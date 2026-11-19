@@ -6,7 +6,7 @@
   "engines": { "node": ">=22.18" },
   "scripts": {
     "check": "node scripts/checks/run-all.mjs",
-    "test": "node --test \"scripts/checks/tests/*.test.mjs\" \"shared/kernel/src/*.test.ts\"",
+    "test": "node --test \"scripts/checks/tests/*.test.mjs\" \"shared/kernel/src/*.test.ts\" \"services/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
