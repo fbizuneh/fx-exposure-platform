@@ -1,22 +1,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PERMISSIONS, TENANT_ROLES, type AccessQuery } from "../contract/index.ts";
+import { PERMISSIONS, TENANT_ROLES, type AccessQuery, type TenantRole } from "../contract/index.ts";
 import { decide, type AccessFacts } from "./access.ts";
 import { ROLE_PERMISSIONS } from "./roles.ts";
 
-const q = (permission: AccessQuery["permission"], programId?: string): AccessQuery =>
-  ({ tenantId: "t", userId: "u", permission, programId }) as unknown as AccessQuery;
+type User = NonNullable<AccessFacts["user"]>;
 
-const facts = (over: Partial<AccessFacts> = {}, roles: AccessFacts["membership"] = null): AccessFacts => ({
-  platformRole: null,
-  membership: roles,
-  enabledPrograms: ["DAILY", "MONTHLY"] as unknown as AccessFacts["enabledPrograms"],
-  ...over,
-});
-const member = (role: (typeof TENANT_ROLES)[number], restriction: string[] | null = null): AccessFacts["membership"] => ({
+const q = (permission: AccessQuery["permission"], programId?: string): AccessQuery =>
+  ({ tenantId: "t", actor: { kind: "user", userId: "u" }, permission, programId }) as unknown as AccessQuery;
+
+const user = (role: TenantRole, restriction: string[] | null = null): User => ({
   status: "ACTIVE",
   roles: [role],
-  programRestriction: restriction as unknown as AccessFacts["membership"] extends infer M ? (M extends { programRestriction: infer R } ? R : never) : never,
+  programRestriction: restriction as unknown as User["programRestriction"],
+});
+
+const facts = (u: AccessFacts["user"] = null, platformRole: AccessFacts["platformRole"] = null): AccessFacts => ({
+  platformRole,
+  user: u,
+  enabledPrograms: ["DAILY", "MONTHLY"] as unknown as AccessFacts["enabledPrograms"],
 });
 
 test("every role only holds known permissions, and the admin holds all", () => {
@@ -24,7 +26,7 @@ test("every role only holds known permissions, and the admin holds all", () => {
   assert.equal(ROLE_PERMISSIONS.TREASURY_ADMIN.size, PERMISSIONS.length);
 });
 
-test("role ladder: viewer reads, analyst imports, reviewer reviews, approver approves", () => {
+test("role ladder: viewer reads, analyst imports, reviewer reviews, approver approves and skips", () => {
   assert.ok(ROLE_PERMISSIONS.VIEWER.has("cycle:read"));
   assert.ok(!ROLE_PERMISSIONS.VIEWER.has("cycle:initiate"));
   assert.ok(ROLE_PERMISSIONS.TREASURY_ANALYST.has("data-source:publish"));
@@ -32,30 +34,31 @@ test("role ladder: viewer reads, analyst imports, reviewer reviews, approver app
   assert.ok(ROLE_PERMISSIONS.TREASURY_REVIEWER.has("hedge-recommendation:review"));
   assert.ok(!ROLE_PERMISSIONS.TREASURY_REVIEWER.has("cycle:approve"));
   assert.ok(ROLE_PERMISSIONS.TREASURY_APPROVER.has("cycle:approve"));
+  assert.ok(ROLE_PERMISSIONS.TREASURY_APPROVER.has("cycle:skip"));
   assert.ok(!ROLE_PERMISSIONS.TREASURY_APPROVER.has("authorization:manage"));
 });
 
-test("no membership and disabled membership are denied", () => {
-  assert.deepEqual(decide(q("cycle:read"), facts()), { allowed: false, reason: "no-membership" });
-  const disabled = { status: "DISABLED", roles: ["TREASURY_ADMIN"], programRestriction: null } as AccessFacts["membership"];
-  assert.deepEqual(decide(q("cycle:read"), facts({}, disabled)), { allowed: false, reason: "membership-disabled" });
+test("no user in the tenant and a disabled user are denied", () => {
+  assert.deepEqual(decide(q("cycle:read"), facts()), { allowed: false, reason: "no-user" });
+  const disabled: User = { status: "DISABLED", roles: ["TREASURY_ADMIN"], programRestriction: null };
+  assert.deepEqual(decide(q("cycle:read"), facts(disabled)), { allowed: false, reason: "user-disabled" });
 });
 
 test("a missing permission is denied, a held one is allowed", () => {
-  assert.deepEqual(decide(q("cycle:approve"), facts({}, member("TREASURY_ANALYST"))), { allowed: false, reason: "permission-missing" });
-  assert.deepEqual(decide(q("cycle:approve"), facts({}, member("TREASURY_APPROVER"))), { allowed: true, via: "membership" });
+  assert.deepEqual(decide(q("cycle:approve"), facts(user("TREASURY_ANALYST"))), { allowed: false, reason: "permission-missing" });
+  assert.deepEqual(decide(q("cycle:approve"), facts(user("TREASURY_APPROVER"))), { allowed: true, via: "user" });
 });
 
-test("a program must be enabled, and a restricted membership must list it", () => {
-  const m = member("TREASURY_APPROVER");
-  assert.deepEqual(decide(q("cycle:approve", "WEEKLY"), facts({}, m)), { allowed: false, reason: "program-not-enabled" });
-  assert.deepEqual(decide(q("cycle:approve", "DAILY"), facts({}, m)), { allowed: true, via: "membership" });
-  const restricted = member("TREASURY_APPROVER", ["MONTHLY"]);
-  assert.deepEqual(decide(q("cycle:approve", "DAILY"), facts({}, restricted)), { allowed: false, reason: "program-restricted" });
-  assert.deepEqual(decide(q("cycle:approve", "MONTHLY"), facts({}, restricted)), { allowed: true, via: "membership" });
-  assert.deepEqual(decide(q("cycle:approve"), facts({}, restricted)), { allowed: true, via: "membership" });
+test("a program must be enabled, and a restricted user must list it", () => {
+  const u = user("TREASURY_APPROVER");
+  assert.deepEqual(decide(q("cycle:approve", "WEEKLY"), facts(u)), { allowed: false, reason: "program-not-enabled" });
+  assert.deepEqual(decide(q("cycle:approve", "DAILY"), facts(u)), { allowed: true, via: "user" });
+  const restricted = user("TREASURY_APPROVER", ["MONTHLY"]);
+  assert.deepEqual(decide(q("cycle:approve", "DAILY"), facts(restricted)), { allowed: false, reason: "program-restricted" });
+  assert.deepEqual(decide(q("cycle:approve", "MONTHLY"), facts(restricted)), { allowed: true, via: "user" });
+  assert.deepEqual(decide(q("cycle:approve"), facts(restricted)), { allowed: true, via: "user" });
 });
 
-test("the platform role is allowed in any tenant and says so", () => {
-  assert.deepEqual(decide(q("authorization:manage", "WEEKLY"), facts({ platformRole: "SYSTEM_ADMIN" })), { allowed: true, via: "platform-role" });
+test("a platform user is allowed in any tenant and says so", () => {
+  assert.deepEqual(decide(q("authorization:manage", "WEEKLY"), facts(null, "SYSTEM_ADMIN")), { allowed: true, via: "platform-role" });
 });

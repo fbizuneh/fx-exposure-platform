@@ -2,8 +2,14 @@
 import type { ProgramId, TenantId } from "@shared/kernel";
 
 declare const brand: unique symbol;
-/** A person known to Identity. Defined here, not in the shared kernel. */
+/** A user of one tenant. Defined here, not in the shared kernel. */
 export type UserId = string & { readonly [brand]: "UserId" };
+/** Platform staff, outside every tenant. */
+export type PlatformUserId = string & { readonly [brand]: "PlatformUserId" };
+
+export type Actor =
+  | { readonly kind: "user"; readonly userId: UserId }
+  | { readonly kind: "platform"; readonly platformUserId: PlatformUserId };
 
 export const TENANT_ROLES = [
   "VIEWER",
@@ -59,20 +65,20 @@ export type Permission = (typeof PERMISSIONS)[number];
 /** May this user do this in this tenant, and in this program when one is given? */
 export interface AccessQuery {
   readonly tenantId: TenantId;
-  readonly userId: UserId;
+  readonly actor: Actor;
   readonly permission: Permission;
   readonly programId?: ProgramId;
 }
 
 export type DenyReason =
-  | "no-membership"
-  | "membership-disabled"
+  | "no-user"
+  | "user-disabled"
   | "permission-missing"
   | "program-not-enabled"
   | "program-restricted";
 
 export type AccessDecision =
-  | { readonly allowed: true; readonly via: "membership" | "platform-role" }
+  | { readonly allowed: true; readonly via: "user" | "platform-role" }
   | { readonly allowed: false; readonly reason: DenyReason };
 
 /** The questions Identity answers. Inside the deployable this is a direct call. */

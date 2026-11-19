@@ -4,10 +4,10 @@ import type { AccessDecision, AccessQuery, PlatformRole, TenantRole } from "../c
 import { ROLE_PERMISSIONS } from "./roles.ts";
 
 export interface AccessFacts {
-  /** The user's platform role, if any. It sits outside every tenant. */
+  /** Set when the actor is an active platform user. Platform roles sit outside every tenant. */
   readonly platformRole: PlatformRole | null;
-  /** The user's membership in the queried tenant, or null if none. */
-  readonly membership: {
+  /** The user in the queried tenant, or null if there is none. */
+  readonly user: {
     readonly status: "ACTIVE" | "DISABLED";
     readonly roles: readonly TenantRole[];
     /** null means no restriction: every enabled program. */
@@ -20,19 +20,19 @@ export interface AccessFacts {
 export function decide(query: AccessQuery, facts: AccessFacts): AccessDecision {
   if (facts.platformRole === "SYSTEM_ADMIN") return { allowed: true, via: "platform-role" };
 
-  const m = facts.membership;
-  if (m === null) return { allowed: false, reason: "no-membership" };
-  if (m.status !== "ACTIVE") return { allowed: false, reason: "membership-disabled" };
+  const u = facts.user;
+  if (u === null) return { allowed: false, reason: "no-user" };
+  if (u.status !== "ACTIVE") return { allowed: false, reason: "user-disabled" };
 
-  if (!m.roles.some((role) => ROLE_PERMISSIONS[role].has(query.permission))) {
+  if (!u.roles.some((role) => ROLE_PERMISSIONS[role].has(query.permission))) {
     return { allowed: false, reason: "permission-missing" };
   }
 
   if (query.programId !== undefined) {
     if (!facts.enabledPrograms.includes(query.programId)) return { allowed: false, reason: "program-not-enabled" };
-    if (m.programRestriction !== null && !m.programRestriction.includes(query.programId)) {
+    if (u.programRestriction !== null && !u.programRestriction.includes(query.programId)) {
       return { allowed: false, reason: "program-restricted" };
     }
   }
-  return { allowed: true, via: "membership" };
+  return { allowed: true, via: "user" };
 }

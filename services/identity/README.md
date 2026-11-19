@@ -3,13 +3,14 @@
 Tier: generic.
 
 ## Owns
-- Tenants, users and memberships
+- Tenants, and their users (each user belongs to one tenant)
+- Platform users (System Admin), outside any tenant
 - Invitations
 - Fixed roles, with permissions as named checks
-- A membership's optional program restriction (none means all programs)
+- A user's optional program restriction (none means all programs)
 - Who may do what in which tenant and program
 - Which programs a tenant has enabled
-See docs/decisions/0001-identity-model.md and 0002-identity-roles-and-permissions.md.
+See docs/decisions/0001, 0002 and 0003 (identity-model, roles-and-permissions, users-belong-to-a-tenant).
 
 ## Answers
 - Who may do what in which tenant and program

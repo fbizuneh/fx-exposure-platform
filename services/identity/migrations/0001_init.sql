@@ -1,5 +1,5 @@
--- Identity schema, first migration. Every table carries tenant_id unless marked exempt;
--- program-scoped tables also carry program_id. No keys point outside this schema.
+-- Identity schema, first migration (docs/decisions/0001 to 0003). Every table carries tenant_id unless
+-- marked exempt; program-scoped tables also carry program_id. No keys point outside this schema.
 
 CREATE SCHEMA IF NOT EXISTS identity;
 
@@ -10,51 +10,56 @@ CREATE TABLE identity.tenants (
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 
--- tenant-exempt: a person can belong to several tenants, so a user belongs to none
+-- A user belongs to one tenant. A person who needs two tenants has a separate user in each.
 CREATE TABLE identity.users (
-  user_id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id         uuid NOT NULL REFERENCES identity.tenants (tenant_id),
+  user_id           uuid NOT NULL DEFAULT gen_random_uuid(),
   issuer            text NOT NULL,
   external_subject  text NOT NULL,
   email             text,
   display_name      text,
-  platform_role     text CHECK (platform_role IS NULL OR platform_role = 'SYSTEM_ADMIN'),
+  status            text NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'DISABLED')),
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  created_by        uuid,
+  disabled_at       timestamptz,
+  disabled_by       uuid,
+  PRIMARY KEY (tenant_id, user_id),
+  UNIQUE (tenant_id, issuer, external_subject)
+);
+
+-- tenant-exempt: platform staff (System Admin) belong to the platform, not to a tenant
+CREATE TABLE identity.platform_users (
+  platform_user_id  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  issuer            text NOT NULL,
+  external_subject  text NOT NULL,
+  email             text,
+  display_name      text,
+  platform_role     text NOT NULL CHECK (platform_role = 'SYSTEM_ADMIN'),
+  status            text NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'DISABLED')),
   created_at        timestamptz NOT NULL DEFAULT now(),
   UNIQUE (issuer, external_subject)
 );
 
-CREATE TABLE identity.memberships (
-  tenant_id      uuid NOT NULL REFERENCES identity.tenants (tenant_id),
-  membership_id  uuid NOT NULL DEFAULT gen_random_uuid(),
-  user_id        uuid NOT NULL REFERENCES identity.users (user_id),
-  status         text NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'DISABLED')),
-  created_at     timestamptz NOT NULL DEFAULT now(),
-  created_by     uuid,
-  disabled_at    timestamptz,
-  disabled_by    uuid,
-  PRIMARY KEY (tenant_id, membership_id),
-  UNIQUE (tenant_id, user_id)
-);
-
 -- Role names are fixed in code (docs/decisions/0002); the service validates them.
-CREATE TABLE identity.membership_roles (
-  tenant_id      uuid NOT NULL,
-  membership_id  uuid NOT NULL,
-  role           text NOT NULL,
-  granted_at     timestamptz NOT NULL DEFAULT now(),
-  granted_by     uuid NOT NULL,
-  revoked_at     timestamptz,
-  revoked_by     uuid,
-  PRIMARY KEY (tenant_id, membership_id, role, granted_at),
-  FOREIGN KEY (tenant_id, membership_id) REFERENCES identity.memberships (tenant_id, membership_id)
+CREATE TABLE identity.user_roles (
+  tenant_id   uuid NOT NULL,
+  user_id     uuid NOT NULL,
+  role        text NOT NULL,
+  granted_at  timestamptz NOT NULL DEFAULT now(),
+  granted_by  uuid NOT NULL,
+  revoked_at  timestamptz,
+  revoked_by  uuid,
+  PRIMARY KEY (tenant_id, user_id, role, granted_at),
+  FOREIGN KEY (tenant_id, user_id) REFERENCES identity.users (tenant_id, user_id)
 );
 
--- program-scoped: no rows for a membership means no restriction (every enabled program)
-CREATE TABLE identity.membership_programs (
-  tenant_id      uuid NOT NULL,
-  membership_id  uuid NOT NULL,
-  program_id     text NOT NULL,
-  PRIMARY KEY (tenant_id, membership_id, program_id),
-  FOREIGN KEY (tenant_id, membership_id) REFERENCES identity.memberships (tenant_id, membership_id)
+-- program-scoped: no rows for a user means no restriction (every enabled program)
+CREATE TABLE identity.user_programs (
+  tenant_id   uuid NOT NULL,
+  user_id     uuid NOT NULL,
+  program_id  text NOT NULL,
+  PRIMARY KEY (tenant_id, user_id, program_id),
+  FOREIGN KEY (tenant_id, user_id) REFERENCES identity.users (tenant_id, user_id)
 );
 
 -- program-scoped: the programs a tenant has enabled; Exposure Management validates the combination
@@ -92,6 +97,5 @@ CREATE TABLE identity.outbox (
   published_at  timestamptz
 );
 
-CREATE INDEX memberships_user_idx ON identity.memberships (user_id, status);
-CREATE INDEX membership_roles_active_idx ON identity.membership_roles (tenant_id, membership_id) WHERE revoked_at IS NULL;
+CREATE INDEX user_roles_active_idx ON identity.user_roles (tenant_id, user_id) WHERE revoked_at IS NULL;
 CREATE INDEX outbox_unpublished_idx ON identity.outbox (created_at) WHERE published_at IS NULL;

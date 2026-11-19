@@ -21,7 +21,7 @@ Tenant roles: VIEWER, TREASURY_ANALYST, TREASURY_REVIEWER, TREASURY_APPROVER, TR
 | TREASURY_ADMIN | every permission |
 | SYSTEM_ADMIN | every permission in any tenant; each use is reported so it can be written to Audit |
 
-`cycle:initiate` covers starting a cycle and rerunning it before approval. `cycle:skip` covers skipping or deleting a cycle that is holding the next one. Giving `cycle:skip` to the approver is my assignment, not carried over; confirm or change it.
+`cycle:initiate` covers starting a cycle and rerunning it before approval. `cycle:skip` covers skipping or deleting a cycle that is holding the next one. The approver holding `cycle:skip` is new, not carried over, and was confirmed.
 
 ## Revisit when
 Business support staff need to do tenant set-up without the IT-level platform role. Then add a second platform role.

@@ -2,6 +2,8 @@
 
 Date: 2026-11-18. Service: identity (generic tier).
 
+Memberships were later folded into users: see 0003.
+
 Identity answers who may do what in which tenant and program, and which programs a tenant has enabled. The design documents leave its tables, roles and access model open. Three choices settle them.
 
 ## 1. Tables
