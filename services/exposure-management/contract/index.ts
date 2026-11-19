@@ -49,7 +49,7 @@ export interface ProgramSettings {
   readonly nettingLevel: NettingLevel;
   /** The currency gross and net exposure are also shown in; also the portfolio currency for GROUP_PORTFOLIO. Default USD. */
   readonly displayCurrency: string;
-  /** Per program. Does not apply at the group portfolio level, where the non-portfolio currency is always the exposure currency. */
+  /** Per program. Does not apply at the group portfolio level or at a level with an entity, where the exposure currency is fixed (decision 0008). */
   readonly exposureCurrencyOverrides: readonly ExposureCurrencyOverride[];
   readonly bucketScheme: BucketScheme;
   readonly schedule: Schedule | null;

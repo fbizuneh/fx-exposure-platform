@@ -1,5 +1,7 @@
 # FX Exposure Platform
 
+Start with docs/STATUS.md for where the build stands.
+
 Read docs/design/ before changing any structure or boundary, and use its
 vocabulary exactly. Data source means financial data (GL balances, forecasts,
 cash balances, orders, AR/AP). Master data means organization structure and

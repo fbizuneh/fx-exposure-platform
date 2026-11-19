@@ -18,9 +18,9 @@ const bal = (entityCode: string, accountNumber: string, currency: string, amount
   lineage: lineageRef("ERP", "b1", `r${++n}`), programId: programId("BS"), asOf: asOfDate("2026-11-09"), entityId: entityId(`id-${entityCode}`), entityCode, accountId: accountId(`a-${accountNumber}`),
   chartCode: "C", accountNumber, currency, amount, dimensions: {},
 });
-const entities = new Map([ent("US01"), ent("DE01", { functionalCurrency: "EUR" }), ent("UK01", { functionalCurrency: "GBP" }), ent("REG", { type: "REGION", isLegalEntity: false }), ent("NOFC", { functionalCurrency: null })].map((e) => [e.code, e]));
+const entities = new Map([ent("US01"), ent("DE01", { functionalCurrency: "EUR" }), ent("UK01", { functionalCurrency: "GBP" }), ent("BR01", { functionalCurrency: "BRL" }), ent("REG", { type: "REGION", isLegalEntity: false }), ent("NOFC", { functionalCurrency: null })].map((e) => [e.code, e]));
 const accounts = new Map([acct("4000"), acct("9000", { monetaryFlag: false }), acct("9100", { fxRelevantFlag: false })].map((a) => [accountKey(a.chartCode, a.accountNumber), a]));
-const RATES: Record<string, string> = { "EUR|USD": "1.1", "GBP|USD": "1.25", "EUR|GBP": "0.88", "USD|JPY": "150" };
+const RATES: Record<string, string> = { "EUR|USD": "1.1", "GBP|USD": "1.25", "EUR|GBP": "0.88", "USD|JPY": "150", "USD|BRL": "5" };
 const rateOf = (b: string, q: string): string => (b === q ? "1" : (RATES[`${b}|${q}`] ?? (RATES[`${q}|${b}`] ? new Decimal(1).div(RATES[`${q}|${b}`]!).toString() : (() => { throw new Error(`no rate ${b}-${q}`); })())));
 
 test("pair order follows market convention, then alphabetical", () => {
@@ -133,6 +133,21 @@ test("exposure currency: an override wins over the default except at portfolio l
   assert.equal(exposureCurrencyFor("REGION", "USD", "BRL", "USD", rules), "USD", "override beats the NDF default");
   assert.equal(exposureCurrencyFor("GROUP_PORTFOLIO", "USD", "BRL", "USD", rules), "BRL");
   assert.equal(exposureCurrencyFor("GROUP_PORTFOLIO", "EUR", "USD", "USD", rules), "EUR");
+});
+
+test("exposure currency with an entity in the netting level: always the entity's non-functional currency, before the override and the NDF logic", () => {
+  const rules = { ndf: new Set(["BRL"]), overrides: new Map([["BRL-USD", "BRL"], ["EUR-USD", "USD"]]) };
+  assert.equal(exposureCurrencyFor("ENTITY", "USD", "BRL", "USD", rules, "BRL"), "USD", "BRL is NDF, but it is the entity's own currency");
+  assert.equal(exposureCurrencyFor("REGION_BY_ENTITY", "EUR", "USD", "USD", rules, "EUR"), "USD", "the override does not apply at an entity level");
+  assert.equal(exposureCurrencyFor("ENTITY", "EUR", "USD", "USD", rules, "USD"), "EUR");
+  assert.equal(exposureCurrencyFor("REGION", "EUR", "USD", "USD", rules, "USD"), "USD", "no entity in the level: the override applies");
+  assert.equal(exposureCurrencyFor("GROUP_NATURAL", "BRL", "USD", "USD", rules), "BRL");
+  const { kept } = filterBalances([bal("US01", "4000", "EUR", "10"), bal("DE01", "4000", "USD", "10"), bal("BR01", "4000", "USD", "10")], entities, accounts);
+  const rows = buildBaseline(kept, rateOf, () => "AMER");
+  const entityLevel = netByLevel(rows, "ENTITY", "2026-11-09", "USD", rateOf, { ndf: new Set(["BRL"]), overrides: new Map() });
+  assert.deepEqual(entityLevel.map((g) => `${g.entityCode}:${g.pair}:${g.exposureCurrency}`), ["DE01:EUR-USD:USD", "US01:EUR-USD:EUR", "BR01:USD-BRL:USD"]);
+  const group = netByLevel(rows, "GROUP_NATURAL", "2026-11-09", "USD", rateOf, { ndf: new Set(["BRL"]), overrides: new Map() });
+  assert.deepEqual(group.map((g) => `${g.pair}:${g.exposureCurrency}`), ["EUR-USD:EUR", "USD-BRL:BRL"]);
 });
 
 test("required rates: the pair rates, and the display rates for each currency 1 (portfolio: for each currency)", () => {

@@ -96,10 +96,12 @@ export interface Contribution {
   readonly currency2: string;
   readonly amount1: Num;
   readonly amount2: Num;
+  /** The entity's functional currency; empty when the contribution is a portfolio re-pairing. */
+  readonly functional: string;
 }
 
 const straight = (rows: readonly Baseline[]): Contribution[] =>
-  rows.map((r) => ({ rowNo: r.rowNo, entityCode: r.kept.balance.entityCode, region: r.region, currency1: r.kept.currency1, currency2: r.kept.currency2, amount1: r.amount1, amount2: r.amount2 }));
+  rows.map((r) => ({ rowNo: r.rowNo, entityCode: r.kept.balance.entityCode, region: r.region, currency1: r.kept.currency1, currency2: r.kept.currency2, amount1: r.amount1, amount2: r.amount2, functional: r.kept.functionalCurrency }));
 
 /** Re-express every row against the portfolio currency: each non-portfolio currency leg is paired with it. */
 export function repairToPortfolio(rows: readonly Baseline[], portfolio: string, rateToPortfolio: (ccy: string) => string): Contribution[] {
@@ -116,7 +118,7 @@ export function repairToPortfolio(rows: readonly Baseline[], portfolio: string, 
       const clean = offset.isZero() ? new D(0) : offset;
       out.push({
         rowNo: r.rowNo, entityCode: r.kept.balance.entityCode, region: r.region, currency1: c1, currency2: c2,
-        amount1: c1 === l.ccy ? l.amount : clean, amount2: c1 === l.ccy ? clean : l.amount,
+        amount1: c1 === l.ccy ? l.amount : clean, amount2: c1 === l.ccy ? clean : l.amount, functional: "",
       });
     }
   }
@@ -170,9 +172,17 @@ export interface ExposureCurrencyRules {
 }
 export const overrideKey = (a: string, b: string): string => [a, b].sort().join("-");
 
-/** A group's exposure currency. At the portfolio level it is always the non-portfolio currency; elsewhere an override wins over the default. */
-export function exposureCurrencyFor(level: NettingLevel, c1: string, c2: string, display: string, rules: ExposureCurrencyRules): string {
+/**
+ * A group's exposure currency, in this order:
+ * 1. portfolio level: always the non-portfolio currency;
+ * 2. a netting level with an entity in it (region by entity, entity): always the entity's non-functional currency;
+ * 3. the program's override for the pair;
+ * 4. the default logic (NDF, then the majors, then currency 2).
+ * Steps 1 and 2 are fixed: no override applies. `functional` is the functional currency of the group's entity.
+ */
+export function exposureCurrencyFor(level: NettingLevel, c1: string, c2: string, display: string, rules: ExposureCurrencyRules, functional: string | null = null): string {
   if (level === "GROUP_PORTFOLIO") return c1 === display ? c2 : c1;
+  if (byEntity(level) && functional !== null) return c1 === functional ? c2 : c1;
   return rules.overrides.get(overrideKey(c1, c2)) ?? defaultExposureCurrency(c1, c2, rules.ndf);
 }
 
@@ -192,7 +202,7 @@ export function netByLevel(
     const first = list[0]!;
     const sum = (f: (c: Contribution) => Num, keep: (n: Num) => boolean = () => true) => list.map(f).filter(keep).reduce((a, b) => a.plus(b), new D(0));
     const net1 = sum((c) => c.amount1), net2 = sum((c) => c.amount2);
-    const exposureCurrency = exposureCurrencyFor(level, first.currency1, first.currency2, display, exposureRules);
+    const exposureCurrency = exposureCurrencyFor(level, first.currency1, first.currency2, display, exposureRules, first.functional === "" ? null : first.functional);
     const displayRate = first.currency1 === display ? "1" : rateOf(first.currency1, display);
     results.push({
       nettingLevel: level, region: byRegion(level) ? first.region : null, entityCode: byEntity(level) ? first.entityCode : null,

@@ -1,0 +1,24 @@
+# Build status and working notes
+
+Read this with AGENTS.md at the start of a session. Update it when a service is finished or a decision is added.
+
+## Order and status
+Shared kernel, checks, Identity (done) -> Master Data (done) -> FX Rate (done) -> Data Source (done) -> Exposure Management (done) -> **Exposure Analysis (done for GL balances)** -> FX Trade (next; the demo simulator is a separate tool outside the services) -> Hedge Recommendation -> Audit.
+
+## Decisions (docs/decisions)
+0001-0003 Identity; 0004 Master Data (also holds the currency reference with the NDF flag); 0005 FX Rate; 0006 Data Source; 0007 Exposure Management (cycles, run events with run IDs, settings incl. netting level, display currency, exposure currency overrides); 0008 Exposure Analysis (workbook rules, run lifecycle, netting levels, exposure currency order).
+Process for each service: a DECISION REQUIRED block (options, recommendation, cost), the user's answer, a numbered decision record, then build, test, commit, push.
+
+## Facts the code depends on
+- The product owner's workbook (Exposure Calculation Steps) and the Hedging Programs domain design are the references for exposure rules; they win over earlier defaults.
+- GL balances: no source record ID (identity is entity, account, currency, dimensions); the sign is kept exactly as sent and carries no asset or liability meaning; the period is the as-of date; the filter needs both the FX-relevant and the monetary flag.
+- Amounts: rounded to 2 places per row, shown with 0 decimals by clients. Pairs follow market convention (EUR, GBP, AUD, NZD, USD, CHF, CAD, SGD, then alphabetical).
+- Exposure currency, first match wins: portfolio level (non-portfolio currency); a level with an entity (the entity's non-functional currency); the program override; the default (NDF, then USD, EUR, GBP, AUD, NZD, CAD, CHF, SGD, then currency 2).
+- Not built yet: hedge rows and net exposure (with FX Trade), forecast and AR/AP adapters, netting by product/project/business unit.
+
+## Working notes
+- TypeScript runs on Node 22 type stripping: `import type`, `.ts` extensions, no parameter properties. `import { Decimal } from "decimal.js"` (named).
+- Services import others only through `@services/<name>/contract`; the schema check flags any text like `<otherSchema>.` in code, so do not name a variable `identity.`.
+- DB tests need `TEST_DATABASE_URL` (database name ends `_test`) and run one file at a time (`--test-concurrency=1`). A throwaway PostgreSQL 16 can be started with `pg_ctl` on a spare port; CI uses 17.
+- Push with `git -c push.negotiate=true push`; the token has no `workflow` scope, so workflow files change by hand.
+- Design documents also live in Claude Docs; the data ownership table exists in both places and must be kept in step.

@@ -24,12 +24,12 @@ Date: 2026-11-18. Service: exposure-analysis (core tier). Sources: the product o
 - A run that can be tried again is retried by an explicit command, which the app calls on "batch stamped" and "rates loaded" events and on a timer.
 
 ## Amendments (2026-11-18 and 19; built 2026-11-19)
-13. **Exposure currency** is set by a default logic and an override configuration. Default: if the pair has an NDF currency, that is the exposure currency; otherwise, if the pair has USD, the non-USD currency; then the same test for EUR, GBP, AUD, NZD, CAD, CHF, SGD in that order; otherwise currency 2. Users can override it per pair by configuration. If both currencies are NDF, currency 2. This replaced the interim rule of the first version.
+13. **Exposure currency** follows this order, first match wins: (a) group portfolio level: the non-portfolio currency; (b) a netting level with an entity in it (region by entity, entity): **the entity's non-functional currency**, before any NDF logic; (c) the program's override for the netted pair; (d) the default logic: the NDF currency if the pair has one (currency 2 if both are NDF), otherwise the non-USD currency if the pair has USD, then the same for EUR, GBP, AUD, NZD, CAD, CHF, SGD, otherwise currency 2. Steps (a) and (b) are fixed, so **no override applies at those levels** (my reading of "always"; say if an override should still win at entity levels). This replaced the interim rule of the first version.
 14. **Rounding and display.** Amounts are rounded to 2 places (unchanged) and shown with 0 decimal places. This is a display rule; stored and returned amounts keep 2 places.
 
 15. **NDF currencies are held in Master Data**, as a flag on its currency reference, effective-dated like the rest. Exposure Analysis asks Master Data which currencies are NDF on the as-of date.
 16. **The override is per program** and is a program setting in Exposure Management (a pair, optionally with the exposure currency chosen), so it is copied into each cycle with the other settings.
-17. **The override applies to the netted pair.** At the portfolio level the non-portfolio currency is always the exposure currency, and no override applies.
+17. **The override applies to the netted pair**, at levels without an entity. Portfolio and entity levels are fixed (decision 13).
 
 Build order for these: Master Data (NDF flag on currencies, question, change-set support), Exposure Management (override setting, migration, validation), then Exposure Analysis (the default logic and override in the run).
 

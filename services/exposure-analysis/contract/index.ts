@@ -56,7 +56,7 @@ export interface ExposureGroup {
   readonly currencyPair: string;
   readonly currency1: string;
   readonly currency2: string;
-  /** The currency the exposure is in: set by the default logic or the program's override (decision 0008). */
+  /** The currency the exposure is in (decision 0008): fixed at portfolio and entity levels, otherwise the program's override or the default logic. */
   readonly exposureCurrency: string;
   readonly period: AsOfDate;
   readonly rowCount: number;
