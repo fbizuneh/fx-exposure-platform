@@ -25,7 +25,7 @@ export interface AmountResult {
   readonly issues: RowIssue[];
 }
 
-/** The signed, debit-positive amount: a balance as given, or debit minus credit. */
+/** The signed amount: a balance as given (its sign is not interpreted), or debit minus credit. */
 export function normalizeAmount(row: Pick<GlBalanceRow, "balance" | "debit" | "credit">): AmountResult {
   const issues: RowIssue[] = [];
   const hasBalance = !blank(row.balance);

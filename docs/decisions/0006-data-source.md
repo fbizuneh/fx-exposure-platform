@@ -15,7 +15,7 @@ Date: 2026-11-18. Service: data-source (supporting tier). Master Data's contract
 A GL balance from an ERP has none. A balance is identified by its data: **entity, account, currency and its dimension values.** Within a batch, rows with the same key are all blocked as duplicates, since there is no way to tell which is right. The key is also the record ID in the lineage reference (source system, batch, key).
 
 ## Defaults I chose, to confirm or change
-- A balance is a signed amount or debit and credit amounts, never both. Debit minus credit is the signed amount. **Amounts are debit-positive**; a source that sends credit-positive must be converted by its connector.
+- A balance is a signed amount as the source sends it, or separate debit and credit amounts (debit minus credit), never both. **The sign is kept exactly as received and carries no accounting meaning here**: a GL balance does not reliably show asset or liability (a liability account can be positive, an asset account negative), so nothing downstream infers long or short from the account type. Superseded wording "debit-positive" in the first draft; see decision 0008.
 - Amounts are exact decimals, up to 4 places. Currency must be a valid 3-letter code.
 - A row needs an entity, account, currency and amount. An unknown entity or account in Master Data, a missing or unsupported currency, a row whose as-of date differs from the batch, or a program that is unknown or disabled in the catalog blocks that balance.
 - A batch with an unusable source system or date, no rows, a future date, or more than 20,000 rows is refused. Refusals with a usable source and date are recorded as FAILED.

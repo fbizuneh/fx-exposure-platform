@@ -4,8 +4,17 @@ import type { AsOfDate, CycleId, ProgramId, TenantId } from "@shared/kernel";
 export const PROGRAM_TYPES = ["BALANCE_SHEET", "CASH_FLOW", "BUDGET_TO_CASH", "IN_HOUSE_BANK"] as const;
 export type ProgramType = (typeof PROGRAM_TYPES)[number];
 
-export const NETTING_LEVELS = ["ENTITY_PAIR", "CORPORATE_PAIR", "REGION_PAIR"] as const;
+/**
+ * Where exposure is netted, always by currency pair and period (decision 0008).
+ * GROUP_NATURAL: whole group, natural pairs. GROUP_PORTFOLIO: whole group, every pair re-expressed against the display currency.
+ * REGION: by region. REGION_BY_ENTITY: by region and legal entity. ENTITY: by legal entity.
+ */
+export const NETTING_LEVELS = ["GROUP_NATURAL", "GROUP_PORTFOLIO", "REGION", "REGION_BY_ENTITY", "ENTITY"] as const;
 export type NettingLevel = (typeof NETTING_LEVELS)[number];
+/** Names used before decision 0008. They are accepted on input and stored as the level they map to. */
+export const NETTING_LEVEL_ALIASES: Readonly<Record<string, NettingLevel>> = {
+  ENTITY_PAIR: "ENTITY", CORPORATE_PAIR: "GROUP_NATURAL", REGION_PAIR: "REGION",
+};
 
 /**
  * How exposure is split into date buckets. DAYS: the upper edges, in days after the as-of date, strictly
@@ -32,6 +41,8 @@ export interface ProgramSettings {
   readonly programId: ProgramId;
   readonly type: ProgramType;
   readonly nettingLevel: NettingLevel;
+  /** The currency gross and net exposure are also shown in; also the portfolio currency for GROUP_PORTFOLIO. Default USD. */
+  readonly displayCurrency: string;
   readonly bucketScheme: BucketScheme;
   readonly schedule: Schedule | null;
   /** The first day this version applies. */

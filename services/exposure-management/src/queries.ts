@@ -10,12 +10,12 @@ export async function settingsOn(db: Queryable, tenant: TenantId, program: strin
   const r = await q(db)
     .selectFrom("program_settings as s")
     .innerJoin("programs as p", (j) => j.onRef("p.tenant_id", "=", "s.tenant_id").onRef("p.program_id", "=", "s.program_id"))
-    .select(["s.program_id", "s.valid_from", "s.netting_level", "s.bucket_scheme", "s.schedule", "p.program_type"])
+    .select(["s.program_id", "s.valid_from", "s.netting_level", "s.display_currency", "s.bucket_scheme", "s.schedule", "p.program_type"])
     .where("s.tenant_id", "=", tenant).where("s.program_id", "=", program).where("s.valid_from", "<=", asOf)
     .where((eb) => eb.or([eb("s.valid_to", "is", null), eb("s.valid_to", ">", asOf)])).executeTakeFirst();
   if (!r) return null;
   return {
-    programId: programId(r.program_id), type: r.program_type, nettingLevel: r.netting_level, bucketScheme: json(r.bucket_scheme),
+    programId: programId(r.program_id), type: r.program_type, nettingLevel: r.netting_level, displayCurrency: r.display_currency, bucketScheme: json(r.bucket_scheme),
     schedule: r.schedule === null ? null : json<Schedule>(r.schedule), validFrom: asOfDate(r.valid_from),
   };
 }

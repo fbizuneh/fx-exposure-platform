@@ -3,7 +3,7 @@ export interface GlBalanceRow {
   readonly entityCode: string | null;
   readonly accountNumber: string | null;
   readonly currency: string | null;
-  /** A signed balance, debit-positive. Or send debit and credit instead, never both. */
+  /** A signed balance, kept as sent. Or send debit and credit instead, never both. */
   readonly balance: string | null;
   readonly debit: string | null;
   readonly credit: string | null;

@@ -1,18 +1,29 @@
 // Pure rules: settings, schedules and which program types may coexist. No I/O.
-import { NETTING_LEVELS, type BucketScheme, type ProgramType, type Schedule } from "../contract/index.ts";
+import { NETTING_LEVELS, NETTING_LEVEL_ALIASES, type BucketScheme, type NettingLevel, type ProgramType, type Schedule } from "../contract/index.ts";
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 export const realDate = (v: string): boolean => ISO.test(v) && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v;
 
 export interface SettingsInput {
   readonly nettingLevel: string;
+  /** Defaults to USD when left out. */
+  readonly displayCurrency?: string;
   readonly bucketScheme: BucketScheme;
   readonly schedule: Schedule | null;
 }
 
+/** The netting level a name stands for, accepting the names used before decision 0008; null when unknown. */
+export function nettingLevelOf(name: string): NettingLevel | null {
+  if ((NETTING_LEVELS as readonly string[]).includes(name)) return name as NettingLevel;
+  return Object.hasOwn(NETTING_LEVEL_ALIASES, name) ? NETTING_LEVEL_ALIASES[name]! : null;
+}
+
+export const displayCurrencyOf = (s: SettingsInput): string => s.displayCurrency ?? "USD";
+
 export function validateSettings(s: SettingsInput): string[] {
   const out: string[] = [];
-  if (!(NETTING_LEVELS as readonly string[]).includes(s.nettingLevel)) out.push(`netting level must be one of ${NETTING_LEVELS.join(", ")}`);
+  if (nettingLevelOf(s.nettingLevel) === null) out.push(`netting level must be one of ${NETTING_LEVELS.join(", ")}`);
+  if (!/^[A-Z]{3}$/.test(displayCurrencyOf(s))) out.push("display currency must be a three-letter currency code in capitals");
   const b = s.bucketScheme as { kind?: string; boundaries?: unknown };
   if (b?.kind === "DAYS") {
     const edges = b.boundaries;

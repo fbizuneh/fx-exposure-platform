@@ -1,7 +1,7 @@
 // Published questions and events of Data Source. Other services import this file, never src/.
 import type { AccountId, AsOfDate, EntityId, LineageRef, ProgramId, TenantId } from "@shared/kernel";
 
-/** One included balance, stamped with its program. Amounts are debit-positive decimal strings. */
+/** One included balance, stamped with its program. Amounts are signed decimal strings, kept as the source sent them; the sign says nothing about asset or liability. */
 export interface IncludedBalance {
   readonly lineage: LineageRef;
   readonly programId: ProgramId;

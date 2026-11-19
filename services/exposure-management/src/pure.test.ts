@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { combinationProblem, scheduledAsOf, validateSettings } from "./rules.ts";
+import { combinationProblem, displayCurrencyOf, nettingLevelOf, scheduledAsOf, validateSettings } from "./rules.ts";
 import type { Schedule } from "../contract/index.ts";
 
-const ok = { nettingLevel: "ENTITY_PAIR", bucketScheme: { kind: "DAYS", boundaries: [0, 30, 90] } as const, schedule: null };
+const ok = { nettingLevel: "ENTITY", bucketScheme: { kind: "DAYS", boundaries: [0, 30, 90] } as const, schedule: null };
 
 test("settings: netting level, buckets and schedule are each checked", () => {
   assert.deepEqual(validateSettings(ok), []);
@@ -42,4 +42,13 @@ test("schedules: the as-of date is the run date minus the offset, only on the sc
   assert.equal(scheduledAsOf(monthly, "2026-03-01"), "2026-02-28");
   assert.equal(scheduledAsOf(monthly, "2026-03-02"), null);
   assert.equal(scheduledAsOf(null, "2026-03-02"), null);
+});
+
+test("netting levels: the five levels and the earlier names are accepted; display currency defaults to USD", () => {
+  for (const l of ["GROUP_NATURAL", "GROUP_PORTFOLIO", "REGION", "REGION_BY_ENTITY", "ENTITY"]) assert.equal(nettingLevelOf(l), l);
+  assert.deepEqual(["ENTITY_PAIR", "CORPORATE_PAIR", "REGION_PAIR"].map(nettingLevelOf), ["ENTITY", "GROUP_NATURAL", "REGION"]);
+  assert.equal(nettingLevelOf("toString"), null);
+  assert.equal(displayCurrencyOf(ok), "USD");
+  assert.deepEqual(validateSettings({ ...ok, nettingLevel: "ENTITY_PAIR", displayCurrency: "EUR" }), []);
+  assert.match(validateSettings({ ...ok, displayCurrency: "usd" }).join(), /display currency/);
 });

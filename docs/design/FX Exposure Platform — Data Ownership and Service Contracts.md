@@ -30,8 +30,8 @@ Each service is reached in two ways: a question it answers on request, and an ev
 
 | Service | Answers on request | Announces | Consumes |
 | --- | --- | --- | --- |
-| Exposure Management | Program catalog; a program's settings; a cycle and its stage | Cycle initiated; cycle completed; program or settings changed | Run finished (from Exposure Analysis); programs enabled (from Identity) |
-| Exposure Analysis | Exposure by program, cycle, date bucket and currency pair, with lineage; the evidence of a run | Run finished | Included balances (Data Source); pre-trades and executed trades (FX Trade); rates (FX Rate); functional currencies (Master Data); settings (Exposure Management) |
+| Exposure Management | Program catalog; a program's settings; a cycle and its stage | Cycle initiated; cycle completed; approved, skipped, deleted; program or settings changed | Run started and run finished (from Exposure Analysis); programs enabled (from Identity) |
+| Exposure Analysis | Exposure by program, cycle, netting level, currency pair and period, with lineage; the rates used and the evidence of a run | Run started; run finished | Included balances (Data Source); pre-trades and executed trades (FX Trade); rates (FX Rate); functional currencies (Master Data); settings (Exposure Management) |
 | Hedge Recommendation | Recommendations for a cycle and their follow-up status; its hedge policy | Recommendation issued; pre-trade created | Exposure (Exposure Analysis); executed trades (FX Trade); settings (Exposure Management) |
 | Data Source | Included balances for a program, as-of date and scope; ingestion status; data quality issues | Batch stamped; issues raised (a blocked balance is an issue) | Files and feeds from source systems; entities, accounts and hierarchy (Master Data); program catalog (Exposure Management) |
 | Master Data | Entities, accounts and hierarchy walks as of a date | Master data changed | ERP and TMS syncs or manual uploads |

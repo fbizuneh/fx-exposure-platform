@@ -20,7 +20,8 @@ export interface ExposureManagementDatabase {
     program_id: string;
     valid_from: string;
     valid_to: string | null;
-    netting_level: "ENTITY_PAIR" | "CORPORATE_PAIR" | "REGION_PAIR";
+    netting_level: "GROUP_NATURAL" | "GROUP_PORTFOLIO" | "REGION" | "REGION_BY_ENTITY" | "ENTITY";
+    display_currency: string;
     bucket_scheme: JsonIn;
     schedule: JsonOrNull;
     changed_by: string;

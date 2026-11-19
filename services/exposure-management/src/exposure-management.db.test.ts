@@ -56,7 +56,7 @@ const newTenant = (...programs: string[]) => {
   enabledPrograms.set(t, new Set(programs));
   return t;
 };
-const settings = { nettingLevel: "ENTITY_PAIR", bucketScheme: { kind: "DAYS", boundaries: [0, 30, 90] } as const, schedule: null };
+const settings = { nettingLevel: "ENTITY", bucketScheme: { kind: "DAYS", boundaries: [0, 30, 90] } as const, schedule: null };
 const define = (t: TenantId, id: string, over: Partial<NewProgram> = {}) =>
   em.commands.defineProgram({ tenantId: t, programId: id, name: `Program ${id}`, type: "BALANCE_SHEET", settings, effectiveFrom: "2026-01-01", actor: admin, ...over });
 const events = async (t: TenantId) => (await em.outbox.pending(1000)).filter((e) => e.tenantId === t);
@@ -106,18 +106,18 @@ dbTest("combination rules are enforced when programs are defined", async () => {
 dbTest("settings are versions: a lookup reads the one in force, and history is never rewritten", async () => {
   const t = await ready("BS");
   const mgr = user(["program:manage"]);
-  const change = (effectiveFrom: string, nettingLevel = "CORPORATE_PAIR", actor: Actor = mgr) =>
+  const change = (effectiveFrom: string, nettingLevel = "GROUP_NATURAL", actor: Actor = mgr) =>
     em.commands.changeSettings({ tenantId: t, programId: "BS", settings: { ...settings, nettingLevel }, effectiveFrom, actor });
   await change("2026-02-01");
   const on = (d: string) => em.questions.programSettings(t, programId("BS"), asOfDate(d));
-  assert.equal((await on("2026-01-31"))?.nettingLevel, "ENTITY_PAIR");
-  assert.equal((await on("2026-02-01"))?.nettingLevel, "CORPORATE_PAIR");
+  assert.equal((await on("2026-01-31"))?.nettingLevel, "ENTITY");
+  assert.equal((await on("2026-02-01"))?.nettingLevel, "GROUP_NATURAL");
   assert.equal((await on("2026-02-01"))?.validFrom, "2026-02-01");
   assert.equal(await on("2025-12-31"), null, "nothing before the first version");
   assert.equal((await on("2026-02-01"))?.type, "BALANCE_SHEET");
-  await assert.rejects(change("2026-02-01", "REGION_PAIR"), /must start after/, "not on or before the open version's start");
-  await assert.rejects(change("2026-01-15", "REGION_PAIR"), /must start after/);
-  await assert.rejects(change("2026-03-01", "ENTITY_PAIR", user(["cycle:read"])), AccessDenied);
+  await assert.rejects(change("2026-02-01", "REGION"), /must start after/, "not on or before the open version's start");
+  await assert.rejects(change("2026-01-15", "REGION"), /must start after/);
+  await assert.rejects(change("2026-03-01", "ENTITY", user(["cycle:read"])), AccessDenied);
   await assert.rejects(em.commands.changeSettings({ tenantId: t, programId: "ZZ", settings, effectiveFrom: "2026-03-01", actor: admin }), AccessDenied);
   const rows = await q(db).selectFrom("program_settings").select(["valid_from", "valid_to"]).where("tenant_id", "=", t).orderBy("valid_from").execute();
   assert.deepEqual(rows.map((r) => [r.valid_from, r.valid_to]), [["2026-01-01", "2026-02-01"], ["2026-02-01", null]]);
@@ -130,12 +130,12 @@ dbTest("a cycle starts for an enabled program with settings in force, and keeps 
   const id = await em.commands.startCycle({ tenantId: t, programId: "BS", asOf: "2026-03-05", actor: a });
   const c = (await em.questions.getCycle(t, id))!;
   assert.deepEqual([c.stage, c.outcome, c.rerunCount, c.approvedAt, c.programId, c.asOf], ["INITIATED", null, 0, null, "BS", "2026-03-05"]);
-  assert.deepEqual([c.settings.nettingLevel, c.settings.bucketScheme], ["ENTITY_PAIR", { kind: "DAYS", boundaries: [0, 30, 90] }]);
+  assert.deepEqual([c.settings.nettingLevel, c.settings.bucketScheme], ["ENTITY", { kind: "DAYS", boundaries: [0, 30, 90] }]);
   assert.deepEqual(c.history.map((h) => h.kind), ["INITIATED"]);
   assert.match(c.initiatedBy, /^user:/);
   // later settings changes do not touch the copy
-  await em.commands.changeSettings({ tenantId: t, programId: "BS", settings: { ...settings, nettingLevel: "REGION_PAIR" }, effectiveFrom: "2026-03-06", actor: admin });
-  assert.equal((await em.questions.getCycle(t, id))!.settings.nettingLevel, "ENTITY_PAIR");
+  await em.commands.changeSettings({ tenantId: t, programId: "BS", settings: { ...settings, nettingLevel: "REGION" }, effectiveFrom: "2026-03-06", actor: admin });
+  assert.equal((await em.questions.getCycle(t, id))!.settings.nettingLevel, "ENTITY");
   const e = (await events(t)).find((x) => x.type === "exposure-management.cycle-initiated")!;
   assert.deepEqual(Object.keys(e).sort(), ["asOf", "cycleId", "eventId", "occurredAt", "programId", "tenantId", "type"]);
 });
@@ -293,4 +293,12 @@ dbTest("the database itself refuses a second open cycle and an approved cycle th
   await assert.rejects(q(db).updateTable("cycles").set({ approved_at: new Date(), approved_by: "x" }).where("tenant_id", "=", t).where("cycle_id", "=", id).execute(), /check/i);
   await assert.rejects(q(db).updateTable("cycles").set({ outcome: "SKIPPED" }).where("tenant_id", "=", t).where("cycle_id", "=", id).execute(), /check/i, "an outcome needs a reason");
   await assert.rejects(q(db).updateTable("program_settings").set({ valid_to: "2025-01-01" }).where("tenant_id", "=", t).execute(), /check/i);
+});
+
+dbTest("display currency defaults to USD and earlier netting names are stored as the level they map to", async () => {
+  const t = newTenant("BS");
+  await define(t, "BS");
+  assert.deepEqual(await em.questions.programSettings(t, programId("BS"), asOfDate("2026-02-01")).then((s) => [s?.nettingLevel, s?.displayCurrency]), ["ENTITY", "USD"]);
+  await em.commands.changeSettings({ tenantId: t, programId: "BS", settings: { ...settings, nettingLevel: "CORPORATE_PAIR", displayCurrency: "EUR" }, effectiveFrom: "2026-02-01", actor: admin });
+  assert.deepEqual(await em.questions.programSettings(t, programId("BS"), asOfDate("2026-02-01")).then((s) => [s?.nettingLevel, s?.displayCurrency]), ["GROUP_NATURAL", "EUR"]);
 });
