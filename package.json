@@ -3,14 +3,26 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.18" },
+  "engines": {
+    "node": ">=22.18"
+  },
   "scripts": {
     "check": "node scripts/checks/run-all.mjs",
     "test": "node --test \"scripts/checks/tests/*.test.mjs\" \"shared/kernel/src/*.test.ts\" \"services/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:up": "docker compose up -d",
+    "db:migrate": "node scripts/migrate.mjs"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
+    "typescript": "^5.6.0"
+  },
+  "workspaces": [
+    "shared/kernel"
+  ],
+  "dependencies": {
+    "kysely": "^0.29.9",
+    "pg": "^8.23.1"
   }
 }

@@ -35,7 +35,10 @@ charts of accounts and TMS accounts.
 
 ## Commands
 - npm run check: the build checks for rules 1 to 6. Rule 7 is checked in review.
-- npm test: check self-tests and kernel tests. npm run typecheck: tsc.
+- npm test: check, kernel and service tests. npm run typecheck: tsc.
+- Database tests need TEST_DATABASE_URL (a database named *_test; see
+  docker-compose.yml). Without it they are skipped and say so: not a pass.
+- npm run db:migrate applies every service's migrations (DATABASE_URL).
 
 ## Finishing
 Report in a few lines: what changed, which checks ran and their result,
