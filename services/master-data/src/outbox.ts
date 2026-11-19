@@ -14,7 +14,7 @@ export async function announce(tx: Queryable, event: Omit<MasterDataEvents, "eve
 }
 
 export async function pendingEvents(db: Db, limit = 100): Promise<MasterDataEvents[]> {
-  const rows = await q(db).selectFrom("outbox").select("payload").where("published_at", "is", null).orderBy("created_at").orderBy("event_id").limit(limit).execute();
+  const rows = await q(db).selectFrom("outbox").select("payload").where("published_at", "is", null).orderBy("seq").limit(limit).execute();
   return rows.map((r) => (typeof r.payload === "string" ? JSON.parse(r.payload) : r.payload) as MasterDataEvents);
 }
 

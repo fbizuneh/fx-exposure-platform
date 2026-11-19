@@ -61,6 +61,7 @@ export interface IdentityDatabase {
     type: string;
     payload: string;
     created_at: Generated<Date>;
+    seq: Generated<string>;
     published_at: Date | null;
   };
 }

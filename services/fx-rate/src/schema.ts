@@ -39,5 +39,5 @@ export interface FxRateDatabase {
     quality: "VALID" | "STALE" | "OUTLIER";
     loaded_at: Generated<Date>;
   };
-  outbox: { event_id: string; tenant_id: string; type: string; payload: string; created_at: Generated<Date>; published_at: Date | null };
+  outbox: { event_id: string; tenant_id: string; type: string; payload: string; created_at: Generated<Date>; seq: Generated<string>; published_at: Date | null };
 }

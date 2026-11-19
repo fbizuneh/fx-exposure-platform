@@ -22,8 +22,7 @@ export async function pendingEvents(db: Db, limit = 100): Promise<IdentityEvents
     .selectFrom("outbox")
     .select("payload")
     .where("published_at", "is", null)
-    .orderBy("created_at")
-    .orderBy("event_id")
+    .orderBy("seq")
     .limit(limit)
     .execute();
   return rows.map((r) => (typeof r.payload === "string" ? JSON.parse(r.payload) : r.payload) as IdentityEvents);
