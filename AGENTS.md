@@ -16,6 +16,13 @@ vocabulary exactly. Data source means financial data (GL balances, forecasts,
 cash balances, orders, AR/AP). Master data means organization structure and
 charts of accounts.
 
+## Changes to main
+main is protected: a pull request, one independent approval (not the person
+who pushed last), and a passing CI `verify` check. Work on a branch and open a
+PR; never push to main. Until collaborators are added the repository owner
+merges with the admin bypass; when a second reviewer exists, turn on "Do not
+allow bypassing the above settings" and update this note.
+
 ## Structure
 - One repository, one deployable (app/). Each service is a folder in
   services/ with its own contract/, src/, migrations/ and README.md.
