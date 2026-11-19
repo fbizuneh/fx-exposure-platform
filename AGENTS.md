@@ -3,18 +3,20 @@
 Start with docs/STATUS.md for where the build stands.
 
 ## Ownership
-Claude is the primary owner of this codebase: it designs with the product
-owner (Fikre), builds every service, and maintains the code, tests, checks and
-docs (this file, docs/STATUS.md and docs/decisions) going forward. Other
-programmers will contribute. Their changes follow the same boundary rules,
-checks and decision process, and the owner reviews them against docs/design
-and docs/decisions. Keep STATUS.md current so any session or contributor can
-pick up where the last one stopped.
+Claude is the primary owner: it designs with the product owner (Fikre),
+builds every service, and maintains code, tests, checks and docs. Other
+programmers contribute under the same rules; the owner reviews against
+docs/design and docs/decisions. Keep docs/STATUS.md current.
 
 Read docs/design/ before changing any structure or boundary, and use its
 vocabulary exactly. Data source means financial data (GL balances, forecasts,
 cash balances, orders, AR/AP). Master data means organization structure and
 charts of accounts.
+
+## Changes to main
+main is protected: a PR, one independent approval, a passing `verify` check.
+Work on a branch and open a PR; never push to main. The owner merges with the
+admin bypass until collaborators exist; then turn off bypassing and update this.
 
 ## Structure
 - One repository, one deployable (app/). Each service is a folder in
