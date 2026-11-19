@@ -8,7 +8,7 @@
   },
   "scripts": {
     "check": "node scripts/checks/run-all.mjs",
-    "test": "node --test \"scripts/checks/tests/*.test.mjs\" \"shared/kernel/src/*.test.ts\" \"services/**/*.test.ts\"",
+    "test": "node --test --test-concurrency=1 \"scripts/checks/tests/*.test.mjs\" \"shared/kernel/src/*.test.ts\" \"services/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "db:up": "docker compose up -d",
     "db:migrate": "node scripts/migrate.mjs"
