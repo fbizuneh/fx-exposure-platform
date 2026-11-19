@@ -8,6 +8,11 @@ builds every service, and maintains code, tests, checks and docs. Other
 programmers contribute under the same rules; the owner reviews against
 docs/design and docs/decisions. Keep docs/STATUS.md current.
 
+Read docs/design/ before changing any structure or boundary, and use its
+vocabulary exactly. Data source means financial data (GL balances, forecasts,
+cash balances, orders, AR/AP). Master data means organization structure and
+charts of accounts.
+
 ## Changes to main
 main is protected: a PR, one independent approval, a passing `verify` check.
 Work on a branch and open a PR; never push to main. The owner merges with the
