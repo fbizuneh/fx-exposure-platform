@@ -63,6 +63,21 @@ export interface Account {
 export interface MasterDataQuestions {
   getEntity(tenantId: TenantId, code: string, asOf: AsOfDate): Promise<Entity | null>;
   getAccount(tenantId: TenantId, chartCode: string, accountNumber: string, asOf: AsOfDate): Promise<Account | null>;
+  /** Several entities by code in one call. Unknown codes are left out. */
+  getEntities(tenantId: TenantId, codes: readonly string[], asOf: AsOfDate): Promise<readonly Entity[]>;
+  /** Several accounts in one call. Unknown accounts are left out. */
+  getAccounts(
+    tenantId: TenantId,
+    keys: readonly { readonly chartCode: string; readonly accountNumber: string }[],
+    asOf: AsOfDate,
+  ): Promise<readonly Account[]>;
+  /** For each hierarchy node: its own code, then its ancestors nearest first. Unknown nodes are left out. */
+  hierarchyPaths(
+    tenantId: TenantId,
+    chartCode: string,
+    nodeCodes: readonly string[],
+    asOf: AsOfDate,
+  ): Promise<readonly { readonly nodeCode: string; readonly path: readonly string[] }[]>;
   /** Everything under an entity (descendants) or above it (ancestors, nearest first). The entity itself is not included. */
   entityWalk(tenantId: TenantId, entityId: EntityId, direction: "descendants" | "ancestors", asOf: AsOfDate): Promise<readonly Entity[]>;
   /** The accounts on a hierarchy node and on every node beneath it. */

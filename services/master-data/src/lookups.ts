@@ -44,8 +44,8 @@ function openNodes(db: Db, tenant: TenantId, asOf: AsOfDate) {
     .execute();
 }
 
-async function accountsOn(db: Db, tenant: TenantId, asOf: AsOfDate, where: { chartId?: string; accountNumber?: string; nodeIds?: string[] }): Promise<Account[]> {
-  if (where.nodeIds && where.nodeIds.length === 0) return [];
+async function accountsOn(db: Db, tenant: TenantId, asOf: AsOfDate, where: { chartId?: string; accountNumber?: string; accountNumbers?: string[]; nodeIds?: string[] }): Promise<Account[]> {
+  if ((where.nodeIds && where.nodeIds.length === 0) || (where.accountNumbers && where.accountNumbers.length === 0)) return [];
   let query = q(db)
     .selectFrom("accounts")
     .selectAll()
@@ -54,6 +54,7 @@ async function accountsOn(db: Db, tenant: TenantId, asOf: AsOfDate, where: { cha
     .where((eb) => eb.or([eb("valid_to", "is", null), eb("valid_to", ">", asOf)]));
   if (where.chartId) query = query.where("chart_id", "=", where.chartId);
   if (where.accountNumber) query = query.where("account_number", "=", where.accountNumber);
+  if (where.accountNumbers) query = query.where("account_number", "in", where.accountNumbers);
   if (where.nodeIds) query = query.where("hierarchy_node_id", "in", where.nodeIds);
   const rows = await query.orderBy("account_number").execute();
   if (rows.length === 0) return [];
@@ -78,6 +79,44 @@ export function masterDataQuestions(db: Db): MasterDataQuestions {
       const rows = await openEntities(db, tenant, asOf);
       const r = rows.find((x) => x.code === code);
       return r ? toEntity(r) : null;
+    },
+
+    async getEntities(tenant, codes, asOf) {
+      if (codes.length === 0) return [];
+      const wanted = new Set(codes);
+      return (await openEntities(db, tenant, asOf)).filter((r) => wanted.has(r.code)).map(toEntity);
+    },
+
+    async getAccounts(tenant, keys, asOf) {
+      const byChart = new Map<string, string[]>();
+      for (const k of keys) byChart.set(k.chartCode, [...(byChart.get(k.chartCode) ?? []), k.accountNumber]);
+      const c = await charts(db, tenant);
+      const out: Account[] = [];
+      for (const [chartCode, numbers] of byChart) {
+        const chartId = c.byCode.get(chartCode);
+        if (chartId) out.push(...(await accountsOn(db, tenant, asOf, { chartId, accountNumbers: [...new Set(numbers)] })));
+      }
+      return out;
+    },
+
+    async hierarchyPaths(tenant, chartCode, nodeCodes, asOf) {
+      const chartId = (await charts(db, tenant)).byCode.get(chartCode);
+      if (!chartId || nodeCodes.length === 0) return [];
+      const nodes = (await openNodes(db, tenant, asOf)).filter((n) => n.chart_id === chartId);
+      const byId = new Map(nodes.map((n) => [n.node_id, n]));
+      const byCode = new Map(nodes.map((n) => [n.code, n]));
+      const out: { nodeCode: string; path: string[] }[] = [];
+      for (const code of new Set(nodeCodes)) {
+        let cur = byCode.get(code);
+        if (!cur) continue;
+        const path: string[] = [];
+        while (cur) {
+          path.push(cur.code);
+          cur = cur.parent_node_id ? byId.get(cur.parent_node_id) : undefined;
+        }
+        out.push({ nodeCode: code, path });
+      }
+      return out;
     },
 
     async getAccount(tenant, chartCode, accountNumber, asOf) {

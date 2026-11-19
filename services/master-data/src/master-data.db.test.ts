@@ -181,6 +181,21 @@ dbTest("hierarchy and accounts: walks, versions and references", async () => {
   await assert.rejects(md.commands.applyHierarchy(snap(t, [node("1", "2"), node("2", "1")], D3)), /cycle/);
 });
 
+dbTest("batch lookups: entities, accounts and hierarchy paths", async () => {
+  const t = newTenant();
+  await md.commands.applyEntities(snap(t, [ent("G"), legal("US1", "USD", "G")]));
+  await md.commands.applyHierarchy(snap(t, [node("1", null), node("11", "1"), node("111", "11")]));
+  await md.commands.applyAccounts(snap(t, [acct("1000", "111"), acct("2000", null)]));
+  assert.deepEqual((await md.questions.getEntities(t, ["US1", "NOPE", "G"], D1)).map((e) => e.code).sort(), ["G", "US1"]);
+  assert.deepEqual(await md.questions.getEntities(t, [], D1), []);
+  assert.deepEqual((await md.questions.getAccounts(t, [{ chartCode: "C", accountNumber: "1000" }, { chartCode: "C", accountNumber: "2000" }, { chartCode: "C", accountNumber: "9" }, { chartCode: "X", accountNumber: "1000" }], D1)).map((a) => a.accountNumber).sort(), ["1000", "2000"]);
+  assert.deepEqual(await md.questions.hierarchyPaths(t, "C", ["111", "1", "nope"], D1), [{ nodeCode: "111", path: ["111", "11", "1"] }, { nodeCode: "1", path: ["1"] }]);
+  assert.deepEqual(await md.questions.hierarchyPaths(t, "C", ["111"], asOfDate("2025-01-01")), []);
+  const other = newTenant();
+  assert.deepEqual(await md.questions.getEntities(other, ["US1"], D1), []);
+  assert.deepEqual(await md.questions.hierarchyPaths(other, "C", ["111"], D1), []);
+});
+
 dbTest("tenant isolation: the same codes in two tenants never mix", async () => {
   const a = newTenant();
   const b = newTenant();
