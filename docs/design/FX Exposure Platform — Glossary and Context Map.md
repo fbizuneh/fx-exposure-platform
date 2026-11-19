@@ -24,7 +24,7 @@ Financial data and master data are different things, and most boundary decisions
 | Program boundary | The line that says which financial data belongs to which program | Each balance carries exactly one program ID. An unmatched balance is blocked. An excluded balance is out of scope, not an error. |
 | Mapping rule | A rule that assigns data to a program by single account or by account hierarchy node, or entity, or any combination of data dimensions with exclude rules for exceptions | Can also include or exclude by source system, entity and account. |
 | Exposure | An amount in a currency pair, in a date bucket, that moves with FX rates, with its program and lineage | Calculated by the exposure analysis service. |
-| Netting level | The level at which exposures offset each other: entity and pair, corporate and pair, region and pair | Configurable per program. |
+| Netting level | The level at which exposures offset each other: group natural, group portfolio, region, region by entity, or entity (each on currency pairs) | Configurable per program. |
 | Exposure engine | The calculation: raw data, filter, normalize, baseline exposure, netting level, gross exposure, net exposure | Hedges run the same sequence. Built on currency pairs. |
 | FX pre-trade | A soon to be executed forward, spot, NDF, or swap carrying its program ID and trading entity | Generated from the hedge recommendation process. Could also be created manually as a trade request. |
 | FX trade | An executed forward, spot, NDF or swap, carrying its program ID and trading entity | Imported from a standard flat file. The source of truth is generally a TMS (treasury management system) or an execution platform like a trading platform. Execution platform examples: FXall, 360T. |
@@ -70,7 +70,7 @@ Six decisions shape the boundaries above. Each has my recommendation; please ove
 
 1. **Who stamps the program ID?** Decided: Data Source stamps it at intake, as you first described, using the mapping rules it owns. An unmatched balance is blocked there.
 2. **Where do account classification and program rules live?** Decided: Data Source keeps the program mapping rules and applies them, so Exposure Analysis asks for a program's balances and gets only the included ones, without calling Exposure Management for rules. Master Data keeps accounts, hierarchy and descriptive classification, which the rules refer to.
-3. **Where does normalization happen?** Decided: Data Source normalizes to one canonical financial record (sign, currency, as-of date), and Exposure Analysis does its own "normalize" step into signed currency-pair rows, as in your workbook.&#32;
+3. **Where does normalization happen?** Decided: Data Source normalizes to one canonical financial record (currency, as-of date; the balance sign is kept exactly as sent and carries no accounting meaning), and Exposure Analysis does its own "normalize" step into signed currency-pair rows, as in your workbook.&#32;
    1. &#32;I agree with this recommendation
 4. **Who runs the program cycle?** Decided: Exposure Management owns the schedule, the program configuration and the cycle, which has three stages: initiated, in progress and completed. Exposure Analysis owns the run and its evidence, so a run can be reproduced from stored inputs.
 5. **Is FX Trade core or supporting?** Decided: supporting. We send pre-trades out for execution and receive the executed trade definitions back; execution itself happens outside our application.

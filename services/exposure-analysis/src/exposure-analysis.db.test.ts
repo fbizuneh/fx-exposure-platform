@@ -23,6 +23,8 @@ interface World {
   rates: Map<string, Pick<Rate, "rate" | "quality">>;
   cycles: Map<string, Cycle>;
   ndf: string[];
+  /** When true the rate service throws, as if it were unreachable. */
+  down?: boolean;
 }
 const worlds = new Map<string, World>();
 const world = (t: string): World => worlds.get(t)!;
@@ -58,6 +60,7 @@ const fakes = {
   },
   rates: {
     async getRate(query: { tenantId: TenantId; base: string; quote: string }): Promise<Rate | null> {
+      if (world(query.tenantId).down) throw new Error("fx-rate unavailable");
       const r = world(query.tenantId).rates.get(`${query.base}|${query.quote}`);
       return r ? { base: query.base, quote: query.quote, tenor: "SPOT", asOf: asOfDate(AS_OF), rate: r.rate, derivation: "DIRECT", quality: r.quality, source: "ECB", loadIds: ["load-1"] } : null;
     },
@@ -135,6 +138,18 @@ dbTest("with no included balances the run waits with a reason, announces nothing
   assert.deepEqual([after.runId, after.status, after.waitReason], [run.runId, "FINISHED", null]);
   assert.equal((await events(t)).length, 2);
   assert.equal(await ea.commands.retryWaiting(t), 0, "a finished run is not tried again");
+});
+
+dbTest("a service that cannot be reached makes the run wait with that reason, and it finishes when the service is back", async () => {
+  const { t, c, w, event } = setup();
+  w.down = true;
+  assert.equal(await ea.commands.onCycleInitiated(event()), "WAITING");
+  const run = (await ea.questions.currentRun(t, c))!;
+  assert.match(run.waitReason!, /could not be reached: fx-rate unavailable/);
+  assert.deepEqual(await events(t), []);
+  w.down = false;
+  assert.equal(await ea.commands.retryWaiting(t), 1);
+  assert.equal((await ea.questions.currentRun(t, c))!.status, "FINISHED");
 });
 
 dbTest("a missing rate stops the run before it starts and names the pair; stale and outlier rates are used and flagged", async () => {

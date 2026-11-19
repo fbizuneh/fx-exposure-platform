@@ -32,8 +32,18 @@ export function runCommands(db: Db, c: Collaborators, now: () => Date) {
     return "WAITING";
   }
 
-  /** Collect everything, then compute and save in one transaction. Nothing is saved but the reason when something is missing. */
+  /** Reads from other services; if one is down the run waits with that reason and is retried, rather than failing the event. */
   async function attempt(tenant: TenantId, runId: string): Promise<RunOutcome> {
+    let saving = false;
+    try {
+      return await attemptInner(tenant, runId, () => { saving = true; });
+    } catch (e) {
+      if (saving) throw e;
+      return wait(tenant, runId, `A service this run depends on could not be reached: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function attemptInner(tenant: TenantId, runId: string, startSaving: () => void): Promise<RunOutcome> {
     const run = await q(db).selectFrom("runs").selectAll().where("tenant_id", "=", tenant).where("run_id", "=", runId).executeTakeFirst();
     if (!run || run.status !== "WAITING") return "IGNORED";
     const asOf = asOfDate(run.as_of);
@@ -74,6 +84,7 @@ export function runCommands(db: Db, c: Collaborators, now: () => Date) {
     const ndf = new Set((await c.masterData.getCurrencies(tenant, asOf)).filter((x) => x.isNdf).map((x) => x.code));
     const overrides = new Map((json<{ pair: string; exposureCurrency: string }[]>(run.exposure_currency_overrides)).map((o) => [overrideKey(...(o.pair.split("-") as [string, string])), o.exposureCurrency]));
     const groups = netByLevel(baseline, level, run.as_of, display, rateOf, { ndf, overrides });
+    startSaving();
     return save(tenant, run.program_id, runId, { baseline, groups, counts, warnings, blocked, needs, fetched });
   }
 

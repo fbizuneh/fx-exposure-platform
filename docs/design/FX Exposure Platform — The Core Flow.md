@@ -22,7 +22,7 @@ A cycle takes six steps before anything is sent out. Steps 1 to 4 can run unatte
 | --- | --- | --- | --- |
 | 1. Start | Exposure Management | A schedule or a user starts a cycle for a program and as-of date. The cycle gets its ID and the program settings in force. | Initiated |
 | 2. Collect | Exposure Analysis | Asks Data Source for the program's included balances at the as-of date (whatever it has at that moment), FX Rate for the rates, Master Data for each entity's functional currency, and Exposure Management for the settings. | In progress |
-| 3. Analyze | Exposure Analysis | Normalizes the balances into signed currency-pair rows, nets them at the program's netting level, assigns date buckets, saves the result under the cycle ID, and announces the run finished. | Completed |
+| 3. Analyze | Exposure Analysis | Filters the balances (legal entities, accounts flagged both FX-relevant and monetary, functional-currency balances dropped), normalizes them into signed currency-pair rows at the as-of date, nets them at the program's netting level, assigns date buckets, saves the result under the cycle ID, and announces the run finished. | Completed |
 | 4. Recommend | Hedge Recommendation | Reads the exposure, the executed trades already in place and the settings, issues recommendations, and saves them under the cycle ID. | Completed |
 | 5. Decide | Hedge Recommendation | A user accepts, changes or rejects each recommendation. The decision is saved with who and when. Accepted ones become pre-trades in FX Trade. | Completed |
 | 6. Approve | Exposure Management | A user approves the cycle. Exposure Management records the approval and each service freezes its part. | Completed, approved |
