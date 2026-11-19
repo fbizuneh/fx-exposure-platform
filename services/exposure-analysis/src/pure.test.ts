@@ -155,3 +155,19 @@ test("required rates: the pair rates, and the display rates for each currency 1 
   assert.deepEqual(requiredRates(kept, "GROUP_NATURAL", "USD").map((r) => `${r.base}-${r.quote}:${r.purpose}`), ["EUR-GBP:PAIR", "EUR-USD:DISPLAY"]);
   assert.deepEqual(requiredRates(kept, "GROUP_PORTFOLIO", "USD").map((r) => `${r.base}-${r.quote}:${r.purpose}`), ["EUR-GBP:PAIR", "EUR-USD:PORTFOLIO", "GBP-USD:PORTFOLIO"]);
 });
+
+import { buildHedgeRows } from "./calc.ts";
+import type { ExecutedTrade } from "@services/fx-trade/contract";
+
+test("hedge rows: a buy is positive in the deal currency, a sold swap keeps only its open far leg, and the pair is in market order", () => {
+  const trade = (legs: object[]): ExecutedTrade => ({ executedTradeId: "e", platform: "P", tradeId: "t", tradingEntityCode: "US01", legs } as unknown as ExecutedTrade);
+  const leg = (legNo: number, direction: string, deal: string, dealAmount: string, settle: string, settleAmount: string, valueDate: string) =>
+    ({ legNo, role: "SINGLE", direction, dealCurrency: deal, dealAmount, settlementCurrency: settle, settlementAmount: settleAmount, valueDate, fixingDate: null });
+  const { rows, counts } = buildHedgeRows(
+    [trade([leg(1, "BUY", "USD", "110", "EUR", "100", "2027-01-15")]), trade([leg(1, "SELL", "EUR", "10", "USD", "11", "2026-11-09"), leg(2, "BUY", "EUR", "10", "USD", "11.05", "2026-12-09")])],
+    "2026-11-09", (code) => (code === "US01" ? { region: "AMER", functional: "USD" } : null),
+  );
+  assert.deepEqual(counts, { trades: 2, openLegs: 2, used: 2, noEntity: 0 });
+  // buying USD 110 against EUR 100: pair EUR-USD, EUR is currency 1 and goes negative, USD positive
+  assert.deepEqual(rows.map((r) => [r.pair, r.currency1, r.amount1.toFixed(2), r.amount2.toFixed(2)]), [["EUR-USD", "EUR", "-100.00", "110.00"], ["EUR-USD", "EUR", "10.00", "-11.05"]]);
+});

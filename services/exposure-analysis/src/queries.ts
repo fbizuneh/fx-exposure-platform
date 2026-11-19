@@ -1,6 +1,6 @@
 // The questions Exposure Analysis answers. Amounts are exact decimal strings.
 import { asOfDate, cycleId, lineageRef, programId, type CycleId, type TenantId } from "@shared/kernel";
-import type { BaselineRow, ExposureAnalysisQuestions, ExposureGroup, FilterCounts, RateUsed, RateWarning, RunSummary } from "../contract/index.ts";
+import type { BaselineRow, ExposureAnalysisQuestions, ExposureGroup, FilterCounts, HedgeCounts, HedgeRow, NetExposureGroup, RateUsed, RateWarning, RunSummary } from "../contract/index.ts";
 import { q, type Db } from "./db.ts";
 
 const json = <T>(v: unknown): T => (typeof v === "string" ? JSON.parse(v) : v) as T;
@@ -15,7 +15,7 @@ export function exposureAnalysisQuestions(db: Db): ExposureAnalysisQuestions {
       return {
         runId: r.run_id, cycleId: cycleId(r.cycle_id), programId: programId(r.program_id), asOf: asOfDate(r.as_of), status: r.status, waitReason: r.wait_reason,
         nettingLevel: r.netting_level as RunSummary["nettingLevel"], displayCurrency: r.display_currency,
-        counts: r.counts === null ? null : json<FilterCounts>(r.counts), blockedBalances: r.blocked_count, warnings: r.warnings === null ? [] : json<RateWarning[]>(r.warnings),
+        counts: r.counts === null ? null : json<FilterCounts>(r.counts), hedgeCounts: r.hedge_counts === null ? null : json<HedgeCounts>(r.hedge_counts), blockedBalances: r.blocked_count, warnings: r.warnings === null ? [] : json<RateWarning[]>(r.warnings),
         attemptedAt: r.attempted_at.toISOString(), finishedAt: r.finished_at?.toISOString() ?? null, frozenAt: r.frozen_at?.toISOString() ?? null,
       };
     },
@@ -41,6 +41,25 @@ export function exposureAnalysisQuestions(db: Db): ExposureAnalysisQuestions {
         period: asOfDate(b.period), transactionCurrency: b.transaction_currency, functionalCurrency: b.functional_currency, currencyPair: b.currency_pair, pairRate: b.pair_rate,
         amount: amount(b.amount), amount1: amount(b.amount1), amount2: amount(b.amount2), dimensions: json<Record<string, string>>(b.dimensions),
         contribution: { amount1: amount(b.c1), amount2: amount(b.c2) },
+      }));
+    },
+
+    async netExposures(tenant: TenantId, runId: string): Promise<readonly NetExposureGroup[]> {
+      const rows = await q(db).selectFrom("net_groups").selectAll().where("tenant_id", "=", tenant).where("run_id", "=", runId).orderBy("group_no").execute();
+      return rows.map((g) => ({
+        groupNo: g.group_no, nettingLevel: g.netting_level as NetExposureGroup["nettingLevel"], region: g.region, entityCode: g.entity_code, currencyPair: g.currency_pair,
+        currency1: g.currency1, currency2: g.currency2, exposureCurrency: g.exposure_currency, period: asOfDate(g.period), displayCurrency: g.display_currency, displayRate: g.display_rate,
+        gross: { net1: amount(g.gross_net1), net2: amount(g.gross_net2), exposureAmount: amount(g.gross_exposure), displayAmount: amount(g.gross_display) },
+        hedges: { net1: amount(g.hedge_net1), net2: amount(g.hedge_net2), exposureAmount: amount(g.hedge_exposure), displayAmount: amount(g.hedge_display) },
+        net: { net1: amount(g.net_net1), net2: amount(g.net_net2), exposureAmount: amount(g.net_exposure), displayAmount: amount(g.net_display) },
+      }));
+    },
+
+    async hedgeRows(tenant: TenantId, runId: string): Promise<readonly HedgeRow[]> {
+      const rows = await q(db).selectFrom("hedge_rows").selectAll().where("tenant_id", "=", tenant).where("run_id", "=", runId).orderBy("row_no").execute();
+      return rows.map((h) => ({
+        rowNo: h.row_no, executedTradeId: h.executed_trade_id, platform: h.platform, tradeId: h.trade_id, legNo: h.leg_no, entityCode: h.entity_code, region: h.region, period: asOfDate(h.period),
+        dealCurrency: h.deal_currency, settlementCurrency: h.settlement_currency, currencyPair: h.currency_pair, amount1: amount(h.amount1), amount2: amount(h.amount2),
       }));
     },
 

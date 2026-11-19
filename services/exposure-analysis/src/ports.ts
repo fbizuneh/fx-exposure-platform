@@ -2,6 +2,7 @@
 import type { DataSourceQuestions } from "@services/data-source/contract";
 import type { ExposureManagementQuestions } from "@services/exposure-management/contract";
 import type { FxRateQuestions } from "@services/fx-rate/contract";
+import type { FxTradeQuestions } from "@services/fx-trade/contract";
 import type { MasterDataQuestions } from "@services/master-data/contract";
 
 export interface Collaborators {
@@ -9,4 +10,5 @@ export interface Collaborators {
   readonly dataSource: Pick<DataSourceQuestions, "includedBalances" | "ingestionStatus">;
   readonly masterData: Pick<MasterDataQuestions, "getEntities" | "getAccounts" | "entityWalk" | "getCurrencies">;
   readonly rates: Pick<FxRateQuestions, "getRate">;
+  readonly trades: Pick<FxTradeQuestions, "executedTrades">;
 }

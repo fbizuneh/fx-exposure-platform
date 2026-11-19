@@ -7,6 +7,7 @@ import { asOfDate, accountId, cycleId, entityId, lineageRef, programId, tenantId
 import type { IncludedBalance, IngestionStatus } from "@services/data-source/contract";
 import type { Cycle } from "@services/exposure-management/contract";
 import type { Rate } from "@services/fx-rate/contract";
+import type { ExecutedTrade } from "@services/fx-trade/contract";
 import type { Account, Entity } from "@services/master-data/contract";
 import { migrate } from "../../../scripts/migrate.mjs";
 import { connect, createExposureAnalysis, type Db } from "./index.ts";
@@ -25,6 +26,8 @@ interface World {
   ndf: string[];
   /** When true the rate service throws, as if it were unreachable. */
   down?: boolean;
+  /** Executed trades FX Trade would return. */
+  trades?: ExecutedTrade[];
 }
 const worlds = new Map<string, World>();
 const world = (t: string): World => worlds.get(t)!;
@@ -56,6 +59,11 @@ const fakes = {
     async entityWalk(_t: TenantId, id: string) {
       const parent = [...ENTITIES.values()].find((e) => e.entityId === id)?.parentEntityId;
       return parent ? [...ENTITIES.values()].filter((e) => e.entityId === parent) : [];
+    },
+  },
+  trades: {
+    async executedTrades(tenant: TenantId): Promise<readonly ExecutedTrade[]> {
+      return world(tenant).trades ?? [];
     },
   },
   rates: {
@@ -237,4 +245,43 @@ dbTest("exposure currency: an NDF currency in the pair decides it, a program ove
   assert.deepEqual(await exposure(mk("GROUP_NATURAL", [])), ["EUR-USD:EUR", "USD-BRL:BRL"]);
   assert.deepEqual(await exposure(mk("GROUP_NATURAL", [{ pair: "BRL-USD", exposureCurrency: "USD" }])), ["EUR-USD:EUR", "USD-BRL:USD"]);
   assert.deepEqual(await exposure(mk("GROUP_PORTFOLIO", [{ pair: "EUR-USD", exposureCurrency: "USD" }])), ["EUR-USD:EUR", "USD-BRL:BRL"]);
+});
+
+const hedge = (entityCode: string, direction: "BUY" | "SELL", deal: string, dealAmount: string, settle: string, settleAmount: string, valueDate: string, id = "x1"): ExecutedTrade => ({
+  executedTradeId: id, platform: "P", tradeId: id, version: 1, cancelled: false, programId: programId("BS"), tradingEntityCode: entityCode, counterparty: null, tradeDate: asOfDate("2026-11-01"),
+  instrument: "FORWARD", portfolio: null, customFields: {}, matchStatus: "MATCHED", preTradeId: null, matchNote: null, candidates: [], batchId: null,
+  legs: [{ legNo: 1, role: "SINGLE", direction, dealCurrency: deal, dealAmount, settlementCurrency: settle, settlementAmount: settleAmount, valueDate, fixingDate: null }],
+} as ExecutedTrade);
+
+dbTest("net exposure is gross plus outstanding hedges; a matured leg and an unknown entity are left out, and a hedge-only group still appears (decision 0010)", async () => {
+  const { t, c, event } = setup({
+    balances: [bal("US01", "4000", "EUR", "1000"), bal("DE01", "4000", "USD", "550")],
+    trades: [
+      hedge("US01", "SELL", "EUR", "400", "USD", "440", "2027-01-15", "h1"),
+      hedge("US01", "SELL", "EUR", "50", "USD", "55", "2026-11-09", "matured"),
+      hedge("NOPE", "BUY", "EUR", "10", "USD", "11", "2027-01-15", "ghost"),
+      hedge("US01", "SELL", "GBP", "100", "USD", "125", "2027-01-15", "h2"),
+    ],
+  });
+  assert.equal(await ea.commands.onCycleInitiated(event()), "FINISHED");
+  const run = (await ea.questions.currentRun(t, c))!;
+  assert.deepEqual(run.hedgeCounts, { trades: 4, openLegs: 3, used: 2, noEntity: 1 });
+  const gross = await ea.questions.exposures(t, run.runId);
+  assert.deepEqual(gross.map((g) => g.currencyPair), ["EUR-USD"], "gross is unchanged by hedges");
+  const net = await ea.questions.netExposures(t, run.runId);
+  assert.deepEqual(net.map((n) => [n.currencyPair, n.gross.exposureAmount, n.hedges.exposureAmount, n.net.exposureAmount, n.exposureCurrency]), [
+    ["EUR-USD", "500.00", "-400.00", "100.00", "EUR"], ["GBP-USD", "0.00", "-100.00", "-100.00", "GBP"]]);
+  const eur = net[0]!;
+  assert.deepEqual([eur.hedges.net1, eur.hedges.net2, eur.net.net1, eur.net.net2, eur.net.displayAmount, eur.hedges.displayAmount], ["-400.00", "440.00", "100.00", "-110.00", "110.00", "-440.00"]);
+  const rows = await ea.questions.hedgeRows(t, run.runId);
+  assert.deepEqual(rows.map((r) => [r.tradeId, r.entityCode, r.region, r.currencyPair, r.amount1, r.amount2]), [["h1", "US01", "AMER", "EUR-USD", "-400.00", "440.00"], ["h2", "US01", "AMER", "GBP-USD", "-100.00", "125.00"]]);
+});
+
+dbTest("a program with no executed trades has net equal to gross", async () => {
+  const { t, c, event } = setup();
+  await ea.commands.onCycleInitiated(event());
+  const run = (await ea.questions.currentRun(t, c))!;
+  assert.deepEqual(run.hedgeCounts, { trades: 0, openLegs: 0, used: 0, noEntity: 0 });
+  const net = await ea.questions.netExposures(t, run.runId);
+  assert.ok(net.length > 0 && net.every((n) => n.net.exposureAmount === n.gross.exposureAmount && n.hedges.exposureAmount === "0.00"));
 });

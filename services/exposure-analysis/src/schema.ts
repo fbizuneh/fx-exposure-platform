@@ -18,6 +18,7 @@ export interface ExposureAnalysisDatabase {
     display_currency: string;
     exposure_currency_overrides: JsonIn;
     counts: JsonOrNull;
+    hedge_counts: JsonOrNull;
     blocked_count: number | null;
     warnings: JsonOrNull;
     created_at: Generated<Date>;
@@ -73,6 +74,17 @@ export interface ExposureAnalysisDatabase {
     display_amount: string;
   };
   group_members: { tenant_id: string; program_id: string; run_id: string; group_no: number; row_no: number; amount1: string; amount2: string };
+  hedge_rows: {
+    tenant_id: string; program_id: string; run_id: string; row_no: number; executed_trade_id: string; platform: string; trade_id: string; leg_no: number;
+    entity_code: string; region: string; period: string; deal_currency: string; settlement_currency: string; currency_pair: string; currency1: string; currency2: string; amount1: string; amount2: string;
+  };
+  net_groups: {
+    tenant_id: string; program_id: string; run_id: string; group_no: number; netting_level: string; region: string | null; entity_code: string | null; currency_pair: string;
+    currency1: string; currency2: string; exposure_currency: string; period: string; display_currency: string; display_rate: string;
+    gross_net1: string; gross_net2: string; gross_exposure: string; gross_display: string;
+    hedge_net1: string; hedge_net2: string; hedge_exposure: string; hedge_display: string;
+    net_net1: string; net_net2: string; net_exposure: string; net_display: string;
+  };
   rates_used: {
     tenant_id: string;
     program_id: string;
