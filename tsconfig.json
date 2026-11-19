@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@shared/kernel": ["shared/kernel/src/index.ts"],
+      "@services/*/contract": ["services/*/contract/index.ts"]
+    },
+    "types": ["node"]
+  },
+  "include": ["shared", "services", "app"]
+}
