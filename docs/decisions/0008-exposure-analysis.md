@@ -17,11 +17,16 @@ Date: 2026-11-18. Service: exposure-analysis (core tier). Sources: the product o
 12. **Blocked balances do not stop a run.** The count of blocked balances across the tenant's current batches for that date is saved on the run, for display at approval.
 
 ## Defaults I chose, to confirm or change
-- Exposure currency of a group: the currency that is not the display currency when the pair includes it, otherwise currency 2. A per-pair setting can replace this later.
 - Display amount uses currency 1 as in the workbook, whatever the exposure currency is.
 - Rounding is 2 places for every currency, half away from zero, as in the workbook.
 - A zero balance is kept as a row.
 - A run that can be tried again is retried by an explicit command, which the app calls on "batch stamped" and "rates loaded" events and on a timer.
+
+## Amendments (2026-11-18, after the first build; not yet in code)
+13. **Exposure currency** is set by a default logic and an override configuration. Default: if the pair has an NDF currency, that is the exposure currency; otherwise, if the pair has USD, the non-USD currency; then the same test for EUR, GBP, AUD, NZD, CAD, CHF, SGD in that order; otherwise currency 2. Users can override it per pair by configuration. This replaces the interim rule built in the first version (non-display currency, else currency 2).
+14. **Rounding and display.** Amounts are rounded to 2 places (unchanged) and shown with 0 decimal places. This is a display rule; stored and returned amounts keep 2 places.
+
+Open for tomorrow: where the list of NDF currencies lives (Master Data currency reference or FX Rate), whether the override is per program or per tenant, and whether the override applies to the pair as netted or to the original natural pair.
 
 ## Not built yet
 Hedge rows and net exposure, forecast and AR/AP adapters, "entity by product, project or business unit" netting, per-pair exposure currency, purging of old runs.
