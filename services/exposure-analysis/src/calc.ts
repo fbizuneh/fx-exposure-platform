@@ -99,6 +99,8 @@ export interface NetRow {
   readonly amount2: Num;
   /** The entity's functional currency; empty if it has none. */
   readonly functional: string;
+  /** Hedge rows only: the deal currency of the trade leg, the exposure currency when the entity's functional currency is not in the pair. */
+  readonly dealCurrency?: string;
 }
 /** An open leg of an executed trade (decision 0010). */
 export interface HedgeRow extends NetRow {
@@ -123,12 +125,17 @@ export function buildHedgeRows(
 ): { readonly rows: HedgeRow[]; readonly counts: HedgeCounts } {
   const rows: HedgeRow[] = [];
   let openLegs = 0, noEntity = 0;
+  const excluded: HedgeCounts["excluded"][number][] = [];
   for (const t of trades) {
     for (const leg of t.legs) {
       if (leg.valueDate <= asOf) continue;
       openLegs++;
       const info = entityOf(t.tradingEntityCode);
-      if (!info) { noEntity++; continue; }
+      if (!info) {
+        noEntity++;
+        excluded.push({ executedTradeId: t.executedTradeId, platform: t.platform, tradeId: t.tradeId, legNo: leg.legNo, entityCode: t.tradingEntityCode, reason: "TRADING_ENTITY_NOT_ON_RECORD" });
+        continue;
+      }
       const deal = new D(leg.dealAmount), settle = new D(leg.settlementAmount);
       const [dealSigned, settleSigned] = leg.direction === "BUY" ? [deal, settle.negated()] : [deal.negated(), settle];
       const [c1, c2] = orderPair(leg.dealCurrency, leg.settlementCurrency);
@@ -140,7 +147,7 @@ export function buildHedgeRows(
       });
     }
   }
-  return { rows, counts: { trades: trades.length, openLegs, used: rows.length, noEntity } };
+  return { rows, counts: { trades: trades.length, openLegs, used: rows.length, noEntity, excluded } };
 }
 
 /** One contribution to a netting group. At the portfolio level a baseline row gives up to two. */
@@ -154,10 +161,11 @@ export interface Contribution {
   readonly amount2: Num;
   /** The entity's functional currency; empty when the contribution is a portfolio re-pairing. */
   readonly functional: string;
+  readonly dealCurrency?: string;
 }
 
 const straight = (rows: readonly NetRow[]): Contribution[] =>
-  rows.map((r) => ({ rowNo: r.rowNo, entityCode: r.entityCode, region: r.region, currency1: r.currency1, currency2: r.currency2, amount1: r.amount1, amount2: r.amount2, functional: r.functional }));
+  rows.map((r) => ({ rowNo: r.rowNo, entityCode: r.entityCode, region: r.region, currency1: r.currency1, currency2: r.currency2, amount1: r.amount1, amount2: r.amount2, functional: r.functional, ...(r.dealCurrency === undefined ? {} : { dealCurrency: r.dealCurrency }) }));
 
 /** Re-express every row against the portfolio currency: each non-portfolio currency leg is paired with it. */
 export function repairToPortfolio(input: readonly (Baseline | NetRow)[], portfolio: string, rateToPortfolio: (ccy: string) => string): Contribution[] {
@@ -247,9 +255,15 @@ export function netByLevel(
   exposureRules: ExposureCurrencyRules = { ndf: new Set(), overrides: new Map() },
 ): GroupResult[] {
   const contributions = level === "GROUP_PORTFOLIO" ? repairToPortfolio(rows, display, (ccy) => rateOf(ccy, display)) : straight(rows.map(flat));
+  // The exposure currency is chosen per contribution, before aggregation, and is part of the netting key (decision 0010).
+  const exposureOf = (c: Contribution): string => {
+    const fn = c.functional === "" ? null : c.functional;
+    if (byEntity(level) && c.dealCurrency !== undefined && (fn === null || (c.currency1 !== fn && c.currency2 !== fn))) return c.dealCurrency;
+    return exposureCurrencyFor(level, c.currency1, c.currency2, display, exposureRules, fn);
+  };
   const groups = new Map<string, Contribution[]>();
   for (const c of contributions) {
-    const key = [byRegion(level) ? c.region : "", byEntity(level) ? c.entityCode : "", pairName(c.currency1, c.currency2)].join("\u0000");
+    const key = [byRegion(level) ? c.region : "", byEntity(level) ? c.entityCode : "", pairName(c.currency1, c.currency2), exposureOf(c)].join("\u0000");
     const list = groups.get(key);
     if (list) list.push(c); else groups.set(key, [c]);
   }
@@ -258,7 +272,7 @@ export function netByLevel(
     const first = list[0]!;
     const sum = (f: (c: Contribution) => Num, keep: (n: Num) => boolean = () => true) => list.map(f).filter(keep).reduce((a, b) => a.plus(b), new D(0));
     const net1 = sum((c) => c.amount1), net2 = sum((c) => c.amount2);
-    const exposureCurrency = exposureCurrencyFor(level, first.currency1, first.currency2, display, exposureRules, first.functional === "" ? null : first.functional);
+    const exposureCurrency = exposureOf(first);
     const displayRate = first.currency1 === display ? "1" : rateOf(first.currency1, display);
     results.push({
       nettingLevel: level, region: byRegion(level) ? first.region : null, entityCode: byEntity(level) ? first.entityCode : null,
@@ -269,7 +283,7 @@ export function netByLevel(
     });
   }
   const cmp = (a: string | null, b: string | null) => (a ?? "") < (b ?? "") ? -1 : (a ?? "") > (b ?? "") ? 1 : 0;
-  return results.sort((a, b) => cmp(a.pair, b.pair) || cmp(a.region, b.region) || cmp(a.entityCode, b.entityCode));
+  return results.sort((a, b) => cmp(a.pair, b.pair) || cmp(a.region, b.region) || cmp(a.entityCode, b.entityCode) || cmp(a.exposureCurrency, b.exposureCurrency));
 }
 
 export interface RateNeed { readonly base: string; readonly quote: string; readonly purpose: "PAIR" | "DISPLAY" | "PORTFOLIO" }
@@ -300,7 +314,7 @@ export interface NetGroupResult {
   readonly net: { readonly net1: Num; readonly net2: Num; readonly exposure: Num; readonly display: Num };
 }
 
-const groupKey = (g: GroupResult): string => [g.region ?? "", g.entityCode ?? "", g.pair].join("\u0000");
+const groupKey = (g: GroupResult): string => [g.region ?? "", g.entityCode ?? "", g.pair, g.exposureCurrency].join("\u0000");
 
 /**
  * Net exposure per group (decision 0010): the same netting over balances and hedge rows. Hedges are net minus gross, so the three add up.
@@ -316,7 +330,7 @@ export function netExposure(
     const g = grossBy.get(groupKey(n));
     const g1 = g?.net1 ?? new D(0), g2 = g?.net2 ?? new D(0), ge = g?.exposureAmount ?? new D(0), gd = g?.displayAmount ?? new D(0);
     const rate = n.displayRate;
-    const h1 = n.net1.minus(g1), h2 = n.net2.minus(g2), he = n.exposureAmount.minus(ge);
+    const h1 = round2(n.net1.minus(g1)), h2 = round2(n.net2.minus(g2)), he = round2(n.exposureAmount.minus(ge));
     const zero = (x: Num): Num => (x.isZero() ? new D(0) : x);
     return {
       group: n,

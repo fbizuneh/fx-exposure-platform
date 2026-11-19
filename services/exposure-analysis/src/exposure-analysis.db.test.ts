@@ -265,7 +265,7 @@ dbTest("net exposure is gross plus outstanding hedges; a matured leg and an unkn
   });
   assert.equal(await ea.commands.onCycleInitiated(event()), "FINISHED");
   const run = (await ea.questions.currentRun(t, c))!;
-  assert.deepEqual(run.hedgeCounts, { trades: 4, openLegs: 3, used: 2, noEntity: 1 });
+  assert.deepEqual(run.hedgeCounts, { trades: 4, openLegs: 3, used: 2, noEntity: 1, excluded: [{ executedTradeId: "ghost", platform: "P", tradeId: "ghost", legNo: 1, entityCode: "NOPE", reason: "TRADING_ENTITY_NOT_ON_RECORD" }] });
   const gross = await ea.questions.exposures(t, run.runId);
   assert.deepEqual(gross.map((g) => g.currencyPair), ["EUR-USD"], "gross is unchanged by hedges");
   const net = await ea.questions.netExposures(t, run.runId);
@@ -281,7 +281,37 @@ dbTest("a program with no executed trades has net equal to gross", async () => {
   const { t, c, event } = setup();
   await ea.commands.onCycleInitiated(event());
   const run = (await ea.questions.currentRun(t, c))!;
-  assert.deepEqual(run.hedgeCounts, { trades: 0, openLegs: 0, used: 0, noEntity: 0 });
+  assert.deepEqual(run.hedgeCounts, { trades: 0, openLegs: 0, used: 0, noEntity: 0, excluded: [] });
   const net = await ea.questions.netExposures(t, run.runId);
   assert.ok(net.length > 0 && net.every((n) => n.net.exposureAmount === n.gross.exposureAmount && n.hedges.exposureAmount === "0.00"));
+});
+
+dbTest("entity level: hedges without the entity's functional currency in the pair are keyed by their deal currency, so EUR-deal and GBP-deal trades give two rows; cents are kept (decision 0010)", async () => {
+  const { t, c, event } = setup({
+    balances: [bal("US01", "4000", "EUR", "1000")],
+    trades: [
+      hedge("US01", "BUY", "EUR", "100.45", "GBP", "87.30", "2027-01-15", "d1"),
+      hedge("US01", "BUY", "EUR", "10.10", "GBP", "8.80", "2027-01-15", "d2"),
+      hedge("US01", "SELL", "GBP", "50.10", "EUR", "57.80", "2027-01-15", "d3"),
+    ],
+  }, "ENTITY");
+  assert.equal(await ea.commands.onCycleInitiated(event()), "FINISHED");
+  const run = (await ea.questions.currentRun(t, c))!;
+  assert.equal(run.status, "FINISHED");
+  const net = (await ea.questions.netExposures(t, run.runId)).filter((n) => n.currencyPair.includes("GBP") && n.currencyPair.includes("EUR"));
+  assert.equal(net.length, 2, "one row per exposure currency");
+  const byCcy = new Map(net.map((n) => [n.exposureCurrency, n]));
+  assert.deepEqual([...byCcy.keys()].sort(), ["EUR", "GBP"]);
+  // same full key nets together: d1 and d2 are EUR-deal; d3 is GBP-deal
+  assert.equal(byCcy.get("EUR")!.hedges.exposureAmount, "110.55");
+  assert.equal(byCcy.get("GBP")!.hedges.exposureAmount, "-50.10");
+  assert.ok(net.every((n) => n.gross.exposureAmount === "0.00" && n.net.exposureAmount === n.hedges.exposureAmount), "gross, hedge and net are aligned on the full key");
+});
+
+dbTest("a hedge whose trading entity is missing is excluded and recorded by trade and leg, and the run still finishes without waiting", async () => {
+  const { t, c, event } = setup({ balances: [bal("US01", "4000", "EUR", "1000")], trades: [hedge("LATER", "SELL", "EUR", "5.55", "USD", "6.10", "2027-01-15", "m1")] });
+  assert.equal(await ea.commands.onCycleInitiated(event()), "FINISHED");
+  const run = (await ea.questions.currentRun(t, c))!;
+  assert.deepEqual([run.hedgeCounts!.used, run.hedgeCounts!.noEntity, run.hedgeCounts!.excluded.map((x) => x.tradeId)], [0, 1, ["m1"]]);
+  assert.equal(run.waitReason, null);
 });

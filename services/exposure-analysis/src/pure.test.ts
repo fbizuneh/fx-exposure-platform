@@ -167,7 +167,7 @@ test("hedge rows: a buy is positive in the deal currency, a sold swap keeps only
     [trade([leg(1, "BUY", "USD", "110", "EUR", "100", "2027-01-15")]), trade([leg(1, "SELL", "EUR", "10", "USD", "11", "2026-11-09"), leg(2, "BUY", "EUR", "10", "USD", "11.05", "2026-12-09")])],
     "2026-11-09", (code) => (code === "US01" ? { region: "AMER", functional: "USD" } : null),
   );
-  assert.deepEqual(counts, { trades: 2, openLegs: 2, used: 2, noEntity: 0 });
+  assert.deepEqual(counts, { trades: 2, openLegs: 2, used: 2, noEntity: 0, excluded: [] });
   // buying USD 110 against EUR 100: pair EUR-USD, EUR is currency 1 and goes negative, USD positive
   assert.deepEqual(rows.map((r) => [r.pair, r.currency1, r.amount1.toFixed(2), r.amount2.toFixed(2)]), [["EUR-USD", "EUR", "-100.00", "110.00"], ["EUR-USD", "EUR", "10.00", "-11.05"]]);
 });

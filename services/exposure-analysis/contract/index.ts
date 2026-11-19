@@ -29,6 +29,17 @@ export interface HedgeCounts {
   readonly used: number;
   /** Open legs left out because the trading entity is not on record in Master Data on the as-of date. */
   readonly noEntity: number;
+  /** Every leg left out, so a user can fix the setup and recalculate. The run finishes without them; it does not wait. */
+  readonly excluded: readonly HedgeExclusion[];
+}
+
+export interface HedgeExclusion {
+  readonly executedTradeId: string;
+  readonly platform: string;
+  readonly tradeId: string;
+  readonly legNo: number;
+  readonly entityCode: string;
+  readonly reason: "TRADING_ENTITY_NOT_ON_RECORD";
 }
 
 export interface RateWarning {

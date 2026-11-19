@@ -166,7 +166,7 @@ e2e("approval releases a recommended pre-trade; a simulated platform returns the
   await drain(app);
   const run2 = (await app.exposureAnalysis.questions.currentRun(t, next as never))!;
   assert.equal(run2.status, "FINISHED");
-  assert.deepEqual(run2.hedgeCounts, { trades: 1, openLegs: 1, used: 1, noEntity: 0 });
+  assert.deepEqual(run2.hedgeCounts, { trades: 1, openLegs: 1, used: 1, noEntity: 0, excluded: [] });
   const all = await app.exposureAnalysis.questions.netExposures(t, run2.runId);
   const eur = all.find((g) => g.currencyPair === "EUR-USD" && g.entityCode === "US01")!;
   assert.equal(eur.hedges.exposureAmount, "-1000.00");
