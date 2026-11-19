@@ -5,6 +5,7 @@ import { connect as connectDataSource, createDataSource } from "../../services/d
 import { connect as connectExposureAnalysis, createExposureAnalysis } from "../../services/exposure-analysis/src/index.ts";
 import { connect as connectExposureManagement, createExposureManagement } from "../../services/exposure-management/src/index.ts";
 import { connect as connectFxRate, createFxRate } from "../../services/fx-rate/src/index.ts";
+import { connect as connectFxTrade, createFxTrade } from "../../services/fx-trade/src/index.ts";
 import { connect as connectIdentity, createIdentity } from "../../services/identity/src/index.ts";
 import { connect as connectMasterData, createMasterData } from "../../services/master-data/src/index.ts";
 
@@ -19,6 +20,7 @@ export function composeApp(connectionString: string, now: () => Date = () => new
     dataSource: connectDataSource(connectionString),
     exposureManagement: connectExposureManagement(connectionString),
     exposureAnalysis: connectExposureAnalysis(connectionString),
+    fxTrade: connectFxTrade(connectionString),
   };
   const identity = createIdentity(dbs.identity);
   const masterData = createMasterData(dbs.masterData);
@@ -32,8 +34,9 @@ export function composeApp(connectionString: string, now: () => Date = () => new
     rates: fxRate.questions,
     now,
   });
+  const fxTrade = createFxTrade(dbs.fxTrade, { access: identity.questions, masterData: masterData.questions, management: exposureManagement.questions }, { now });
   return {
-    identity, masterData, fxRate, dataSource, exposureManagement, exposureAnalysis,
+    identity, masterData, fxRate, dataSource, exposureManagement, exposureAnalysis, fxTrade,
     async close(): Promise<void> {
       await Promise.all(Object.values(dbs).map((d) => d.destroy()));
     },

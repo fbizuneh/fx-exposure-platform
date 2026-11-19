@@ -3,16 +3,16 @@
 Read this with AGENTS.md at the start of a session. Update it when a service is finished or a decision is added.
 
 ## Order and status
-Shared kernel, checks, Identity (done) -> Master Data (done) -> FX Rate (done) -> Data Source (done) -> Exposure Management (done) -> **Exposure Analysis (done for GL balances)** -> FX Trade (next; the demo simulator is a separate tool outside the services) -> Hedge Recommendation -> Audit.
+Shared kernel, checks, Identity (done) -> Master Data (done) -> FX Rate (done) -> Data Source (done) -> Exposure Management (done) -> **Exposure Analysis (done for GL balances)** -> **FX Trade (done; the demo simulator is a separate tool outside the services)** -> Hedge Recommendation (next) -> Audit. Still to do after FX Trade: hedge rows and net exposure in Exposure Analysis, reading `executedTrades` from FX Trade.
 
 ## app/ (composition)
-`app/src/compose.ts` builds all services over one database; `app/src/dispatch.ts` delivers events between them (`drain`) and starts due cycles (`startDueCycles`). `app/src/end-to-end.db.test.ts` runs a cycle through the real services (no fakes). A real process still needs a loop that calls both on a timer.
+`app/src/compose.ts` builds all services over one database; `app/src/dispatch.ts` delivers events between them (`drain`) and starts due cycles (`startDueCycles`). `app/src/end-to-end.db.test.ts` runs a cycle through the real services (no fakes). The dispatcher also routes cycle approved to FX Trade (release gate) and cycle skipped or deleted (cancels drafts). A real process still needs a loop that calls both on a timer.
 
 ## Known gaps (recorded, not built)
 Control totals by currency; per-currency holiday calendar; tenant + program composite keys; contract versioning; platform-level versus tenant-level NDF list; Audit change records; retention and purge; delivery is at-least-once with per-event retry only through the next drain.
 
 ## Decisions (docs/decisions)
-0001-0003 Identity; 0004 Master Data (also holds the currency reference with the NDF flag); 0005 FX Rate; 0006 Data Source; 0007 Exposure Management (cycles, run events with run IDs, settings incl. netting level, display currency, exposure currency overrides); 0008 Exposure Analysis (workbook rules, run lifecycle, netting levels, exposure currency order).
+0001-0003 Identity; 0004 Master Data (also holds the currency reference with the NDF flag); 0005 FX Rate; 0006 Data Source; 0007 Exposure Management (cycles, run events with run IDs, settings incl. netting level, display currency, exposure currency overrides); 0008 Exposure Analysis (workbook rules, run lifecycle, netting levels, exposure currency order); 0009 FX Trade (two record types, legs, standard file, matching, release gate).
 Process for each service: a DECISION REQUIRED block (options, recommendation, cost), the user's answer, a numbered decision record, then build, test, commit, push.
 
 ## Facts the code depends on
@@ -20,6 +20,7 @@ Process for each service: a DECISION REQUIRED block (options, recommendation, co
 - GL balances: no source record ID (identity is entity, account, currency, dimensions); the sign is kept exactly as sent and carries no asset or liability meaning; the period is the as-of date; the filter needs both the FX-relevant and the monetary flag.
 - Amounts: rounded to 2 places per row, shown with 0 decimals by clients. Pairs follow market convention (EUR, GBP, AUD, NZD, USD, CHF, CAD, SGD, then alphabetical).
 - Exposure currency, first match wins: portfolio level (non-portfolio currency); a level with an entity (the entity's non-functional currency); the program override; the default (NDF, then USD, EUR, GBP, AUD, NZD, CAD, CHF, SGD, then currency 2).
+- FX Trade: executed trades are append-only versions; a match is a link; fills are recomputed from current live versions; a trade with no or unknown program is stored unmatched; matching is exact with no tolerance.
 - Not built yet: hedge rows and net exposure (with FX Trade), forecast and AR/AP adapters, netting by product/project/business unit.
 
 ## Working notes

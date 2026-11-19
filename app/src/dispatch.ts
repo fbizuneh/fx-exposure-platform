@@ -24,6 +24,11 @@ async function deliver(app: App, e: Announced): Promise<void> {
       return;
     case "exposure-management.cycle-approved":
       await app.exposureAnalysis.commands.onCycleApproved(e as never);
+      await app.fxTrade.commands.onCycleApproved(e as never); // the release gate for pre-trades
+      return;
+    case "exposure-management.cycle-skipped":
+    case "exposure-management.cycle-deleted":
+      await app.fxTrade.commands.onCycleClosed(e as never);
       return;
     case "exposure-analysis.run-started":
       await app.exposureManagement.commands.onRunStarted(e as never);
@@ -43,7 +48,7 @@ async function deliver(app: App, e: Announced): Promise<void> {
 
 /** Delivers pending events until none are left (a delivery can write new events). Returns how many were delivered. */
 export async function drain(app: App, maxRounds = 25): Promise<number> {
-  const sources = [app.identity, app.masterData, app.fxRate, app.dataSource, app.exposureManagement, app.exposureAnalysis];
+  const sources = [app.identity, app.masterData, app.fxRate, app.dataSource, app.exposureManagement, app.exposureAnalysis, app.fxTrade];
   let delivered = 0;
   for (let round = 0; round < maxRounds; round++) {
     let any = false;

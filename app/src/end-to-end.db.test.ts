@@ -8,6 +8,7 @@ import { asOfDate, programId, type TenantId } from "@shared/kernel";
 import type { Actor } from "@services/identity/contract";
 import { migrate } from "../../scripts/migrate.mjs";
 import { composeApp, type App } from "./compose.ts";
+import { parseExecutedFile } from "../../services/fx-trade/src/index.ts";
 import { drain, startDueCycles } from "./dispatch.ts";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -22,7 +23,7 @@ before(async () => {
   if (!enabled) return;
   const client = new pg.Client({ connectionString: url });
   await client.connect();
-  for (const s of ["identity", "master_data", "fx_rate", "data_source", "exposure_management", "exposure_analysis"]) await client.query(`DROP SCHEMA IF EXISTS ${s} CASCADE`);
+  for (const s of ["identity", "master_data", "fx_rate", "data_source", "exposure_management", "exposure_analysis", "fx_trade"]) await client.query(`DROP SCHEMA IF EXISTS ${s} CASCADE`);
   await client.end();
   await migrate(url!);
   app = composeApp(url!, () => clock.now);
@@ -33,7 +34,7 @@ after(async () => {
 
 const D0 = asOfDate("2026-01-01");
 const entity = (code: string, over: object = {}) => ({ code, name: code, type: "BUSINESS_UNIT", parentCode: null, countryCode: null, functionalCurrency: null, isLegalEntity: false, isTreasuryEntity: false, isHedgeExecutionEntity: false, ...over });
-const legal = (code: string, currency: string, parentCode: string) => entity(code, { type: "LEGAL_ENTITY", isLegalEntity: true, functionalCurrency: currency, parentCode, countryCode: "US" });
+const legal = (code: string, currency: string, parentCode: string) => entity(code, { type: "LEGAL_ENTITY", isLegalEntity: true, functionalCurrency: currency, parentCode, countryCode: "US", isHedgeExecutionEntity: code === "US01" });
 const spot = (base: string, quote: string, allIn: string) => ({ base, quote, type: "SPOT" as const, tenor: "SPOT", valueDate: null, allIn, spot: null, forwardPoints: null, bid: null, mid: null, ask: null, observedAt: clock.now.toISOString() });
 const row = (entityCode: string, currency: string, balance: string) => ({ entityCode, accountNumber: "4000", currency, balance, debit: null, credit: null, asOf: null, dimensions: {} });
 
@@ -111,4 +112,48 @@ e2e("a cycle with no data waits, blocks the next one, and finishes by itself whe
   const run = (await app.exposureAnalysis.questions.currentRun(t, cycle as never))!;
   assert.equal(run.status, "FINISHED");
   assert.equal((await app.exposureManagement.questions.getCycle(t, cycle as never))?.stage, "COMPLETED");
+});
+
+e2e("approval releases a recommended pre-trade; a simulated platform returns the file; the executed trade matches and the cycle record is untouched", async () => {
+  clock.now = new Date("2026-11-11T23:00:00Z");
+  const t = await tenantWithProgram();
+  await sendRates(t, "2026-11-11", "1.1");
+  await sendBalances(t, "2026-11-11");
+  await drain(app);
+  const [cycle] = await startDueCycles(app, t, "2026-11-12", admins.get(t)!);
+  await drain(app);
+  const before = (await app.exposureAnalysis.questions.currentRun(t, cycle as never))!;
+  assert.equal(before.status, "FINISHED");
+
+  // Hedge Recommendation would call this; it does not exist yet, so the test plays its part.
+  const [made] = await app.fxTrade.commands.createPreTrades({
+    tenantId: t, cycleId: cycle as never, by: "recommendation",
+    items: [{ recommendationId: "rec-1", tradingEntityCode: "US01", instrument: "FORWARD", legs: [{ role: "SINGLE", direction: "SELL", dealCurrency: "EUR", dealAmount: "1000", settlementCurrency: "USD", settlementAmount: null, valueDate: "2026-12-15", fixingDate: null }] }],
+  });
+  await drain(app);
+  assert.equal((await app.fxTrade.questions.getPreTrade(t, made!.preTradeId))!.status, "DRAFT", "nothing goes out before approval");
+
+  await app.exposureManagement.commands.approveCycle({ tenantId: t, cycleId: cycle as string, actor: admins.get(t)! });
+  await drain(app);
+  assert.equal((await app.fxTrade.questions.getPreTrade(t, made!.preTradeId))!.status, "READY", "approval released it");
+
+  const sent = await app.fxTrade.commands.exportPreTrades({ tenantId: t, actor: admins.get(t)! });
+  assert.equal(sent.preTradeIds.length, 1);
+  // The simulator: reads the outbound file and answers in the standard executed-trade file, echoing the reference.
+  const [h, d] = sent.file.trim().split("\n").map((l) => l.split(","));
+  const out = Object.fromEntries(h!.map((k, i) => [k, d![i]!]));
+  const reply = [
+    "trade_id,execution_platform_id,trading_entity,counterparty,trade_date,value_date,deal_currency,deal_amount,settlement_currency,settlement_amount,instrument,buy_sell,hedging_program_id,pre_trade_reference",
+    `SIM-1,SIMFX,${out.trading_entity},Sim Bank,2026-11-12,${out.value_date},${out.deal_currency},${out.deal_amount},${out.settlement_currency},1105.0000,${out.instrument},${out.buy_sell},${out.hedging_program_id},${out.pre_trade_reference}`,
+  ].join("\n");
+  const r = await app.fxTrade.commands.importExecutedTrades({ tenantId: t, rows: parseExecutedFile(reply), by: "simulator" });
+  assert.deepEqual([r.stored, r.matched, r.blocked], [1, 1, 0]);
+  await drain(app);
+
+  assert.equal((await app.fxTrade.questions.getPreTrade(t, made!.preTradeId))!.status, "EXECUTED");
+  const open = await app.fxTrade.questions.executedTrades(t, { programId: programId("BS"), asOf: asOfDate("2026-11-12") });
+  assert.deepEqual(open.map((x) => [x.tradeId, x.legs[0]!.dealAmount, x.preTradeId]), [["SIM-1", "1000.0000", made!.preTradeId]]);
+  const after = (await app.exposureAnalysis.questions.currentRun(t, cycle as never))!;
+  assert.deepEqual([after.runId, after.status, after.frozenAt !== null], [before.runId, "FINISHED", true], "a trade arriving after approval leaves the saved run alone");
+  assert.equal(await drain(app), 0);
 });
