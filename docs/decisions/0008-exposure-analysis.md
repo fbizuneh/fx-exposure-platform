@@ -26,7 +26,11 @@ Date: 2026-11-18. Service: exposure-analysis (core tier). Sources: the product o
 13. **Exposure currency** is set by a default logic and an override configuration. Default: if the pair has an NDF currency, that is the exposure currency; otherwise, if the pair has USD, the non-USD currency; then the same test for EUR, GBP, AUD, NZD, CAD, CHF, SGD in that order; otherwise currency 2. Users can override it per pair by configuration. This replaces the interim rule built in the first version (non-display currency, else currency 2).
 14. **Rounding and display.** Amounts are rounded to 2 places (unchanged) and shown with 0 decimal places. This is a display rule; stored and returned amounts keep 2 places.
 
-Open for tomorrow: where the list of NDF currencies lives (Master Data currency reference or FX Rate), whether the override is per program or per tenant, and whether the override applies to the pair as netted or to the original natural pair.
+15. **NDF currencies are held in Master Data**, as a flag on its currency reference, effective-dated like the rest. Exposure Analysis asks Master Data which currencies are NDF on the as-of date.
+16. **The override is per program** and is a program setting in Exposure Management (a pair, optionally with the exposure currency chosen), so it is copied into each cycle with the other settings.
+17. **The override applies to the netted pair.** At the portfolio level the non-portfolio currency is always the exposure currency, and no override applies.
+
+Build order for these: Master Data (NDF flag on currencies, question, change-set support), Exposure Management (override setting, migration, validation), then Exposure Analysis (the default logic and override in the run).
 
 ## Not built yet
 Hedge rows and net exposure, forecast and AR/AP adapters, "entity by product, project or business unit" netting, per-pair exposure currency, purging of old runs.
