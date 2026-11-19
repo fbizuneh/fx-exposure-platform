@@ -16,6 +16,7 @@ export interface ExposureAnalysisDatabase {
     wait_reason: string | null;
     netting_level: string;
     display_currency: string;
+    exposure_currency_overrides: JsonIn;
     counts: JsonOrNull;
     blocked_count: number | null;
     warnings: JsonOrNull;

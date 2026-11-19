@@ -38,6 +38,7 @@ const md: MasterDataQuestions = {
   },
   async entityWalk() { return []; },
   async functionalCurrencies() { return []; },
+  async getCurrencies() { return []; },
 };
 
 let db: Db;

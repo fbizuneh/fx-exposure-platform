@@ -1,5 +1,5 @@
 // Pure rules: settings, schedules and which program types may coexist. No I/O.
-import { NETTING_LEVELS, NETTING_LEVEL_ALIASES, type BucketScheme, type NettingLevel, type ProgramType, type Schedule } from "../contract/index.ts";
+import { NETTING_LEVELS, NETTING_LEVEL_ALIASES, type BucketScheme, type ExposureCurrencyOverride, type NettingLevel, type ProgramType, type Schedule } from "../contract/index.ts";
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 export const realDate = (v: string): boolean => ISO.test(v) && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v;
@@ -8,6 +8,8 @@ export interface SettingsInput {
   readonly nettingLevel: string;
   /** Defaults to USD when left out. */
   readonly displayCurrency?: string;
+  /** Defaults to none. */
+  readonly exposureCurrencyOverrides?: readonly ExposureCurrencyOverride[];
   readonly bucketScheme: BucketScheme;
   readonly schedule: Schedule | null;
 }
@@ -18,12 +20,29 @@ export function nettingLevelOf(name: string): NettingLevel | null {
   return Object.hasOwn(NETTING_LEVEL_ALIASES, name) ? NETTING_LEVEL_ALIASES[name]! : null;
 }
 
+export const overridesOf = (s: SettingsInput): readonly ExposureCurrencyOverride[] => s.exposureCurrencyOverrides ?? [];
+
+/** The two currencies of a pair written "EUR-GBP", or null if it is not that. */
+export function pairCurrencies(pair: string): readonly [string, string] | null {
+  const m = /^([A-Z]{3})-([A-Z]{3})$/.exec(typeof pair === "string" ? pair : "");
+  return m && m[1] !== m[2] ? [m[1]!, m[2]!] : null;
+}
+
 export const displayCurrencyOf = (s: SettingsInput): string => s.displayCurrency ?? "USD";
 
 export function validateSettings(s: SettingsInput): string[] {
   const out: string[] = [];
   if (nettingLevelOf(s.nettingLevel) === null) out.push(`netting level must be one of ${NETTING_LEVELS.join(", ")}`);
   if (!/^[A-Z]{3}$/.test(displayCurrencyOf(s))) out.push("display currency must be a three-letter currency code in capitals");
+  const seen = new Set<string>();
+  for (const o of overridesOf(s)) {
+    const ccys = pairCurrencies(o?.pair);
+    if (ccys === null) { out.push(`exposure currency override ${String(o?.pair)}: the pair must be two different currency codes like EUR-GBP`); continue; }
+    if (!ccys.includes(o.exposureCurrency)) out.push(`exposure currency override ${o.pair}: the exposure currency must be one of the pair`);
+    const key = [...ccys].sort().join("-");
+    if (seen.has(key)) out.push(`exposure currency override ${o.pair}: the pair appears twice`);
+    seen.add(key);
+  }
   const b = s.bucketScheme as { kind?: string; boundaries?: unknown };
   if (b?.kind === "DAYS") {
     const edges = b.boundaries;

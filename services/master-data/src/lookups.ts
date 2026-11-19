@@ -99,6 +99,12 @@ export function masterDataQuestions(db: Db): MasterDataQuestions {
       return out;
     },
 
+    async getCurrencies(tenant, asOf) {
+      const rows = await q(db).selectFrom("currencies").select(["code", "is_ndf"]).where("tenant_id", "=", tenant).where("valid_from", "<=", asOf)
+        .where((eb) => eb.or([eb("valid_to", "is", null), eb("valid_to", ">", asOf)])).orderBy("code").execute();
+      return rows.map((r) => ({ code: r.code, isNdf: r.is_ndf }));
+    },
+
     async hierarchyPaths(tenant, chartCode, nodeCodes, asOf) {
       const chartId = (await charts(db, tenant)).byCode.get(chartCode);
       if (!chartId || nodeCodes.length === 0) return [];

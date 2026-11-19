@@ -32,8 +32,14 @@ export interface AccountRow {
   readonly hierarchyNodeCode: string | null;
 }
 
+/** A currency and whether it trades as an NDF (non-deliverable forward). */
+export interface CurrencyRow {
+  readonly code: string;
+  readonly isNdf: boolean;
+}
+
 export type Mode = "SNAPSHOT" | "PARTIAL";
-export type Kind = "ENTITY" | "HIERARCHY" | "ACCOUNT";
+export type Kind = "ENTITY" | "HIERARCHY" | "ACCOUNT" | "CURRENCY";
 
 /** Natural key of a hierarchy node or account within its chart. */
 export const chartKey = (chartCode: string, code: string): string => JSON.stringify([chartCode, code]);

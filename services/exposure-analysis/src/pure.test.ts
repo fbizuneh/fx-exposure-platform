@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { asOfDate, entityId, accountId, lineageRef, programId } from "@shared/kernel";
 import type { IncludedBalance } from "@services/data-source/contract";
 import type { Account, Entity } from "@services/master-data/contract";
-import { accountKey, buildBaseline, exposureCurrencyOf, filterBalances, netByLevel, orderPair, repairToPortfolio, requiredRates, round2 } from "./calc.ts";
+import { accountKey, buildBaseline, defaultExposureCurrency, exposureCurrencyFor, filterBalances, netByLevel, orderPair, repairToPortfolio, requiredRates, round2 } from "./calc.ts";
 import { Decimal } from "decimal.js";
 
 const ent = (code: string, over: Partial<Entity> = {}): Entity => ({
@@ -108,10 +108,31 @@ test("group portfolio: each row is re-paired against the display currency, so a 
   assert.equal(eur.members.length, 3);
 });
 
-test("exposure currency: the non-display currency when the pair holds the display currency, otherwise currency 2", () => {
-  assert.equal(exposureCurrencyOf("EUR", "USD", "USD"), "EUR");
-  assert.equal(exposureCurrencyOf("USD", "JPY", "USD"), "JPY");
-  assert.equal(exposureCurrencyOf("EUR", "GBP", "USD"), "GBP");
+test("exposure currency, default logic: NDF first, then USD, EUR, GBP, AUD, NZD, CAD, CHF, SGD, then currency 2", () => {
+  const ndf = new Set(["BRL", "INR"]);
+  const d = (a: string, b: string) => defaultExposureCurrency(a, b, ndf);
+  assert.equal(d("USD", "BRL"), "BRL");
+  assert.equal(d("EUR", "INR"), "INR");
+  assert.equal(d("BRL", "INR"), "INR", "both NDF: currency 2");
+  assert.equal(d("EUR", "USD"), "EUR");
+  assert.equal(d("USD", "JPY"), "JPY");
+  assert.equal(d("EUR", "GBP"), "GBP", "EUR before GBP");
+  assert.equal(d("GBP", "AUD"), "AUD");
+  assert.equal(d("AUD", "NZD"), "NZD");
+  assert.equal(d("NZD", "CAD"), "CAD");
+  assert.equal(d("CAD", "CHF"), "CHF");
+  assert.equal(d("CHF", "SGD"), "SGD");
+  assert.equal(d("JPY", "SEK"), "SEK", "no major: currency 2");
+  assert.equal(d("USD", "EUR"), "EUR", "USD first even when written the other way round");
+});
+
+test("exposure currency: an override wins over the default except at portfolio level, which always uses the non-portfolio currency", () => {
+  const rules = { ndf: new Set(["BRL"]), overrides: new Map([["EUR-GBP", "EUR"], ["BRL-USD", "USD"]]) };
+  assert.equal(exposureCurrencyFor("GROUP_NATURAL", "EUR", "GBP", "USD", rules), "EUR");
+  assert.equal(exposureCurrencyFor("ENTITY", "EUR", "GBP", "USD", { ndf: new Set(), overrides: new Map() }), "GBP");
+  assert.equal(exposureCurrencyFor("REGION", "USD", "BRL", "USD", rules), "USD", "override beats the NDF default");
+  assert.equal(exposureCurrencyFor("GROUP_PORTFOLIO", "USD", "BRL", "USD", rules), "BRL");
+  assert.equal(exposureCurrencyFor("GROUP_PORTFOLIO", "EUR", "USD", "USD", rules), "EUR");
 });
 
 test("required rates: the pair rates, and the display rates for each currency 1 (portfolio: for each currency)", () => {

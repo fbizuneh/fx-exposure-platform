@@ -22,6 +22,7 @@ export interface ExposureManagementDatabase {
     valid_to: string | null;
     netting_level: "GROUP_NATURAL" | "GROUP_PORTFOLIO" | "REGION" | "REGION_BY_ENTITY" | "ENTITY";
     display_currency: string;
+    exposure_currency_overrides: JsonIn;
     bucket_scheme: JsonIn;
     schedule: JsonOrNull;
     changed_by: string;

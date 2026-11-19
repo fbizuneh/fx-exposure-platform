@@ -302,3 +302,12 @@ dbTest("display currency defaults to USD and earlier netting names are stored as
   await em.commands.changeSettings({ tenantId: t, programId: "BS", settings: { ...settings, nettingLevel: "CORPORATE_PAIR", displayCurrency: "EUR" }, effectiveFrom: "2026-02-01", actor: admin });
   assert.deepEqual(await em.questions.programSettings(t, programId("BS"), asOfDate("2026-02-01")).then((s) => [s?.nettingLevel, s?.displayCurrency]), ["GROUP_NATURAL", "EUR"]);
 });
+
+dbTest("exposure currency overrides are saved with the settings, default to none, and are copied into the cycle", async () => {
+  const t = newTenant("BS");
+  await define(t, "BS");
+  assert.deepEqual((await em.questions.programSettings(t, programId("BS"), asOfDate("2026-02-01")))?.exposureCurrencyOverrides, []);
+  await em.commands.changeSettings({ tenantId: t, programId: "BS", settings: { ...settings, exposureCurrencyOverrides: [{ pair: "EUR-GBP", exposureCurrency: "EUR" }] }, effectiveFrom: "2026-02-01", actor: admin });
+  assert.deepEqual((await em.questions.programSettings(t, programId("BS"), asOfDate("2026-02-01")))?.exposureCurrencyOverrides, [{ pair: "EUR-GBP", exposureCurrency: "EUR" }]);
+  await assert.rejects(em.commands.changeSettings({ tenantId: t, programId: "BS", settings: { ...settings, exposureCurrencyOverrides: [{ pair: "EUR-GBP", exposureCurrency: "JPY" }] }, effectiveFrom: "2026-03-01", actor: admin }), ProgramRefused);
+});

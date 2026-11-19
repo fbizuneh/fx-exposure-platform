@@ -59,6 +59,12 @@ export interface Account {
   readonly hierarchyNodeCode: string | null;
 }
 
+/** A currency as it stood on the date asked about. */
+export interface Currency {
+  readonly code: string;
+  readonly isNdf: boolean;
+}
+
 /** Every question reads the version valid on `asOf`, so history does not change when master data does. */
 export interface MasterDataQuestions {
   getEntity(tenantId: TenantId, code: string, asOf: AsOfDate): Promise<Entity | null>;
@@ -71,6 +77,8 @@ export interface MasterDataQuestions {
     keys: readonly { readonly chartCode: string; readonly accountNumber: string }[],
     asOf: AsOfDate,
   ): Promise<readonly Account[]>;
+  /** The currencies on record on the date, with whether each trades as an NDF. A currency not on record is not an NDF. */
+  getCurrencies(tenantId: TenantId, asOf: AsOfDate): Promise<readonly Currency[]>;
   /** For each hierarchy node: its own code, then its ancestors nearest first. Unknown nodes are left out. */
   hierarchyPaths(
     tenantId: TenantId,
@@ -97,7 +105,7 @@ export interface MasterDataChanged {
   readonly tenantId: TenantId;
   readonly occurredAt: string;
   readonly batchId: string;
-  readonly kind: "ENTITY" | "HIERARCHY" | "ACCOUNT";
+  readonly kind: "ENTITY" | "HIERARCHY" | "ACCOUNT" | "CURRENCY";
   readonly asOf: AsOfDate;
 }
 export type MasterDataEvents = MasterDataChanged;

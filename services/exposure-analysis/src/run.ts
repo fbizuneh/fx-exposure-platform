@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import { asOfDate, cycleId as toCycleId, programId as toProgramId, type CycleId, type TenantId } from "@shared/kernel";
 import type { RateWarning } from "../contract/index.ts";
-import { buildBaseline, filterBalances, accountKey, fixed4, netByLevel, requiredRates, type Baseline, type GroupResult } from "./calc.ts";
+import { buildBaseline, filterBalances, accountKey, fixed4, netByLevel, overrideKey, requiredRates, type Baseline, type GroupResult } from "./calc.ts";
 import { q, type Db, type Queryable } from "./db.ts";
 import { announce } from "./outbox.ts";
 import type { Collaborators } from "./ports.ts";
@@ -20,6 +20,7 @@ export interface CycleApprovedEvent {
 }
 export type RunOutcome = "FINISHED" | "WAITING" | "IGNORED" | "DUPLICATE";
 
+const json = <T>(v: unknown): T => (typeof v === "string" ? JSON.parse(v) : v) as T;
 const CHUNK = 500;
 const chunks = <T>(xs: readonly T[]): T[][] => Array.from({ length: Math.ceil(xs.length / CHUNK) }, (_, i) => xs.slice(i * CHUNK, (i + 1) * CHUNK));
 const lock = (tx: Queryable, key: string) => sql`SELECT pg_advisory_xact_lock(hashtext(${key}))`.execute(tx);
@@ -70,7 +71,9 @@ export function runCommands(db: Db, c: Collaborators, now: () => Date) {
     const blocked = (await c.dataSource.ingestionStatus(tenant, { asOf })).filter((s) => s.current).reduce((n, s) => n + s.blocked, 0);
 
     const baseline = buildBaseline(kept, rateOf, (code) => regions.get(code) ?? "UNASSIGNED");
-    const groups = netByLevel(baseline, level, run.as_of, display, rateOf);
+    const ndf = new Set((await c.masterData.getCurrencies(tenant, asOf)).filter((x) => x.isNdf).map((x) => x.code));
+    const overrides = new Map((json<{ pair: string; exposureCurrency: string }[]>(run.exposure_currency_overrides)).map((o) => [overrideKey(...(o.pair.split("-") as [string, string])), o.exposureCurrency]));
+    const groups = netByLevel(baseline, level, run.as_of, display, rateOf, { ndf, overrides });
     return save(tenant, run.program_id, runId, { baseline, groups, counts, warnings, blocked, needs, fetched });
   }
 
@@ -134,6 +137,7 @@ export function runCommands(db: Db, c: Collaborators, now: () => Date) {
         await q(tx).insertInto("runs").values({
           tenant_id: event.tenantId, run_id: id, program_id: cycle.programId, cycle_id: event.cycleId, as_of: cycle.asOf, trigger_event_id: event.eventId, status: "WAITING",
           wait_reason: "Not collected yet", netting_level: cycle.settings.nettingLevel, display_currency: cycle.settings.displayCurrency,
+          exposure_currency_overrides: JSON.stringify(cycle.settings.exposureCurrencyOverrides ?? []),
         }).execute();
         return id;
       });

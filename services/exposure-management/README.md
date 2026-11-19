@@ -3,7 +3,7 @@
 Tier: core.
 
 ## Owns
-- Programs, their types and settings (netting level, display currency, date buckets, schedule), with the combination rules
+- Programs, their types and settings (netting level, display currency, exposure currency overrides, date buckets, schedule), with the combination rules
 - The cycle record: stages (initiated, in progress, completed), outcomes (skipped, deleted), reruns, approval, and the settings in force when it started
 See docs/decisions/0007-exposure-management.md.
 

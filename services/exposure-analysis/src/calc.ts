@@ -145,13 +145,40 @@ export interface GroupResult {
 const byRegion = (l: NettingLevel): boolean => l === "REGION" || l === "REGION_BY_ENTITY";
 const byEntity = (l: NettingLevel): boolean => l === "REGION_BY_ENTITY" || l === "ENTITY";
 
-/** The exposure currency: the one that is not the display currency when the pair holds it, otherwise currency 2. */
-export function exposureCurrencyOf(c1: string, c2: string, display: string): string {
-  return c1 === display ? c2 : c2 === display ? c1 : c2;
+/** The order in which a major currency decides the exposure currency of a pair that holds it: the other currency is exposed. */
+const MAJORS = ["USD", "EUR", "GBP", "AUD", "NZD", "CAD", "CHF", "SGD"] as const;
+
+/**
+ * The default exposure currency of a pair (decision 0008): the NDF currency if the pair has one (currency 2 if both are NDF);
+ * otherwise the other currency of the first major (USD, EUR, GBP, AUD, NZD, CAD, CHF, SGD) the pair holds; otherwise currency 2.
+ */
+export function defaultExposureCurrency(c1: string, c2: string, ndf: ReadonlySet<string>): string {
+  const [n1, n2] = [ndf.has(c1), ndf.has(c2)];
+  if (n1 !== n2) return n1 ? c1 : c2;
+  if (n1 && n2) return c2;
+  for (const m of MAJORS) {
+    if (c1 === m) return c2;
+    if (c2 === m) return c1;
+  }
+  return c2;
+}
+
+export interface ExposureCurrencyRules {
+  readonly ndf: ReadonlySet<string>;
+  /** Per program, keyed by the pair's two codes in alphabetical order, as `overrideKey` makes it. */
+  readonly overrides: ReadonlyMap<string, string>;
+}
+export const overrideKey = (a: string, b: string): string => [a, b].sort().join("-");
+
+/** A group's exposure currency. At the portfolio level it is always the non-portfolio currency; elsewhere an override wins over the default. */
+export function exposureCurrencyFor(level: NettingLevel, c1: string, c2: string, display: string, rules: ExposureCurrencyRules): string {
+  if (level === "GROUP_PORTFOLIO") return c1 === display ? c2 : c1;
+  return rules.overrides.get(overrideKey(c1, c2)) ?? defaultExposureCurrency(c1, c2, rules.ndf);
 }
 
 export function netByLevel(
   rows: readonly Baseline[], level: NettingLevel, period: string, display: string, rateOf: (base: string, quote: string) => string,
+  exposureRules: ExposureCurrencyRules = { ndf: new Set(), overrides: new Map() },
 ): GroupResult[] {
   const contributions = level === "GROUP_PORTFOLIO" ? repairToPortfolio(rows, display, (ccy) => rateOf(ccy, display)) : straight(rows);
   const groups = new Map<string, Contribution[]>();
@@ -165,7 +192,7 @@ export function netByLevel(
     const first = list[0]!;
     const sum = (f: (c: Contribution) => Num, keep: (n: Num) => boolean = () => true) => list.map(f).filter(keep).reduce((a, b) => a.plus(b), new D(0));
     const net1 = sum((c) => c.amount1), net2 = sum((c) => c.amount2);
-    const exposureCurrency = exposureCurrencyOf(first.currency1, first.currency2, display);
+    const exposureCurrency = exposureCurrencyFor(level, first.currency1, first.currency2, display, exposureRules);
     const displayRate = first.currency1 === display ? "1" : rateOf(first.currency1, display);
     results.push({
       nettingLevel: level, region: byRegion(level) ? first.region : null, entityCode: byEntity(level) ? first.entityCode : null,

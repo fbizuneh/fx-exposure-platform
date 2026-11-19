@@ -44,7 +44,8 @@ export interface RunSummary {
   readonly frozenAt: string | null;
 }
 
-/** Gross exposure of one netting group: a currency pair in a period, within the netting level's partition. */
+/** Amounts are exact decimal strings rounded to 2 places; clients show them with 0 decimal places.
+ *  Gross exposure of one netting group: a currency pair in a period, within the netting level's partition. */
 export interface ExposureGroup {
   readonly groupNo: number;
   readonly nettingLevel: NettingLevel;
@@ -55,6 +56,7 @@ export interface ExposureGroup {
   readonly currencyPair: string;
   readonly currency1: string;
   readonly currency2: string;
+  /** The currency the exposure is in: set by the default logic or the program's override (decision 0008). */
   readonly exposureCurrency: string;
   readonly period: AsOfDate;
   readonly rowCount: number;

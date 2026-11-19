@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DEFAULT_MAX_END_SHARE, plan, shouldHold, stable, type OpenRow } from "./diff.ts";
 import { ancestors, descendants, findCycle } from "./tree.ts";
-import { ChangeSetInvalid, validateAccounts, validateEntities, validateHierarchy } from "./validate.ts";
+import { ChangeSetInvalid, validateAccounts, validateCurrencies, validateEntities, validateHierarchy } from "./validate.ts";
 import { chartKey, type AccountRow, type EntityRow, type HierarchyNodeRow } from "./rows.ts";
 
 const entity = (code: string, over: Partial<EntityRow> = {}): EntityRow => ({
@@ -76,4 +76,11 @@ test("safeguard: holds only a large share of a large set", () => {
   assert.equal(shouldHold(9, 5, DEFAULT_MAX_END_SHARE), false, "too few rows for the share to mean anything");
   assert.equal(shouldHold(100, 0, DEFAULT_MAX_END_SHARE), false);
   assert.equal(shouldHold(10, 3, 0.2), true);
+});
+
+test("currencies: three capital letters, a true or false NDF flag, no repeats", () => {
+  assert.deepEqual(validateCurrencies([{ code: "BRL", isNdf: true }, { code: "EUR", isNdf: false }]), []);
+  assert.equal(validateCurrencies([{ code: "BRL", isNdf: true }, { code: "BRL", isNdf: false }]).length, 1);
+  assert.equal(validateCurrencies([{ code: "brl", isNdf: true }]).length, 1);
+  assert.equal(validateCurrencies([{ code: "BRL", isNdf: "yes" as unknown as boolean }]).length, 1);
 });

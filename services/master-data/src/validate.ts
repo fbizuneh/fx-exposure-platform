@@ -1,6 +1,6 @@
 // Checks a change set before anything is written. Pure: the caller passes in what already exists.
 import { ENTITY_TYPES, HIERARCHY_CLASSIFICATIONS, NORMAL_BALANCES, STATEMENT_TYPES } from "../contract/index.ts";
-import { chartKey, type AccountRow, type EntityRow, type HierarchyNodeRow, type Mode } from "./rows.ts";
+import { chartKey, type AccountRow, type CurrencyRow, type EntityRow, type HierarchyNodeRow, type Mode } from "./rows.ts";
 import { findCycle } from "./tree.ts";
 
 const CURRENCY = /^[A-Z]{3}$/;
@@ -80,6 +80,15 @@ export function validateAccounts(rows: readonly AccountRow[], knownNodes: Readon
     if (r.hierarchyNodeCode !== null && !knownNodes.has(chartKey(r.chartCode, r.hierarchyNodeCode))) {
       out.push(`${at}: hierarchy node ${r.hierarchyNodeCode} does not exist in chart ${r.chartCode}`);
     }
+  }
+  return out;
+}
+
+export function validateCurrencies(rows: readonly CurrencyRow[]): string[] {
+  const out = duplicates(rows.map((r) => r.code), "currency");
+  for (const r of rows) {
+    if (typeof r.code !== "string" || !CURRENCY.test(r.code)) out.push(`currency ${String(r.code)}: code must be three capital letters`);
+    if (typeof r.isNdf !== "boolean") out.push(`currency ${String(r.code)}: NDF must be true or false`);
   }
   return out;
 }

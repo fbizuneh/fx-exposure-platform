@@ -37,12 +37,20 @@ export interface ProgramSummary {
 }
 
 /** The settings in force on a date. */
+/** Replaces the default exposure currency of a netted pair. The pair is two currency codes ("EUR-GBP", in either order); the exposure currency is one of them. */
+export interface ExposureCurrencyOverride {
+  readonly pair: string;
+  readonly exposureCurrency: string;
+}
+
 export interface ProgramSettings {
   readonly programId: ProgramId;
   readonly type: ProgramType;
   readonly nettingLevel: NettingLevel;
   /** The currency gross and net exposure are also shown in; also the portfolio currency for GROUP_PORTFOLIO. Default USD. */
   readonly displayCurrency: string;
+  /** Per program. Does not apply at the group portfolio level, where the non-portfolio currency is always the exposure currency. */
+  readonly exposureCurrencyOverrides: readonly ExposureCurrencyOverride[];
   readonly bucketScheme: BucketScheme;
   readonly schedule: Schedule | null;
   /** The first day this version applies. */

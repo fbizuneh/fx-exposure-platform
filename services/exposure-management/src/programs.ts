@@ -6,7 +6,7 @@ import type { Actor, ProgramDisabled, ProgramEnabled } from "@services/identity/
 import { require_, who, type IdentityPort } from "./access.ts";
 import { q, type Db } from "./db.ts";
 import { announce } from "./outbox.ts";
-import { combinationProblem, displayCurrencyOf, nettingLevelOf, realDate, validateSettings, type SettingsInput } from "./rules.ts";
+import { combinationProblem, displayCurrencyOf, nettingLevelOf, overridesOf, realDate, validateSettings, type SettingsInput } from "./rules.ts";
 import { programId as toProgramId } from "@shared/kernel";
 
 export class ProgramRefused extends Error {
@@ -41,7 +41,7 @@ const filled = (v: string): boolean => typeof v === "string" && v.trim() !== "" 
 export function programCommands(db: Db, access: IdentityPort) {
   const settingsRow = (tenant: TenantId, program: string, s: SettingsInput, from: string, by: string) => ({
     tenant_id: tenant, program_id: program, valid_from: from, valid_to: null,
-    netting_level: nettingLevelOf(s.nettingLevel)!, display_currency: displayCurrencyOf(s), bucket_scheme: JSON.stringify(s.bucketScheme),
+    netting_level: nettingLevelOf(s.nettingLevel)!, display_currency: displayCurrencyOf(s), exposure_currency_overrides: JSON.stringify(overridesOf(s).map((o) => ({ pair: o.pair, exposureCurrency: o.exposureCurrency }))), bucket_scheme: JSON.stringify(s.bucketScheme),
     schedule: s.schedule === null ? null : JSON.stringify(s.schedule), changed_by: by,
   });
 

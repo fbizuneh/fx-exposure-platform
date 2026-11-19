@@ -52,3 +52,12 @@ test("netting levels: the five levels and the earlier names are accepted; displa
   assert.deepEqual(validateSettings({ ...ok, nettingLevel: "ENTITY_PAIR", displayCurrency: "EUR" }), []);
   assert.match(validateSettings({ ...ok, displayCurrency: "usd" }).join(), /display currency/);
 });
+
+test("exposure currency overrides: a pair of two different codes, an exposure currency from the pair, no pair twice in either order", () => {
+  const withOverrides = (o: unknown) => validateSettings({ ...ok, exposureCurrencyOverrides: o as never });
+  assert.deepEqual(withOverrides([{ pair: "EUR-GBP", exposureCurrency: "EUR" }, { pair: "USD-JPY", exposureCurrency: "JPY" }]), []);
+  assert.match(withOverrides([{ pair: "EURGBP", exposureCurrency: "EUR" }]).join(), /two different currency codes/);
+  assert.match(withOverrides([{ pair: "EUR-EUR", exposureCurrency: "EUR" }]).join(), /two different currency codes/);
+  assert.match(withOverrides([{ pair: "EUR-GBP", exposureCurrency: "USD" }]).join(), /one of the pair/);
+  assert.match(withOverrides([{ pair: "EUR-GBP", exposureCurrency: "EUR" }, { pair: "GBP-EUR", exposureCurrency: "GBP" }]).join(), /twice/);
+});

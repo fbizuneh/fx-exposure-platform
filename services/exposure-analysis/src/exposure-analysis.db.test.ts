@@ -22,6 +22,7 @@ interface World {
   blocked: number;
   rates: Map<string, Pick<Rate, "rate" | "quality">>;
   cycles: Map<string, Cycle>;
+  ndf: string[];
 }
 const worlds = new Map<string, World>();
 const world = (t: string): World => worlds.get(t)!;
@@ -49,6 +50,7 @@ const fakes = {
   masterData: {
     async getEntities(_t: TenantId, codes: readonly string[]) { return codes.flatMap((c) => (ENTITIES.has(c) ? [ENTITIES.get(c)!] : [])); },
     async getAccounts(_t: TenantId, keys: readonly { accountNumber: string }[]) { return keys.flatMap((k) => (ACCOUNTS.has(k.accountNumber) ? [ACCOUNTS.get(k.accountNumber)!] : [])); },
+    async getCurrencies(t: TenantId) { return world(t).ndf.map((code) => ({ code, isNdf: true })); },
     async entityWalk(_t: TenantId, id: string) {
       const parent = [...ENTITIES.values()].find((e) => e.entityId === id)?.parentEntityId;
       return parent ? [...ENTITIES.values()].filter((e) => e.entityId === parent) : [];
@@ -81,18 +83,18 @@ const bal = (entityCode: string, accountNumber: string, currency: string, amount
   lineage: lineageRef("ERP", "b1", `rec-${++seq}`), programId: programId("BS"), asOf: asOfDate(AS_OF), entityId: entityId(`id-${entityCode}`), entityCode, accountId: accountId(`a-${accountNumber}`),
   chartCode: "C", accountNumber, currency, amount, dimensions: { dept: "10" },
 });
-const settings = (level = "GROUP_NATURAL", display = "USD") => ({ programId: programId("BS"), type: "BALANCE_SHEET", nettingLevel: level, displayCurrency: display, bucketScheme: { kind: "MONTHS" }, schedule: null, validFrom: asOfDate("2026-01-01") }) as Cycle["settings"];
+const settings = (level = "GROUP_NATURAL", display = "USD", overrides: { pair: string; exposureCurrency: string }[] = []) => ({ programId: programId("BS"), type: "BALANCE_SHEET", nettingLevel: level, displayCurrency: display, exposureCurrencyOverrides: overrides, bucketScheme: { kind: "MONTHS" }, schedule: null, validFrom: asOfDate("2026-01-01") }) as Cycle["settings"];
 
 /** A tenant with a program, a cycle in INITIATED, balances and rates. */
-function setup(over: Partial<World> = {}, level = "GROUP_NATURAL") {
+function setup(over: Partial<World> = {}, level = "GROUP_NATURAL", overrides: { pair: string; exposureCurrency: string }[] = []) {
   const t = tenantId(randomUUID());
   const c = cycleId(randomUUID());
   const w: World = {
     balances: [bal("US01", "4000", "EUR", "1000"), bal("DE01", "4000", "USD", "550"), bal("US01", "4000", "USD", "70"), bal("LOOSE", "4000", "GBP", "5"), bal("US01", "9000", "EUR", "9")],
-    blocked: 3, rates: new Map([["EUR|USD", { rate: "1.1", quality: "VALID" }], ["GBP|USD", { rate: "1.25", quality: "VALID" }]]), cycles: new Map(), ...over,
+    blocked: 3, rates: new Map([["EUR|USD", { rate: "1.1", quality: "VALID" }], ["GBP|USD", { rate: "1.25", quality: "VALID" }]]), cycles: new Map(), ndf: [], ...over,
   };
   w.cycles.set(c, { cycleId: c, programId: programId("BS"), asOf: asOfDate(AS_OF), stage: "INITIATED", outcome: null, outcomeReason: null, rerunCount: 0, approvedAt: null, approvedBy: null,
-    initiatedBy: "user:1", initiatedAt: "2026-11-09T00:00:00Z", settings: settings(level), history: [] });
+    initiatedBy: "user:1", initiatedAt: "2026-11-09T00:00:00Z", settings: settings(level, "USD", overrides), history: [] });
   worlds.set(t, w);
   return { t, c, w, event: () => ({ eventId: randomUUID(), tenantId: t, cycleId: c }) };
 }
@@ -205,4 +207,19 @@ dbTest("one tenant never sees another's runs", async () => {
   assert.equal(await ea.questions.currentRun(b.t, a.c), null);
   assert.deepEqual(await ea.questions.exposures(b.t, run.runId), []);
   assert.deepEqual(await ea.questions.ratesUsed(b.t, run.runId), []);
+});
+
+dbTest("exposure currency: an NDF currency in the pair decides it, a program override replaces it, and portfolio level ignores the override", async () => {
+  const mk = (level: string, overrides: { pair: string; exposureCurrency: string }[]) => setup({
+    balances: [bal("US01", "4000", "BRL", "500"), bal("US01", "4000", "EUR", "10")], ndf: ["BRL"],
+    rates: new Map([["USD|BRL", { rate: "5", quality: "VALID" }], ["EUR|USD", { rate: "1.1", quality: "VALID" }], ["BRL|USD", { rate: "0.2", quality: "VALID" }]]),
+  }, level, overrides);
+  const exposure = async (s: ReturnType<typeof mk>) => {
+    assert.equal(await ea.commands.onCycleInitiated(s.event()), "FINISHED");
+    const run = (await ea.questions.currentRun(s.t, s.c))!;
+    return (await ea.questions.exposures(s.t, run.runId)).map((g) => `${g.currencyPair}:${g.exposureCurrency}`);
+  };
+  assert.deepEqual(await exposure(mk("GROUP_NATURAL", [])), ["EUR-USD:EUR", "USD-BRL:BRL"]);
+  assert.deepEqual(await exposure(mk("GROUP_NATURAL", [{ pair: "BRL-USD", exposureCurrency: "USD" }])), ["EUR-USD:EUR", "USD-BRL:USD"]);
+  assert.deepEqual(await exposure(mk("GROUP_PORTFOLIO", [{ pair: "EUR-USD", exposureCurrency: "USD" }])), ["EUR-USD:EUR", "USD-BRL:BRL"]);
 });

@@ -252,3 +252,16 @@ dbTest("the same change set arriving at the same moment is applied once", async 
   assert.deepEqual(results.map((r) => r.status).sort(), ["APPLIED", "DUPLICATE", "DUPLICATE"]);
   assert.equal((await events(t)).length, 1);
 });
+
+dbTest("currencies: the NDF flag is versioned; a lookup reads the day asked about; a change announces once", async () => {
+  const t = newTenant();
+  await md.commands.applyCurrencies(snap(t, [{ code: "BRL", isNdf: true }, { code: "EUR", isNdf: false }], D1));
+  assert.deepEqual(await md.questions.getCurrencies(t, D1), [{ code: "BRL", isNdf: true }, { code: "EUR", isNdf: false }]);
+  const r = await md.commands.applyCurrencies(snap(t, [{ code: "BRL", isNdf: false }, { code: "EUR", isNdf: false }], D2));
+  assert.deepEqual([r.status, r.changed, r.unchanged], ["APPLIED", 1, 1]);
+  assert.equal((await md.questions.getCurrencies(t, asOfDate("2026-02-01"))).find((c) => c.code === "BRL")?.isNdf, true, "still NDF before the change");
+  assert.equal((await md.questions.getCurrencies(t, D2)).find((c) => c.code === "BRL")?.isNdf, false);
+  assert.deepEqual(await md.questions.getCurrencies(newTenant(), D1), []);
+  assert.equal((await events(t)).filter((e) => e.kind === "CURRENCY").length, 2);
+  await assert.rejects(md.commands.applyCurrencies(part(t, [{ code: "xx", isNdf: true }], D3)), ChangeSetInvalid);
+});
