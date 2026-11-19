@@ -3,9 +3,13 @@
 Tier: generic.
 
 ## Owns
-- Tenants
+- Tenants, users and memberships
+- Invitations
+- Fixed roles, with permissions as named checks
+- A membership's optional program restriction (none means all programs)
 - Who may do what in which tenant and program
 - Which programs a tenant has enabled
+See docs/decisions/0001-identity-model.md.
 
 ## Answers
 - Who may do what in which tenant and program
