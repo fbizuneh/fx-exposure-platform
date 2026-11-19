@@ -37,7 +37,7 @@ export interface Created {
   readonly created: boolean;
 }
 
-const referenceOf = (id: string): string => `PT-${id.slice(0, 8).toUpperCase()}`;
+const referenceOf = (id: string): string => `PT-${id.replace(/-/g, "").slice(0, 12).toUpperCase()}`;
 
 export function preTradeCommands(db: Db, c: Collaborators, clock: () => Date) {
   /** Shape of the legs, and that the trading entity is a hedge execution entity on the date. */

@@ -16,8 +16,12 @@ Date: 2026-11-18. Service: exposure-analysis (core tier). Sources: the product o
 11. **Run events.** Only when a run is complete does it announce "run started" then "run finished", both with the run ID (decision 0007). A rerun makes a new run and supersedes the old. A cycle's current run is frozen on "cycle approved" and never changes. Skipped or deleted cycles keep their runs as they were.
 12. **Blocked balances do not stop a run.** The count of blocked balances across the tenant's current batches for that date is saved on the run, for display at approval.
 
+## Confirmed by the product owner (2026-11-19)
+- The exposure currency override does not apply at group portfolio level or at a level with an entity; the rules in amendment 13 (a) and (b) always win there.
+- If both currencies of a pair are NDF, currency 2 is the exposure currency.
+- The display amount is converted from the currency 1 amount, whatever the exposure currency is.
+
 ## Defaults I chose, to confirm or change
-- Display amount uses currency 1 as in the workbook, whatever the exposure currency is.
 - A currency missing from the currency reference is not an NDF.
 - Rounding is 2 places for every currency, half away from zero, as in the workbook.
 - A zero balance is kept as a row.

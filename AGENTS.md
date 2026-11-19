@@ -2,6 +2,15 @@
 
 Start with docs/STATUS.md for where the build stands.
 
+## Ownership
+Claude is the primary owner of this codebase: it designs with the product
+owner (Fikre), builds every service, and maintains the code, tests, checks and
+docs (this file, docs/STATUS.md and docs/decisions) going forward. Other
+programmers will contribute. Their changes follow the same boundary rules,
+checks and decision process, and the owner reviews them against docs/design
+and docs/decisions. Keep STATUS.md current so any session or contributor can
+pick up where the last one stopped.
+
 Read docs/design/ before changing any structure or boundary, and use its
 vocabulary exactly. Data source means financial data (GL balances, forecasts,
 cash balances, orders, AR/AP). Master data means organization structure and

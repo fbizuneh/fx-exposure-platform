@@ -88,7 +88,7 @@ dbTest("recommended pre-trades are drafts under the cycle, made once per recomme
   assert.deepEqual([again[0]!.created, again[0]!.preTradeId], [false, a!.preTradeId], "the same recommendation again returns the pre-trade already made");
   const p = (await ft.questions.getPreTrade(t, a!.preTradeId))!;
   assert.deepEqual([p.status, p.cycleId, p.programId, p.origin, p.legs[0]!.dealAmount, p.legs[0]!.settlementAmount], ["DRAFT", c, "BS", "RECOMMENDATION", "1000000.0000", null]);
-  assert.match(p.reference, /^PT-[0-9A-F]{8}$/);
+  assert.match(p.reference, /^PT-[0-9A-F]{12}$/);
   assert.deepEqual(await events(t), [], "a draft announces nothing");
 
   await assert.rejects(

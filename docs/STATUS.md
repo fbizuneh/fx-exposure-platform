@@ -20,7 +20,7 @@ Process for each service: a DECISION REQUIRED block (options, recommendation, co
 - GL balances: no source record ID (identity is entity, account, currency, dimensions); the sign is kept exactly as sent and carries no asset or liability meaning; the period is the as-of date; the filter needs both the FX-relevant and the monetary flag.
 - Amounts: rounded to 2 places per row, shown with 0 decimals by clients. Pairs follow market convention (EUR, GBP, AUD, NZD, USD, CHF, CAD, SGD, then alphabetical).
 - Exposure currency, first match wins: portfolio level (non-portfolio currency); a level with an entity (the entity's non-functional currency); the program override; the default (NDF, then USD, EUR, GBP, AUD, NZD, CAD, CHF, SGD, then currency 2).
-- FX Trade: executed trades are append-only versions; a match is a link; fills are recomputed from current live versions; a trade with no or unknown program is stored unmatched; matching is exact with no tolerance.
+- FX Trade: every pre-trade has a unique reference (PT- plus 12 characters) sent in the outbound file and echoed back; it is the main match key. Executed trades are append-only versions; a match is a link; fills are recomputed from current live versions; a trade with no or unknown program is stored unmatched; matching is exact with no tolerance.
 - Not built yet: hedge rows and net exposure (with FX Trade), forecast and AR/AP adapters, netting by product/project/business unit.
 
 ## Working notes

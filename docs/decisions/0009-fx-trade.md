@@ -13,11 +13,11 @@ Date: 2026-11-19. Service: fx-trade (supporting tier). Sources: The Core Flow (t
 8. **Release gate.** Pre-trades made from a recommendation are drafts under the cycle ID. Cycle approved makes them ready and announces each. A manual pre-trade belongs to a program, needs `fx-trade:manage`, and is released by a user action.
 9. **Sending out** is a file in the same flat-file shape. Exporting moves ready pre-trades to sent. No connectors in this build; the separate simulator reads the file.
 10. **What others see.** Questions: pre-trades (by cycle, program, status), executed trades open on an as-of date (trade date on or before it, last value date after it; legs with deal and settlement amounts), unmatched trades, batch issues. Commands: create pre-trades (Hedge Recommendation, idempotent by recommendation ID), manual pre-trade, release, cancel, export, import, cancel executed trade. Events (identifiers only): pre-trade ready to send; executed trade received.
-11. **Executed trades never change a saved cycle.** They arrive after approval and attach to the program; the cycle's saved record is not touched.
+11. **Trade reference (confirmed 2026-11-19).** Every pre-trade gets its own unique reference, `PT-` plus 12 characters, unique within the tenant. It is a column of the outbound file, and the execution platform echoes it in `pre_trade_reference` on the executed trade. It is the first and main way an executed trade is matched; characteristics are only the fallback when a trade comes back without one.
+12. **Executed trades never change a saved cycle.** They arrive after approval and attach to the program; the cycle's saved record is not touched.
 
 ## Defaults I chose, to confirm or change
 - Matching is exact (no tolerance on amount or dates beyond "amount not above what is open").
 - An amended executed trade keeps its link to the pre-trade; fill totals are recomputed from current, live versions.
-- The pre-trade reference shown to people is `PT-` plus the first 8 characters of its ID.
 - Importing executed trades needs no user permission (a connector or the simulator calls it, as with Data Source); user commands do.
 - Out of scope: roll or swap recommendation, FX-impact revaluation, fixing-rate import, platform connectors, hedge rows in Exposure Analysis (the next step).
