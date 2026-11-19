@@ -17,7 +17,7 @@ Financial data and master data are different things, and most boundary decisions
 | Term | Meaning | Note |
 | --- | --- | --- |
 | Financial data | Balances and transactions that change with each business day: GL balances, forecasts, cash balances, orders, AR/AP, intercompany loans | Arrives from a source system as of a date. This is what the data source service provides. |
-| Master data | Slow-changing structure that financial data refers to: organization and legal entities, ERP chart of accounts and hierarchy, TMS accounts | Owned by a separate master data service. Not exposure input by itself. |
+| Master data | Slow-changing structure that financial data refers to: organization and legal entities, ERP chart of accounts and hierarchy | Owned by a separate master data service. Not exposure input by itself. |
 | Source system | The ERP, TMS or file that financial data or master data comes from | Cash balances may come from the ERP first and later from a TMS that overrides the ERP balance. |
 | As-of date | The date the balances were taken in the source system | Drives FX rate selection. No processing cutoff: a file for last week can be processed today. A missed day is skipped. |
 | Hedging program | A hedging strategy with its own scope, policy and netting level: Balance Sheet (daily, monthly, rolling), Cash Flow, Budget to Cash, In-House Bank | A tenant may run only one balance sheet program. Classic programs and Budget to Cash are mutually exclusive. |
@@ -50,7 +50,7 @@ Each service owns its data and answers questions about it through one interface.
 | Exposure Analysis | Core | The exposure engine, calculation runs and their results | Exposure by program, date bucket and currency pair | Data Source, Exposure Management, FX Rate, FX Trade |
 | Hedge Recommendation | Core | Hedge policy, recommendations, post-execution actions | Recommended hedges and their follow-up | Exposure Analysis, FX Trade |
 | Data Source | Supporting | Financial data with as-of date and lineage, program mapping rules and program stamps, ingestion runs, data quality issues | The included financial data for a program and date | Master Data, source systems ERP and TMS, on a schedule |
-| Master Data | Supporting | Organization and legal entities, chart of accounts and hierarchy, TMS accounts | Lookups and hierarchy walks | ERP and TMS, on a schedule |
+| Master Data | Supporting | Organization and legal entities, chart of accounts and hierarchy | Lookups and hierarchy walks | ERP and TMS, on a schedule |
 | FX Rate | Supporting | Spot and forward rates, rate sources | The rate for a pair, date and tenor | Nothing |
 | FX Trade | Supporting | Executed trades and trades to go for execution, trade file imports | Trades by program, entity and period | Master Data |
 | Identity, tenancy and access | Generic | Tenants, users, roles, which programs a tenant has enabled | Who may do what in which tenant and program | Nothing |

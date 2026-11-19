@@ -2,8 +2,8 @@
 
 Read docs/design/ before changing any structure or boundary, and use its
 vocabulary exactly. Data source means financial data (GL balances, forecasts,
-cash balances, orders, AR/AP). Master data means organization structure,
-charts of accounts and TMS accounts.
+cash balances, orders, AR/AP). Master data means organization structure and
+charts of accounts.
 
 ## Structure
 - One repository, one deployable (app/). Each service is a folder in
