@@ -477,11 +477,12 @@ e2e("a 50% override entered as USD-EUR applies to the EUR-USD group instead of s
 });
 
 /** A second Hedge Recommendation over the same database whose call to FX Trade is replaced, to play out failures. */
-function withFxTrade(createPreTrades: (input: never) => Promise<readonly { recommendationId: string; preTradeId: string }[]>, lookupFails = false) {
+function withFxTrade(createPreTrades: (input: never) => Promise<readonly { recommendationId: string; preTradeId: string }[]>, lookupFails = false, statusFails = false) {
   const db = connectHr(url!);
   const hr = createHedgeRecommendation(db, {
     access: app.identity.questions, management: app.exposureManagement.questions, analysis: app.exposureAnalysis.questions, masterData: app.masterData.questions,
-    rates: app.fxRate.questions, preTrades: lookupFails ? { ...app.fxTrade.questions, preTrades: async () => { throw new Error("FX Trade lookup unavailable"); } } : app.fxTrade.questions, createPreTrades: createPreTrades as never,
+    rates: app.fxRate.questions,
+    preTrades: { ...app.fxTrade.questions, ...(lookupFails ? { preTrades: async () => { throw new Error("FX Trade lookup unavailable"); } } : {}), ...(statusFails ? { getPreTrade: async () => { throw new Error("FX Trade status unavailable"); } } : {}) }, createPreTrades: createPreTrades as never,
   }, { now: () => clock.now });
   return { hr, done: () => db.destroy() };
 }
@@ -1025,6 +1026,36 @@ e2e("a pre-trade cancelled after FX Trade made it but before the recommendation 
   };
   assert.deepEqual(await run(1), ["ACCEPTED", "OPEN", ["CANCELLED", "OPEN", "OPEN", "OPEN"]]);
   assert.deepEqual(await run(4), ["ACCEPTED", "CANCELLED", ["CANCELLED", "CANCELLED", "CANCELLED", "CANCELLED"]]);
+});
+
+e2e("a failed status read after confirmation does not undo the decision: the pre-trade-created event repairs the part on a later drain, with no second pre-trade or audit record", async () => {
+  const x = await finishedCycle(split({ splitMethod: "THRESHOLD_REMAINDER" }));
+  const rec = us01(x.recs);
+  const { hr, done } = withFxTrade(async (input) => {
+    const made = await real(input);
+    const [first] = await drafts(x.t, x.cycle, rec.recommendationId);
+    await app.fxTrade.commands.cancelPreTrade({ tenantId: x.t, preTradeId: first!.preTradeId, actor: x.admin }); // cancelled before it is linked
+    await drain(app);
+    return made;
+  }, false, true); // and the status read right after confirmation fails
+  try { await hr.commands.decide({ tenantId: x.t, recommendationId: rec.recommendationId, actor: x.admin, action: "ACCEPT" }); } finally { await done(); }
+  const get = async () => (await app.hedgeRecommendation.questions.getRecommendation(x.t, rec.recommendationId))!;
+  const stale = await get();
+  assert.deepEqual([stale.status, stale.followUp, stale.parts.map((p) => p.followUp)], ["ACCEPTED", "OPEN", ["OPEN", "OPEN", "OPEN", "OPEN"]], "the decision stands; the part has not yet caught up");
+
+  // The first delivery of the event fails its read: it stays pending.
+  const qs = app.fxTrade.questions as unknown as { getPreTrade: (...a: never[]) => Promise<unknown> };
+  const real_ = qs.getPreTrade;
+  qs.getPreTrade = async () => { throw new Error("FX Trade status unavailable"); };
+  try { await assert.rejects(drain(app), /status unavailable/); } finally { qs.getPreTrade = real_; }
+  assert.deepEqual((await get()).parts.map((p) => p.followUp), ["OPEN", "OPEN", "OPEN", "OPEN"]);
+
+  await drain(app);
+  const fixed = await get();
+  assert.deepEqual([fixed.status, fixed.followUp, fixed.parts.map((p) => p.followUp)], ["ACCEPTED", "OPEN", ["CANCELLED", "OPEN", "OPEN", "OPEN"]]);
+  assert.equal((await drafts(x.t, x.cycle, rec.recommendationId)).length, 4, "no second set of pre-trades");
+  assert.equal((await trailOf(x.t)).filter((r) => r.action === "recommendation.accepted").length, 1, "one decision record");
+  assert.equal(await drain(app), 0, "nothing is left pending");
 });
 
 e2e("deciders: accepting, overriding and a decision still waiting on FX Trade count; a refused claim and a dismissal do not", async () => {

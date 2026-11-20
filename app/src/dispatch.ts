@@ -47,6 +47,11 @@ async function deliver(app: App, e: Announced): Promise<void> {
       await app.exposureManagement.commands.onRunFinished(e as never);
       await app.hedgeRecommendation.commands.onRunFinished(e as never); // recommendations from the finished run
       return;
+    case "hedge-recommendation.pre-trade-created":
+      // The pre-trade now has a link. FX Trade may have changed it (cancelled it) before that, when its own event found nothing to update, so reconcile from FX Trade's
+      // current status. A failed read throws, so the event stays pending and is delivered again (decision 0016).
+      await app.hedgeRecommendation.commands.refreshFollowUp(e.tenantId, e.preTradeId as string);
+      return;
     case "fx-trade.pre-trade-ready":
     case "fx-trade.pre-trade-cancelled":
     case "fx-trade.executed-trade-received":

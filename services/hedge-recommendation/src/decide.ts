@@ -65,8 +65,9 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
       await recordChange(tx, { tenantId: tenant, programId: rec.program_id as never, actor: rec.decided_by!, action: rec.decision_kind === "OVERRIDE" ? "recommendation.overridden" : "recommendation.accepted", targetType: "recommendation", targetId: id, fields: rec.decision_kind === "OVERRIDE" ? ["amount"] : [] });
     });
     // FX Trade may have changed a draft (cancelled it) after creating it and before the links above were durable; its event then found no part to update.
-    // So once the links are in, bring each part up to FX Trade's current state. This reads FX Trade; it does not span the two services in a transaction.
-    for (const preTradeId of preTrades.values()) await refreshFollowUp(tenant, preTradeId);
+    // So once the links are in, bring each part up to FX Trade's current state. This is best effort: the decision is already committed, so a failed read must not
+    // make it look failed. The `pre-trade-created` events announced above reconcile each part through the dispatcher, and stay pending until that succeeds.
+    for (const preTradeId of preTrades.values()) { try { await refreshFollowUp(tenant, preTradeId); } catch { /* retried by the event */ } }
     return reread(tenant, id);
   }
 
