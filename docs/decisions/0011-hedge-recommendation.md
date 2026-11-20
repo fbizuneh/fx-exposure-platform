@@ -25,7 +25,7 @@ Date: 2026-11-20. Service: hedge-recommendation (core tier). Sources: The Core F
 
 ## Defaults I chose, to confirm or change
 - The calculation uses gross exposure and outstanding hedges from decision 0010, so it never double counts a hedge.
-- No maximum hedge amount yet.
+- No maximum hedge amount yet. (Done in decision 0016.)
 - A recommendation that is *deciding* (item 11) is not shown as accepted until FX Trade confirms the pre-trade exists.
 - Approve Cycle now requires Approve Exposure first. `exposure:approve` is held by the approver and admin roles. Skipping a cycle is still allowed after Approve Exposure; its undecided recommendations lapse.
 - Segregation of duties (approver differs from the decider) is not enforced in this change; it needs an approval guard in Exposure Management and comes next.

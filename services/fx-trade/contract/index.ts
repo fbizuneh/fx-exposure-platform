@@ -31,6 +31,8 @@ export interface PreTrade {
   readonly programId: ProgramId;
   readonly cycleId: CycleId | null;
   readonly recommendationId: string | null;
+  /** Which part of its recommendation this is (a split hedge has several, decision 0016); null for a manual pre-trade. */
+  readonly partNo: number | null;
   readonly origin: "RECOMMENDATION" | "MANUAL";
   readonly status: PreTradeStatus;
   readonly tradingEntityCode: string;
@@ -98,6 +100,13 @@ export interface PreTradeReady extends Announcement {
   readonly programId: ProgramId;
   readonly cycleId: CycleId | null;
 }
+/** A pre-trade was cancelled: by a user, or because its cycle was skipped or deleted before approval. Announced once per pre-trade, when it changes. */
+export interface PreTradeCancelled extends Announcement {
+  readonly type: "fx-trade.pre-trade-cancelled";
+  readonly preTradeId: string;
+  readonly programId: ProgramId;
+  readonly cycleId: CycleId | null;
+}
 /** An executed trade (or a new version of one) was stored. */
 export interface ExecutedTradeReceived extends Announcement {
   readonly type: "fx-trade.executed-trade-received";
@@ -112,4 +121,4 @@ export interface FxTradeChangeRecorded extends ChangeRecordFields {
   readonly eventId: string;
   readonly occurredAt: string;
 }
-export type FxTradeEvents = PreTradeReady | ExecutedTradeReceived | FxTradeChangeRecorded;
+export type FxTradeEvents = PreTradeReady | PreTradeCancelled | ExecutedTradeReceived | FxTradeChangeRecorded;

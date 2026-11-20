@@ -5,6 +5,9 @@ import type { CycleId, ProgramId, TenantId } from "@shared/kernel";
 export const STRATEGIES = ["hedge-ratio-adjustment"] as const;
 export type Strategy = (typeof STRATEGIES)[number];
 
+export const SPLIT_METHODS = ["EVEN", "THRESHOLD_REMAINDER"] as const;
+export type SplitMethod = (typeof SPLIT_METHODS)[number];
+
 /** A policy with its defaults filled in. Amounts and ratios are decimal strings (ratio 1 is 100%). */
 export interface HedgePolicy {
   readonly programId: ProgramId;
@@ -17,6 +20,12 @@ export interface HedgePolicy {
   /** "1M", "2W" and so on. */
   readonly tenor: string;
   readonly tradingEntityCode: string | null;
+  /** The largest amount of one hedge, in the display currency (decision 0016); null when there is no maximum. A larger recommendation is split into parts. */
+  readonly maxHedgeDisplay: string | null;
+  /** A different maximum for the groups of a netting level; it replaces the program's maximum for them. */
+  readonly maxHedgeOverrides: readonly { readonly nettingLevel: string; readonly maxHedgeDisplay: string }[];
+  /** EVEN: equal parts. THRESHOLD_REMAINDER: parts of the maximum and one part for what is left. */
+  readonly splitMethod: SplitMethod;
   /** False when nothing has been saved and the defaults apply. */
   readonly saved: boolean;
 }
@@ -30,7 +39,7 @@ export const NO_ACTION_MESSAGES: Readonly<Record<NoActionReason, string>> = {
   WITHIN_TARGET: "Already hedged to the target ratio.",
   ROUNDS_TO_ZERO: "The amount needed is smaller than the rounding step.",
   BELOW_MINIMUM: "The rounded amount is below the minimum hedge amount.",
-  NO_RATE: "The spot rate needed to convert the minimum hedge amount is missing.",
+  NO_RATE: "The spot rate needed to convert the minimum or maximum hedge amount is missing.",
   NO_TRADING_ENTITY: "This netting group has no entity. Configure a default trading entity in the hedge policy to get a recommendation for it.",
 };
 
@@ -83,6 +92,23 @@ export interface Recommendation {
   readonly decidedBy: string | null;
   readonly decidedAt: string | null;
   readonly decisionNote: string | null;
+  /** The pre-trade of the first part, once the decision has one (the only one when the hedge is not split); see `parts`. */
+  readonly preTradeId: string | null;
+  /** The maximum in the exposure currency that applied; null when there was none. */
+  readonly maxExposureAmount: string | null;
+  readonly splitMethod: SplitMethod | null;
+  /** Set when the split was adjusted so no part falls below the minimum. */
+  readonly splitNote: string | null;
+  /** The pieces of the hedge, in order; one when it is not split. After a decision they are the amounts of the pre-trades. Empty when there is no action. */
+  readonly parts: readonly RecommendationPart[];
+  /** Of the whole: executed when every part is, partly executed once any part is, cancelled when every part is. */
+  readonly followUp: FollowUp;
+}
+
+export interface RecommendationPart {
+  readonly partNo: number;
+  /** Positive, in the exposure currency. */
+  readonly amount: string;
   readonly preTradeId: string | null;
   readonly followUp: FollowUp;
 }
@@ -111,11 +137,13 @@ export interface RecommendationsIssued extends Announcement {
   readonly programId: ProgramId;
   readonly runId: string;
 }
-/** A decision made a pre-trade in FX Trade. */
+/** A decision made a pre-trade in FX Trade: one event per part. */
 export interface PreTradeCreated extends Announcement {
   readonly type: "hedge-recommendation.pre-trade-created";
   readonly recommendationId: string;
   readonly preTradeId: string;
+  /** Which part of the recommendation this pre-trade is, from 1 (decision 0016). */
+  readonly partNo: number;
   readonly cycleId: CycleId;
   readonly programId: ProgramId;
 }

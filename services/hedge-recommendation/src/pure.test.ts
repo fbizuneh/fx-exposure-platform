@@ -107,3 +107,86 @@ test("a pair override is the same pair whichever currency is written first, and 
   assert.match(policyProblems({ ...ok, ratioOverrides: [{ pair: "EUR-USD", ratio: "0.5" }, { pair: "USD-EUR", ratio: "0.8" }] })[0]!, /appears twice/);
   assert.match(policyProblems({ ...ok, ratioOverrides: [{ pair: "EUR-EUR", ratio: "0.5" }] })[0]!, /same currency twice/);
 });
+
+import { splitAmount, MAX_PARTS } from "./calc.ts";
+const split = (total: string, max: string | null, method: "EVEN" | "THRESHOLD_REMAINDER", step = "1", min: string | null = null) =>
+  splitAmount(new D(total), max === null ? null : new D(max), method, new D(step), min === null ? null : new D(min));
+const amounts = (s: { parts: { toString(): string }[] }) => s.parts.map((x) => x.toString());
+
+test("split: the owner's example, 450 at a maximum of 200, is 3 parts either way", () => {
+  assert.deepEqual(amounts(split("450", "200", "EVEN")), ["150", "150", "150"]);
+  assert.deepEqual(amounts(split("450", "200", "THRESHOLD_REMAINDER")), ["200", "200", "50"]);
+});
+test("split: no maximum, or a total within it, is one part", () => {
+  assert.deepEqual(amounts(split("450", null, "EVEN")), ["450"]);
+  assert.deepEqual(amounts(split("200", "200", "THRESHOLD_REMAINDER")), ["200"]);
+  assert.deepEqual(amounts(split("199", "200", "EVEN")), ["199"]);
+});
+test("split: even parts are whole steps, the leftover steps going to the first parts, and the parts add up", () => {
+  const s = split("10000", "3000", "EVEN", "1000"); // 4 parts, 2500 each is not a step multiple
+  assert.deepEqual(amounts(s), ["3000", "3000", "2000", "2000"]);
+  assert.equal(s.parts.reduce((a, b) => a.plus(b), new D(0)).toString(), "10000");
+  assert.deepEqual(amounts(split("10", "3", "EVEN")), ["3", "3", "2", "2"]);
+});
+test("split: threshold parts use the maximum rounded down to a step; an exact multiple has no remainder", () => {
+  assert.deepEqual(amounts(split("5000", "1500", "THRESHOLD_REMAINDER", "1000")), ["1000", "1000", "1000", "1000", "1000"]);
+  assert.deepEqual(amounts(split("600", "200", "THRESHOLD_REMAINDER")), ["200", "200", "200"]);
+});
+test("split: a last part below the minimum is added to the one before it; even parts below it use fewer parts", () => {
+  const t = split("410", "200", "THRESHOLD_REMAINDER", "1", "50");
+  assert.deepEqual(amounts(t), ["200", "210"]);
+  assert.match(t.note!, /added to the part before/);
+  assert.deepEqual(amounts(split("410", "200", "THRESHOLD_REMAINDER", "1", "5")), ["200", "200", "10"], "a remainder at or above the minimum stands alone");
+  const e = split("250", "200", "EVEN", "1", "150"); // 125 and 125 are below 150
+  assert.deepEqual(amounts(e), ["250"]);
+  assert.match(e.note!, /Fewer parts/);
+});
+test("split: an override amount that is not a step multiple splits in the smallest unit; absurd counts are capped", () => {
+  assert.deepEqual(amounts(split("100.5", "50", "EVEN", "1000")), ["33.5", "33.5", "33.5"]);
+  assert.deepEqual(amounts(split("100.0001", "50", "EVEN", "1000")), ["33.3334", "33.3334", "33.3333"]);
+  const huge = split("1000000", "1", "THRESHOLD_REMAINDER");
+  assert.equal(huge.parts.length, MAX_PARTS);
+  assert.equal(huge.parts.reduce((a, b) => a.plus(b), new D(0)).toString(), "1000000");
+});
+
+import { overallFollowUp } from "./decide.ts";
+test("follow-up of the whole: executed when every part is, partly once any is, cancelled when every part is", () => {
+  assert.equal(overallFollowUp(["EXECUTED", "EXECUTED"]), "EXECUTED");
+  assert.equal(overallFollowUp(["EXECUTED", "OPEN"]), "PARTLY_EXECUTED");
+  assert.equal(overallFollowUp(["PARTLY_EXECUTED", "OPEN"]), "PARTLY_EXECUTED");
+  assert.equal(overallFollowUp(["EXECUTED", "CANCELLED"]), "PARTLY_EXECUTED", "the part that was cancelled does not make the rest less done");
+  assert.equal(overallFollowUp(["CANCELLED", "CANCELLED"]), "CANCELLED");
+  assert.equal(overallFollowUp(["OPEN", "CANCELLED"]), "OPEN");
+  assert.equal(overallFollowUp(["NOT_STARTED"]), "NOT_STARTED");
+});
+
+test("split: a rounding step coarser than the pieces never makes a zero part, and the cap holds after the maximum is rounded down", () => {
+  const coarse = split("1000", "400", "EVEN", "1000"); // three parts would be 1000, 0, 0
+  assert.deepEqual(amounts(coarse), ["1000"]);
+  assert.match(coarse.note!, /only 1 whole step of 1000, so it was split into 1 part, larger than the maximum/);
+  const two = split("2000", "400", "EVEN", "1000"); // wants 5 parts, has 2 steps
+  assert.deepEqual(amounts(two), ["1000", "1000"]);
+  // 51,000 at a maximum of 1,999 passes a count check on the maximum (26 parts) but 1,000-unit parts of the rounded-down maximum would be 51.
+  const many = split("51000", "1999", "THRESHOLD_REMAINDER", "1000");
+  assert.equal(many.parts.length, MAX_PARTS);
+  assert.equal(many.parts.reduce((a, b) => a.plus(b), new D(0)).toString(), "51000");
+  assert.ok(many.parts.every((x) => x.gt(0) && x.mod(1000).isZero()));
+  assert.match(many.note!, /50 parts, the most allowed/);
+  // An enormous ratio is counted before it is built: 100 billion pieces of 0.01 would not fit in memory, and must not be attempted.
+  for (const method of ["THRESHOLD_REMAINDER", "EVEN"] as const) {
+    const huge = split("1000000000.07", "0.01", method, "0.01");
+    assert.ok(huge.parts.length <= 50 && huge.parts.every((x) => x.gt(0)));
+    assert.equal(huge.parts.reduce((s, x) => s.plus(x), new D(0)).toString(), "1000000000.07");
+    assert.match(huge.note!, /50 parts, the most allowed/);
+  }
+});
+test("split: whatever the inputs, parts are positive, add up exactly, are at most 50, and any part above the maximum has a note", () => {
+  const methods = ["EVEN", "THRESHOLD_REMAINDER"] as const;
+  for (const total of ["10", "250", "1000", "51000", "100.5", "0.0003"]) for (const max of ["0.0001", "3.5", "199", "333.33", "400", "1999"]) for (const step of ["1", "10", "1000"]) for (const min of [null, "50", "300"]) for (const m of methods) {
+    const s = split(total, max, m, step, min);
+    assert.ok(s.parts.length >= 1 && s.parts.length <= MAX_PARTS, `${total}/${max}/${step}/${min}/${m}: count`);
+    assert.ok(s.parts.every((x) => x.gt(0)), `${total}/${max}/${step}/${min}/${m}: positive`);
+    assert.equal(s.parts.reduce((a, b) => a.plus(b), new D(0)).toString(), new D(total).toString(), `${total}/${max}/${step}/${min}/${m}: sum`);
+    if (s.parts.some((x) => x.gt(max)) && new D(total).gt(max)) assert.ok(s.note !== null, `${total}/${max}/${step}/${min}/${m}: a part above the maximum needs a note`);
+  }
+});

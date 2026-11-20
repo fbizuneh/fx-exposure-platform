@@ -32,13 +32,13 @@ export async function readPreTrades(
   if (filter.status) sel = sel.where("status", "=", filter.status);
   if (filter.ids) sel = sel.where("pre_trade_id", "in", [...filter.ids]);
   if (filter.recommendationIds) sel = sel.where("recommendation_id", "in", [...filter.recommendationIds]);
-  const heads = await sel.orderBy("created_at").orderBy("reference").execute();
+  const heads = await sel.orderBy("created_at").orderBy("part_no").orderBy("reference").execute();
   if (heads.length === 0) return [];
   const ids = heads.map((h) => h.pre_trade_id);
   const legs = await q(db).selectFrom("pre_trade_legs").selectAll().where("tenant_id", "=", tenant).where("pre_trade_id", "in", ids).orderBy("leg_no").execute();
   const filled = await filledAmounts(db, tenant, ids);
   return heads.map((h) => ({
-    preTradeId: h.pre_trade_id, reference: h.reference, programId: h.program_id as ProgramId, cycleId: h.cycle_id as CycleId | null, recommendationId: h.recommendation_id,
+    preTradeId: h.pre_trade_id, reference: h.reference, programId: h.program_id as ProgramId, cycleId: h.cycle_id as CycleId | null, recommendationId: h.recommendation_id, partNo: h.part_no,
     origin: h.origin, status: h.status, tradingEntityCode: h.trading_entity_code, instrument: h.instrument,
     legs: legs.filter((l) => l.pre_trade_id === h.pre_trade_id).map(toLeg), filledAmount: filled.get(h.pre_trade_id) ?? "0.0000",
   }));
