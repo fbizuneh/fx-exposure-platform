@@ -1,6 +1,5 @@
 // Builds every service over one database server, each in its own schema, and hands each the others' questions it needs.
 // This is the only place services meet; none of them imports another's code, only its contract.
-import type { Actor } from "@services/identity/contract";
 import { connect as connectAudit, createAudit } from "../../services/audit/src/index.ts";
 import { connect as connectDataSource, createDataSource } from "../../services/data-source/src/index.ts";
 import { connect as connectExposureAnalysis, createExposureAnalysis } from "../../services/exposure-analysis/src/index.ts";
@@ -10,9 +9,6 @@ import { connect as connectFxTrade, createFxTrade } from "../../services/fx-trad
 import { connect as connectHedgeRecommendation, createHedgeRecommendation } from "../../services/hedge-recommendation/src/index.ts";
 import { connect as connectIdentity, createIdentity } from "../../services/identity/src/index.ts";
 import { connect as connectMasterData, createMasterData } from "../../services/master-data/src/index.ts";
-
-/** The actor that starts scheduled cycles. */
-export const SCHEDULER: Actor = { kind: "platform", platformUserId: "scheduler" as never };
 
 export function composeApp(connectionString: string, now: () => Date = () => new Date()) {
   const dbs = {
