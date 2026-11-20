@@ -1925,3 +1925,23 @@ e2e("close-out+new: no dates, a closed far date and the approval gate work as th
   await setDates(edited, { nearDate: "2026-12-15", farDate: "2027-01-20" });
   await assert.rejects(approveExposure(edited.t, edited.cycle as string), /roll dates changed after this run's recommendations were made/);
 });
+
+e2e("close-out+new with the amount threshold: the net is taken after the close-outs, so a hedge that nets the exposure to zero is closed and put back as a new trade; Adjust+Swap is unchanged", async () => {
+  // 1,000 EUR of exposure fully hedged by a sale that matures in the window: the net is 0 now and +1,000 once the hedge is closed. 1,100 USD is 1,000 EUR.
+  const file = [
+    "trade_id,execution_platform_id,trading_entity,counterparty,trade_date,value_date,deal_currency,deal_amount,settlement_currency,settlement_amount,instrument,buy_sell,hedging_program_id,pre_trade_reference",
+    "T1,SIMFX,US01,Sim Bank,2026-11-10,2026-12-15,EUR,1000.0000,USD,1100.0000,FORWARD,SELL,BS,",
+  ].join("\n");
+  const threshold = (over: object) => ({ strategy: "amount-threshold", amountThresholdDisplay: "1100", ...over });
+  const dates = { nearDate: "2026-12-15", farDate: FAR };
+  const us = groupOf((await rolledCycle(threshold({ rollType: "CLOSE_OUT_NEW" }), dates, { file })).recs, "US01");
+  // The comparison is inclusive: a net of exactly the threshold is hedged, all of it, and brought to zero.
+  assert.deepEqual([us.action, us.direction, us.amount, us.reason, us.hedgedAmount], ["HEDGE", "SELL", "1000.00", null, "0.00"]);
+  assert.deepEqual(partsShown(us), [[1, "CLOSE_OUT", "BUY", "1000.00", "2026-12-15"], [2, "NEW", "SELL", "1000.00", FAR]], "the near buy closes the hedge and the far sale replaces it");
+  // A threshold just above the net after the close-outs: the net is within it, so there are close-outs and no new trade.
+  const within = groupOf((await rolledCycle(threshold({ rollType: "CLOSE_OUT_NEW", amountThresholdDisplay: "1100.01" }), dates, { file })).recs, "US01");
+  assert.deepEqual([within.action, within.reason, partsShown(within).map((p) => p[1])], ["HEDGE", "WITHIN_THRESHOLD", ["CLOSE_OUT"]]);
+  // Adjust+Swap keeps deciding on the net as it stands (0, within the threshold): the roll and no adjustment.
+  const swap = groupOf((await rolledCycle(threshold({}), dates, { file })).recs, "US01");
+  assert.deepEqual([swap.reason, partsShown(swap).map((p) => [p[1], p[2], p[3]])], ["WITHIN_THRESHOLD", [["CLOSE_OUT", "BUY", "1000.00"], ["ROLL", "SELL", "1000.00"]]]);
+});

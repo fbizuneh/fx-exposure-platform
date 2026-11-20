@@ -105,6 +105,8 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
         const roll = rollUsable && rollIssue === null ? planRoll(legsOf.get(g.groupNo) ?? [], rollDates!.near_date, offsetDays) : null;
         // Close-out+New: what is maturing is closed, so it no longer counts as hedged; the rule is applied to what remains (decision 0022).
         const hedged = closeOutNew && roll ? fmt(new D(g.hedges.exposureAmount).minus(roll.maturing)) : g.hedges.exposureAmount;
+        // The amount threshold decides on the net exposure after the close-outs (gross plus the hedges that remain), for the comparison and for the size and direction of the new trade (review of PR 15).
+        const netAfter = closeOutNew && roll ? fmt(new D(g.net.exposureAmount).minus(roll.maturing)) : g.net.exposureAmount;
         // The maximum of one hedge (decision 0016): the level's own when it has one, else the program's, turned into the exposure currency.
         const maxDisplay = maxByLevel.get(g.nettingLevel) ?? policy.maxHedgeDisplay;
         const maxExposure = maxDisplay !== null && rate ? new D(fmt(new D(maxDisplay).div(rate))) : null;
@@ -114,7 +116,7 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
         const thresholdExact = thresholdDisplay !== null && rate ? new D(thresholdDisplay).div(rate) : null;
         // What the strategy wants, then the rules every strategy shares: rounding, the minimum and (below) the split.
         const need = byThreshold
-          ? amountThresholdNeed({ netExposure: g.net.exposureAmount, hedgedAmount: hedged, thresholdExposure: thresholdExact === null ? null : thresholdExact.toFixed() })
+          ? amountThresholdNeed({ netExposure: netAfter, hedgedAmount: hedged, thresholdExposure: thresholdExact === null ? null : thresholdExact.toFixed() })
           : ratioAdjustmentNeed({ grossExposure: g.gross.exposureAmount, hedgedAmount: hedged, ratio });
         const out = finishRecommendation(need, { rounding, minExposure, rateMissing: (minDisplay.gt(0) || maxDisplay !== null || thresholdDisplay !== null) && !rate });
         const adjustment = out.action === "HEDGE" ? { direction: out.direction!, amount: out.amount! } : null;
