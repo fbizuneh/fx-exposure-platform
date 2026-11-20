@@ -27,10 +27,11 @@ export function recordCommands(db: Db, clock: () => Date) {
       if (have) return "DUPLICATE";
       const seq = Number(head.last_seq) + 1;
       const occurredAt = new Date(e.occurredAt).toISOString();
-      const hash = hashOf(head.last_hash, { tenantId: tenant, seq, recordId: e.eventId, source, programId: e.programId, actor: e.actor, action: e.action, targetType: e.targetType, targetId: e.targetId, fields: e.fields, occurredAt });
+      const recordedAt = clock().toISOString(); // taken once: the value hashed is the value stored
+      const hash = hashOf(head.last_hash, { tenantId: tenant, seq, recordId: e.eventId, source, programId: e.programId, actor: e.actor, action: e.action, targetType: e.targetType, targetId: e.targetId, fields: e.fields, occurredAt, recordedAt });
       await q(tx).insertInto("records").values({
         tenant_id: tenant, seq: String(seq), record_id: e.eventId, source, program_id: e.programId, actor: e.actor, action: e.action, target_type: e.targetType, target_id: e.targetId,
-        fields: JSON.stringify(e.fields) as never, occurred_at: new Date(occurredAt), recorded_at: clock(), prev_hash: head.last_hash, hash,
+        fields: JSON.stringify(e.fields) as never, occurred_at: new Date(occurredAt), recorded_at: new Date(recordedAt), prev_hash: head.last_hash, hash,
       }).execute();
       await q(tx).updateTable("chain_heads").set({ last_seq: String(seq), last_hash: hash }).where("tenant_id", "=", tenant).execute();
       return "RECORDED";

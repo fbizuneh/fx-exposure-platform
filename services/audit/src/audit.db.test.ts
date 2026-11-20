@@ -133,6 +133,14 @@ dbTest("verify finds an edited record, a removed record and a record cut off the
   const relinked = await fill();
   await tamper("UPDATE audit.records SET prev_hash = 'GENESIS' WHERE tenant_id = $1 AND seq = 3", [relinked]);
   assert.equal((await audit.questions.verify(relinked, who)).brokenAtSeq, 3);
+
+  // The time Audit received a record is protected like the rest, not only the time the change happened.
+  const retimed = await fill();
+  await tamper("UPDATE audit.records SET recorded_at = recorded_at + interval '1 second' WHERE tenant_id = $1 AND seq = 3", [retimed]);
+  assert.deepEqual(await audit.questions.verify(retimed, who), { ok: false, checked: 2, brokenAtSeq: 3 });
+  const reoccurred = await fill();
+  await tamper("UPDATE audit.records SET occurred_at = occurred_at + interval '1 second' WHERE tenant_id = $1 AND seq = 2", [reoccurred]);
+  assert.deepEqual(await audit.questions.verify(reoccurred, who), { ok: false, checked: 1, brokenAtSeq: 2 });
 });
 
 dbTest("reading needs audit:read, in the program when one is asked for; filters and paging work", async () => {

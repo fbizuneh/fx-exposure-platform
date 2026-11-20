@@ -51,7 +51,7 @@ export function auditQuestions(db: Db, access: IdentityPort): AuditQuestions {
         if (rows.length === 0) break;
         for (const r of rows) {
           const rec = toRecord(r);
-          const good = rec.seq === expected && r.prev_hash === prev && r.hash === hashOf(prev, { tenantId: r.tenant_id, seq: rec.seq, recordId: r.record_id, source: r.source, programId: r.program_id, actor: r.actor, action: r.action, targetType: r.target_type, targetId: r.target_id, fields: rec.fields, occurredAt: rec.occurredAt });
+          const good = rec.seq === expected && r.prev_hash === prev && r.hash === hashOf(prev, { tenantId: r.tenant_id, seq: rec.seq, recordId: r.record_id, source: r.source, programId: r.program_id, actor: r.actor, action: r.action, targetType: r.target_type, targetId: r.target_id, fields: rec.fields, occurredAt: rec.occurredAt, recordedAt: rec.recordedAt });
           if (!good) return { ok: false, checked: expected - 1, brokenAtSeq: expected };
           prev = r.hash;
           expected++;
