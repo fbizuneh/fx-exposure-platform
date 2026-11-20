@@ -23,6 +23,6 @@ export const ROLE_PERMISSIONS: Readonly<Record<TenantRole, ReadonlySet<Permissio
     "hedge-recommendation:generate",
   ]),
   TREASURY_REVIEWER: new Set(reviewer),
-  TREASURY_APPROVER: new Set<Permission>([...reviewer, "cycle:approve", "cycle:skip", "hedge-recommendation:accept"]),
+  TREASURY_APPROVER: new Set<Permission>([...reviewer, "exposure:approve", "cycle:approve", "cycle:skip", "hedge-recommendation:accept"]),
   TREASURY_ADMIN: new Set(PERMISSIONS),
 };

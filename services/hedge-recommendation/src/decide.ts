@@ -82,6 +82,9 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
     if (rec.action !== "HEDGE" || rec.status !== "OPEN") throw new RecommendationError(`the recommendation is ${rec.status.toLowerCase()} and cannot be decided`);
     const cycle = await c.management.getCycle(tenant, rec.cycle_id as never);
     if (!cycle || cycle.approvedAt !== null || cycle.outcome !== null) throw new RecommendationError("the cycle is approved or closed; recommendations can no longer be decided");
+    // Approve Exposure comes first (decision 0011 item 17): before it a recommendation is a preview, and only the approved run's recommendations can be decided.
+    if (cycle.exposureApprovedAt === null) throw new RecommendationError("the exposure has not been approved; approve the exposure before deciding recommendations");
+    if (cycle.exposureApprovedRunId !== rec.run_id) throw new RecommendationError("this recommendation was made from a run other than the approved one and cannot be decided");
     const by = who(input.actor);
     const note = input.note ?? null;
     const lost = async (): Promise<never> => {

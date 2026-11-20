@@ -104,7 +104,7 @@ function setup(over: Partial<World> = {}, level = "GROUP_NATURAL", overrides: { 
     balances: [bal("US01", "4000", "EUR", "1000"), bal("DE01", "4000", "USD", "550"), bal("US01", "4000", "USD", "70"), bal("LOOSE", "4000", "GBP", "5"), bal("US01", "9000", "EUR", "9")],
     blocked: 3, rates: new Map([["EUR|USD", { rate: "1.1", quality: "VALID" }], ["GBP|USD", { rate: "1.25", quality: "VALID" }]]), cycles: new Map(), ndf: [], ...over,
   };
-  w.cycles.set(c, { cycleId: c, programId: programId("BS"), asOf: asOfDate(AS_OF), stage: "INITIATED", outcome: null, outcomeReason: null, rerunCount: 0, approvedAt: null, approvedBy: null,
+  w.cycles.set(c, { cycleId: c, programId: programId("BS"), asOf: asOfDate(AS_OF), stage: "INITIATED", outcome: null, outcomeReason: null, rerunCount: 0, exposureApprovedAt: null, exposureApprovedBy: null, exposureApprovedRunId: null, approvedAt: null, approvedBy: null,
     initiatedBy: "user:1", initiatedAt: "2026-11-09T00:00:00Z", settings: settings(level, "USD", overrides), history: [] });
   worlds.set(t, w);
   return { t, c, w, event: () => ({ eventId: randomUUID(), tenantId: t, cycleId: c }) };
@@ -207,6 +207,21 @@ dbTest("approval freezes the current run: a later initiated event for the cycle 
   const same = (await ea.questions.currentRun(t, c))!;
   assert.deepEqual([same.runId, same.status], [run.runId, "FINISHED"]);
   assert.equal((await ea.questions.exposures(t, run.runId))[0]!.net1, "500.00");
+});
+
+dbTest("approving the exposure locks that exact run and the trade versions it used: later trades and balances, even with earlier dates, change nothing", async () => {
+  const { t, c, w, event } = setup({ trades: [hedge("US01", "SELL", "EUR", "400", "USD", "440", "2027-01-15", "h1")] }, "ENTITY");
+  await ea.commands.onCycleInitiated(event());
+  const run = (await ea.questions.currentRun(t, c))!;
+  await ea.commands.onExposureApproved({ tenantId: t, cycleId: c, runId: randomUUID() }); // some other run: nothing is locked
+  assert.equal((await ea.questions.currentRun(t, c))!.frozenAt, null);
+  await ea.commands.onExposureApproved({ tenantId: t, cycleId: c, runId: run.runId });
+  assert.ok((await ea.questions.currentRun(t, c))!.frozenAt);
+  const before = JSON.stringify([await ea.questions.netExposures(t, run.runId), await ea.questions.hedgeRows(t, run.runId)]);
+  w.trades = [hedge("US01", "SELL", "EUR", "400", "USD", "440", "2027-01-15", "h1"), hedge("US01", "SELL", "EUR", "250", "USD", "275", "2027-01-15", "late")];
+  assert.equal(await ea.commands.onCycleInitiated(event()), "IGNORED");
+  assert.equal(JSON.stringify([await ea.questions.netExposures(t, run.runId), await ea.questions.hedgeRows(t, run.runId)]), before);
+  assert.deepEqual((await ea.questions.hedgeRows(t, run.runId)).map((r) => r.tradeId), ["h1"]);
 });
 
 dbTest("netting level comes from the cycle's settings: portfolio level re-pairs against the display currency", async () => {

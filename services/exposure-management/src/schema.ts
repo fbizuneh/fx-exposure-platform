@@ -39,6 +39,9 @@ export interface ExposureManagementDatabase {
     settings: JsonIn;
     rerun_count: Generated<number>;
     current_run_id: string | null;
+    exposure_approved_at: Date | null;
+    exposure_approved_by: string | null;
+    exposure_approved_run_id: string | null;
     approved_at: Date | null;
     approved_by: string | null;
     initiated_by: string;
@@ -48,7 +51,7 @@ export interface ExposureManagementDatabase {
     tenant_id: string;
     cycle_id: string;
     seq: number;
-    kind: "INITIATED" | "RUN_STARTED" | "RUN_FINISHED" | "RERUN" | "SKIPPED" | "DELETED" | "APPROVED";
+    kind: "INITIATED" | "RUN_STARTED" | "RUN_FINISHED" | "RERUN" | "SKIPPED" | "DELETED" | "EXPOSURE_APPROVED" | "APPROVED";
     by_who: string | null;
     at: Generated<Date>;
     note: string | null;

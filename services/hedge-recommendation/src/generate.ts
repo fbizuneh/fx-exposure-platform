@@ -1,4 +1,4 @@
-// Turn a finished run's net exposure into recommendations (decision 0011 items 2 to 8, 12).
+// Turn a finished run's net exposure into recommendations (decision 0011 items 2 to 8, 12, 17).
 import { randomUUID } from "node:crypto";
 import type { CycleId, ProgramId, TenantId } from "@shared/kernel";
 import { D, fmt, pairKey, recommend, valueDateFor, weekdaysBefore } from "./calc.ts";
@@ -10,8 +10,6 @@ import { readPolicy } from "./queries.ts";
 
 export interface RunFinishedEvent { readonly eventId: string; readonly tenantId: TenantId; readonly cycleId: CycleId; readonly programId: ProgramId; readonly runId: string }
 
-const groupKey = (region: string | null, entity: string | null, pair: string, exposureCurrency: string): string => [region ?? "", entity ?? "", pair, exposureCurrency].join("\u0000");
-const DECIDED = ["ACCEPTED", "OVERRIDDEN", "DISMISSED"];
 
 export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
   /** For a "run finished" event: replaces the cycle's undecided recommendations with ones from this run. */
@@ -19,15 +17,21 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
     const { tenantId: tenant } = event;
     const cycle = await c.management.getCycle(tenant, event.cycleId);
     const run = await c.analysis.currentRun(tenant, event.cycleId);
-    const stale = !cycle || cycle.approvedAt !== null || cycle.outcome !== null || !run || run.runId !== event.runId || run.status !== "FINISHED";
+    let stale = !cycle || cycle.approvedAt !== null || cycle.outcome !== null || !run || run.runId !== event.runId || run.status !== "FINISHED";
+    // Once the exposure is approved the cycle is never recalculated, so nothing may replace its recommendations. The one thing still allowed is
+    // making them for the approved run itself, when its "run finished" event reached us after the approval.
+    if (!stale && cycle!.exposureApprovedAt !== null) {
+      const have = await q(db).selectFrom("recommendations").select("recommendation_id").where("tenant_id", "=", tenant).where("cycle_id", "=", event.cycleId).limit(1).executeTakeFirst();
+      stale = cycle!.exposureApprovedRunId !== event.runId || have !== undefined;
+    }
     if (stale) {
       await db.transaction().execute((tx) => firstTime(tx, tenant, event.eventId));
       return "IGNORED";
     }
     const groups = await c.analysis.netExposures(tenant, event.runId);
     const policy = await readPolicy(db, tenant, event.programId);
-    const ndf = new Set((await c.masterData.getCurrencies(tenant, run.asOf)).filter((x) => x.isNdf).map((x) => x.code));
-    const display = run.displayCurrency;
+    const ndf = new Set((await c.masterData.getCurrencies(tenant, run!.asOf)).filter((x) => x.isNdf).map((x) => x.code));
+    const display = run!.displayCurrency;
     const minDisplay = new D(policy.minHedgeDisplay);
 
     // The minimum is set in the display currency; each exposure currency needs its own spot rate to turn it into that currency.
@@ -35,24 +39,19 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
     if (minDisplay.gt(0)) {
       for (const ccy of new Set(groups.map((g) => g.exposureCurrency))) {
         if (ccy === display) { rateTo.set(ccy, "1"); continue; }
-        const r = await c.rates.getRate({ tenantId: tenant, base: ccy, quote: display, asOf: run.asOf, tenor: "SPOT" });
+        const r = await c.rates.getRate({ tenantId: tenant, base: ccy, quote: display, asOf: run!.asOf, tenor: "SPOT" });
         rateTo.set(ccy, r ? r.rate : null);
       }
     }
     const ratioFor = new Map(policy.ratioOverrides.map((o) => [pairKey(o.pair), o.ratio]));
     const roundingFor = new Map(policy.roundingOverrides.map((o) => [o.currency, o.rounding]));
-    const valueDate = valueDateFor(run.asOf, policy.tenor);
+    const valueDate = valueDateFor(run!.asOf, policy.tenor);
 
     return db.transaction().execute(async (tx) => {
       if (!(await firstTime(tx, tenant, event.eventId))) return "IGNORED";
-      const decided = new Set(
-        (await q(tx).selectFrom("recommendations").select(["region", "entity_code", "currency_pair", "exposure_currency"]).where("tenant_id", "=", tenant).where("cycle_id", "=", event.cycleId).where("status", "in", DECIDED).execute())
-          .map((r) => groupKey(r.region, r.entity_code, r.currency_pair, r.exposure_currency)),
-      );
       await q(tx).updateTable("recommendations").set({ status: "SUPERSEDED" }).where("tenant_id", "=", tenant).where("cycle_id", "=", event.cycleId).where("status", "in", ["OPEN", "NONE"]).execute();
       const rows = [];
       for (const g of groups) {
-        if (decided.has(groupKey(g.region, g.entityCode, g.currencyPair, g.exposureCurrency))) continue;
         const other = g.exposureCurrency === g.currency1 ? g.currency2 : g.currency1;
         const ratio = ratioFor.get(pairKey(g.currencyPair)) ?? policy.defaultRatio;
         const rounding = roundingFor.get(g.exposureCurrency) ?? policy.roundingDefault;

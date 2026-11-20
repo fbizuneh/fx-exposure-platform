@@ -31,6 +31,7 @@ export const PERMISSIONS = [
   "cycle:skip",
   "cycle:approve",
   "exposure:read",
+  "exposure:approve",
   "hedge-recommendation:read",
   "hedge-recommendation:generate",
   "hedge-recommendation:review",

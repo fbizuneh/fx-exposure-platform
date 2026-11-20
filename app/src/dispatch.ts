@@ -22,6 +22,9 @@ async function deliver(app: App, e: Announced): Promise<void> {
     case "exposure-management.cycle-initiated":
       await app.exposureAnalysis.commands.onCycleInitiated(e as never);
       return;
+    case "exposure-management.exposure-approved":
+      await app.exposureAnalysis.commands.onExposureApproved(e as never); // the approved run is locked, with the trade versions it used
+      return;
     case "exposure-management.cycle-approved":
       await app.exposureAnalysis.commands.onCycleApproved(e as never);
       await app.fxTrade.commands.onCycleApproved(e as never); // the release gate for pre-trades

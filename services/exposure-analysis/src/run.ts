@@ -199,6 +199,12 @@ export function runCommands(db: Db, c: Collaborators, now: () => Date) {
       return done;
     },
 
+    /** The exposure was approved: that exact run is locked and never changes again, whatever trades arrive later (decision 0011). */
+    async onExposureApproved(event: { tenantId: TenantId; cycleId: CycleId; runId: string }): Promise<void> {
+      await q(db).updateTable("runs").set({ frozen_at: now() })
+        .where("tenant_id", "=", event.tenantId).where("cycle_id", "=", event.cycleId).where("run_id", "=", event.runId).where("status", "=", "FINISHED").where("frozen_at", "is", null).execute();
+    },
+
     /** The cycle was approved: its current run never changes again. */
     async onCycleApproved(event: CycleApprovedEvent): Promise<void> {
       await q(db).updateTable("runs").set({ frozen_at: now() })

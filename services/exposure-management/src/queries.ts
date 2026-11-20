@@ -25,7 +25,7 @@ const loadRows = (db: Queryable, tenant: TenantId) => q(db).selectFrom("cycles")
 
 const summary = (r: CycleRow): CycleSummary => ({
   cycleId: cycleId(r.cycle_id), programId: programId(r.program_id), asOf: r.as_of as AsOfDate, stage: r.stage, outcome: r.outcome, outcomeReason: r.outcome_reason,
-  rerunCount: r.rerun_count, approvedAt: r.approved_at?.toISOString() ?? null, approvedBy: r.approved_by, initiatedBy: r.initiated_by, initiatedAt: r.initiated_at.toISOString(),
+  rerunCount: r.rerun_count, exposureApprovedAt: r.exposure_approved_at?.toISOString() ?? null, exposureApprovedBy: r.exposure_approved_by, exposureApprovedRunId: r.exposure_approved_run_id, approvedAt: r.approved_at?.toISOString() ?? null, approvedBy: r.approved_by, initiatedBy: r.initiated_by, initiatedAt: r.initiated_at.toISOString(),
 });
 
 export function exposureManagementQuestions(db: Db): ExposureManagementQuestions {

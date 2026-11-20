@@ -3,7 +3,7 @@
 Tier: core. Decision: `docs/decisions/0008-exposure-analysis.md`.
 
 ## Owns
-- Runs: one per "cycle initiated" event, WAITING until everything is collected, then FINISHED; superseded by a rerun; frozen at approval
+- Runs: one per "cycle initiated" event, WAITING until everything is collected, then FINISHED; superseded by a rerun; locked when the exposure is approved (decision 0011)
 - Baseline rows (the filtered balances as two-legged currency-pair rows, with lineage) and gross exposure per netting group
 - Hedge rows (open legs of executed trades) and net exposure per group: gross, hedges, net (decision 0010)
 - The rates used in a run, with their quality, and the filter counts and warnings of a run
@@ -28,7 +28,7 @@ Events carry identifiers only.
 - Executed trades (FX Trade), for outstanding hedges and net exposure
 
 ## How a run goes
-Filter (legal entities; FX-relevant and monetary accounts; not in the functional currency) -> baseline (market-convention pair, two legs, per-row rounding) -> netting level (group natural or portfolio, region, region by entity, entity; always by pair and period) -> gross exposure; the same netting over balances plus open hedge legs gives net exposure. The app calls `onCycleInitiated` for each "cycle initiated" event, `retryWaiting` when a tenant's batches or rates arrive, and `onCycleApproved` on approval.
+Filter (legal entities; FX-relevant and monetary accounts; not in the functional currency) -> baseline (market-convention pair, two legs, per-row rounding) -> netting level (group natural or portfolio, region, region by entity, entity; always by pair and period) -> gross exposure; the same netting over balances plus open hedge legs gives net exposure. The app calls `onCycleInitiated` for each "cycle initiated" event, `retryWaiting` when a tenant's batches or rates arrive, `onExposureApproved` to lock the approved run, and `onCycleApproved` on cycle approval.
 
 ## Schema
 `exposure_analysis`. Its tables are defined by this service's migrations.
