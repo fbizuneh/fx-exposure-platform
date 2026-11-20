@@ -33,8 +33,8 @@ export function composeApp(connectionString: string, now: () => Date = () => new
   const dataSource = createDataSource(dbs.dataSource, { masterData: masterData.questions, now });
   // Approve Cycle under segregation of duties reserves itself in Hedge Recommendation (decision 0013); Hedge Recommendation is built after Exposure Management, so the calls are passed as functions.
   const decisions: DecisionsPort = {
-    reserveApproval: (tenant, cycle, approver) => hedgeRecommendation.commands.reserveApproval(tenant, cycle, approver),
-    releaseApproval: (tenant, holdId) => hedgeRecommendation.commands.releaseApproval(tenant, holdId),
+    reserveApproval: (tenant, cycle, approver, id) => hedgeRecommendation.commands.reserveApproval(tenant, cycle, approver, id),
+    releaseApproval: (tenant, id) => hedgeRecommendation.commands.releaseApproval(tenant, id),
   };
   const exposureManagement = createExposureManagement(dbs.exposureManagement, { access: identity.questions, decisions, now });
   const fxTrade = createFxTrade(dbs.fxTrade, { access: identity.questions, masterData: masterData.questions, management: exposureManagement.questions }, { now });

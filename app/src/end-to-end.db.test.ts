@@ -10,6 +10,7 @@ import { migrate } from "../../scripts/migrate.mjs";
 import { composeApp, type App } from "./compose.ts";
 import { NO_ACTION_MESSAGES } from "../../services/hedge-recommendation/contract/index.ts";
 import { connect as connectHr, createHedgeRecommendation } from "../../services/hedge-recommendation/src/index.ts";
+import { connect as connectEm, createExposureManagement } from "../../services/exposure-management/src/index.ts";
 import { parseExecutedFile } from "../../services/fx-trade/src/index.ts";
 import { drain, startDueCycles } from "./dispatch.ts";
 
@@ -823,24 +824,24 @@ e2e("approval handshake across the real services: a reservation stops its approv
   await drain(app);
 
   // Reservation first: a's accept is refused and the recommendation stays open; releasing it lets a decide.
-  const hold = await hr.commands.reserveApproval(t, cycle, name(a));
-  assert.equal(hold.held, true);
+  const holdId = randomUUID();
+  assert.deepEqual(await hr.commands.reserveApproval(t, cycle, name(a), holdId), { held: true });
+  assert.deepEqual(await hr.commands.reserveApproval(t, cycle, name(a), holdId), { held: true }, "repeating the same reservation is safe");
   assert.deepEqual(await hr.questions.approvalHolds(t, cycle), [name(a)]);
   await assert.rejects(hr.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: a, action: "ACCEPT" }), /you are approving this cycle, so someone else must decide/);
   assert.equal((await hr.questions.getRecommendation(t, rec.recommendationId))!.status, "OPEN");
-  await hr.commands.releaseApproval(t, (hold as { holdId: string }).holdId);
-  await hr.commands.releaseApproval(t, (hold as { holdId: string }).holdId); // releasing twice is harmless
+  await hr.commands.releaseApproval(t, holdId);
+  await hr.commands.releaseApproval(t, holdId); // releasing twice is harmless
   assert.deepEqual(await hr.questions.approvalHolds(t, cycle), []);
 
   // Decision first: a wins the accept (so it counts at once, even before its pre-trade is confirmed elsewhere), and then cannot reserve or approve.
   await hr.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: a, action: "ACCEPT" });
-  assert.deepEqual(await hr.commands.reserveApproval(t, cycle, name(a)), { held: false });
+  assert.deepEqual(await hr.commands.reserveApproval(t, cycle, name(a), randomUUID()), { held: false });
   await assert.rejects(app.exposureManagement.commands.approveCycle({ tenantId: t, cycleId: cycle as string, actor: a }), /accepted or overrode/);
   assert.deepEqual(await hr.questions.approvalHolds(t, cycle), [], "the refused approval left nothing reserved");
 
   // b is not a decider, so b can reserve and approve. A reservation left behind by a crash is cleared once the cycle is approved.
-  const stale = await hr.commands.reserveApproval(t, cycle, name(b));
-  assert.equal(stale.held, true);
+  assert.deepEqual(await hr.commands.reserveApproval(t, cycle, name(b), randomUUID()), { held: true });
   await app.exposureManagement.commands.approveCycle({ tenantId: t, cycleId: cycle as string, actor: b });
   assert.deepEqual(await hr.questions.approvalHolds(t, cycle), [name(b)], "the stale reservation is still there until the cycle's approval reaches Hedge Recommendation");
   await drain(app);
@@ -859,11 +860,49 @@ e2e("approval handshake: an accept and a reservation by the same person, submitt
     const hr = app.hedgeRecommendation;
     const [decision, reservation] = await Promise.all([
       hr.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: a, action: "ACCEPT" }).then(() => true, () => false),
-      hr.commands.reserveApproval(t, cycle, `user:${(a as { userId: string }).userId}`).then((r) => r.held),
+      hr.commands.reserveApproval(t, cycle, `user:${(a as { userId: string }).userId}`, randomUUID()).then((r) => r.held),
     ]);
     assert.equal(decision && reservation, false, "one person won both");
     assert.equal(decision || reservation, true, "and one of them did win");
     outcomes.push(decision ? "decision" : "reservation");
   }
   assert.equal(outcomes.length, 3);
+});
+
+e2e("an interrupted approval strands its holder's hedge decisions; recovery lets the team decide on the same cycle, and is audited", async () => {
+  const { t, admin, cycle, recs } = await finishedCycle(defaults, "ENTITY", false, true);
+  const hr = app.hedgeRecommendation;
+  const rec = recs.find((r) => r.action === "HEDGE")!;
+  const me = (await trailOf(t)).find((r) => r.action === "program.defined")!.actor; // the admin's label; a one-person team
+  await app.exposureManagement.commands.setSegregationOfDuties({ tenantId: t, enabled: false, actor: admin });
+  await approveExposure(t, cycle as string);
+  await app.exposureManagement.commands.setSegregationOfDuties({ tenantId: t, enabled: true, actor: admin });
+
+  // An Approve Cycle whose process dies right after reserving: a second Exposure Management over the same database, with the real calls but a crash after reserve and no release.
+  const dyingDb = connectEm(url!);
+  const dying = createExposureManagement(dyingDb, {
+    access: app.identity.questions,
+    decisions: {
+      reserveApproval: async (tenant, c, approver, id) => { await hr.commands.reserveApproval(tenant, c, approver, id); throw new Error("process died"); },
+      releaseApproval: async () => { throw new Error("unreachable"); },
+    },
+    now: () => clock.now,
+  });
+  await assert.rejects(dying.commands.approveCycle({ tenantId: t, cycleId: cycle as string, actor: admin }), /process died/);
+  assert.deepEqual(await hr.questions.approvalHolds(t, cycle), [me]);
+  await assert.rejects(hr.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "ACCEPT" }), /you are approving this cycle/);
+  // Turning the policy off does not free the holder.
+  await app.exposureManagement.commands.setSegregationOfDuties({ tenantId: t, enabled: false, actor: admin });
+  await assert.rejects(hr.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "ACCEPT" }), /you are approving this cycle/);
+
+  // Recovery: stops the attempt, releases the reservation; the same person can now decide on the same open cycle, and approve it.
+  assert.equal(await app.exposureManagement.commands.recoverApproval({ tenantId: t, cycleId: cycle as string, actor: admin }), 1);
+  assert.deepEqual(await hr.questions.approvalHolds(t, cycle), []);
+  assert.equal(await app.exposureManagement.commands.recoverApproval({ tenantId: t, cycleId: cycle as string, actor: admin }), 0, "repeating it is harmless");
+  await hr.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "ACCEPT" });
+  await app.exposureManagement.commands.approveCycle({ tenantId: t, cycleId: cycle as string, actor: admin });
+  await drain(app);
+  assert.ok((await app.exposureManagement.questions.getCycle(t, cycle))!.approvedAt);
+  assert.equal((await trailOf(t, { action: "cycle.approval-recovered" })).length, 1, "one recovery recorded");
+  await dyingDb.destroy();
 });

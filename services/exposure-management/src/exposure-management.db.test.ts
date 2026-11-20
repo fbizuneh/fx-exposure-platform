@@ -39,19 +39,19 @@ const user = (permissions: Permission[], programs: string[] | null = null): Acto
 // Hedge Recommendation as the handshake sees it: who has decided on a cycle, and the reservations in flight. `claim` is what a hedge decision does there.
 const deciders = new Map<string, string[]>();
 const holds = new Map<string, { key: string; approver: string }>();
-const hooks: { afterReserve?: () => Promise<void>; failRelease?: boolean } = {};
+const hooks: { beforeReserve?: () => Promise<void>; afterReserve?: () => Promise<void>; failRelease?: boolean } = {};
 const decisions = {
-  async reserveApproval(t: TenantId, c: CycleId, approver: string) {
+  async reserveApproval(t: TenantId, c: CycleId, approver: string, reservationId: string) {
+    await hooks.beforeReserve?.();
     const key = `${t}:${c}`;
-    if ((deciders.get(key) ?? []).includes(approver)) return { held: false } as const;
-    const holdId = randomUUID();
-    holds.set(holdId, { key, approver });
+    if ((deciders.get(key) ?? []).includes(approver)) return { held: false };
+    holds.set(reservationId, { key, approver });
     await hooks.afterReserve?.();
-    return { held: true, holdId } as const;
+    return { held: true };
   },
-  async releaseApproval(_t: TenantId, holdId: string) {
+  async releaseApproval(_t: TenantId, reservationId: string) {
     if (hooks.failRelease) throw new Error("Hedge Recommendation unreachable");
-    holds.delete(holdId);
+    holds.delete(reservationId);
   },
 };
 const claim = (t: TenantId, c: string, who: string): boolean => {
@@ -585,4 +585,83 @@ dbTest("segregation: a failed or repeated Approve Cycle leaves nothing reserved,
   try { await em.commands.approveCycle({ tenantId: t3, cycleId: id3, actor: p }); } finally { hooks.afterReserve = undefined; }
   assert.ok((await em.questions.getCycle(t3, id3))!.approvedAt);
   assert.equal(holds.size, 0);
+});
+
+// --- Recovery of an interrupted Approve Cycle (decision 0013) ---
+const attemptStates = async (t: TenantId, c: string) => (await q(db).selectFrom("approval_attempts").select("state").where("tenant_id", "=", t).where("cycle_id", "=", c).orderBy("started_at").execute()).map((r) => r.state);
+const readyForCycleApproval = async () => {
+  const t = await ready("BS");
+  const other = approver();
+  const { id } = await completed(t);
+  await em.commands.approveExposure({ tenantId: t, cycleId: id, actor: other });
+  return { t, id, other };
+};
+
+dbTest("recovery: an approval that stopped before committing strands its holder until recovered; recovery is authorized, audited once, repeatable, and lets the team carry on", async () => {
+  const { t, id, other } = await readyForCycleApproval();
+  const p = approver();
+  hooks.afterReserve = async () => { throw new Error("process died"); };
+  hooks.failRelease = true;
+  try { await assert.rejects(em.commands.approveCycle({ tenantId: t, cycleId: id, actor: p }), /process died/); } finally { hooks.afterReserve = undefined; hooks.failRelease = false; }
+  assert.equal(holds.size, 1, "the reservation was left behind");
+  assert.deepEqual(await attemptStates(t, id), ["IN_FLIGHT"]);
+  assert.equal(claim(t, id, label(p)), false, "its holder cannot win a hedge decision");
+
+  // Switching the policy off does not free it; recovery does.
+  await em.commands.setSegregationOfDuties({ tenantId: t, enabled: false, actor: user(["authorization:manage"]) });
+  assert.equal(claim(t, id, label(p)), false);
+  await assert.rejects(em.commands.recoverApproval({ tenantId: t, cycleId: id, actor: user(["cycle:read", "cycle:initiate"]) }), AccessDenied);
+  assert.equal(holds.size, 1, "a refused recovery changed nothing");
+  assert.equal(await em.commands.recoverApproval({ tenantId: t, cycleId: id, actor: other }), 1);
+  assert.equal(holds.size, 0);
+  assert.deepEqual(await attemptStates(t, id), ["ABANDONED"]);
+  assert.equal(claim(t, id, label(p)), true, "the holder can decide again on the same cycle");
+  assert.deepEqual((await changes(t)).filter((c) => c.startsWith("cycle.approval-recovered")), ["cycle.approval-recovered cycle"]);
+
+  // Repeating it finds nothing to stop and records nothing more; the cycle is still open and can be approved.
+  assert.equal(await em.commands.recoverApproval({ tenantId: t, cycleId: id, actor: other }), 0);
+  assert.equal((await changes(t)).filter((c) => c.startsWith("cycle.approval-recovered")).length, 1);
+  await em.commands.approveCycle({ tenantId: t, cycleId: id, actor: other });
+  assert.ok((await em.questions.getCycle(t, id))!.approvedAt);
+});
+
+dbTest("recovery: racing an active approval, in every order, the attempt either commits or can no longer commit, and nothing stays reserved", async () => {
+  // Recovery lands after the attempt reserved and before it commits: the attempt cannot finish.
+  let s = await readyForCycleApproval();
+  const p = approver(); const r = approver();
+  hooks.afterReserve = async () => { hooks.afterReserve = undefined; assert.equal(await em.commands.recoverApproval({ tenantId: s.t, cycleId: s.id, actor: r }), 1); };
+  try { await assert.rejects(em.commands.approveCycle({ tenantId: s.t, cycleId: s.id, actor: p }), /stopped by a recovery/); } finally { hooks.afterReserve = undefined; }
+  assert.equal((await em.questions.getCycle(s.t, s.id))!.approvedAt, null);
+  assert.deepEqual(await attemptStates(s.t, s.id), ["ABANDONED"]);
+  assert.equal(holds.size, 0);
+  await em.commands.approveCycle({ tenantId: s.t, cycleId: s.id, actor: p }); // retrying is a new attempt, and it can commit
+  assert.deepEqual(await attemptStates(s.t, s.id), ["ABANDONED", "COMMITTED"]);
+
+  // Recovery lands before the attempt's reservation reaches Hedge Recommendation (a delayed attempt): it still cannot finish, and its late reservation is released.
+  s = await readyForCycleApproval();
+  hooks.beforeReserve = async () => { hooks.beforeReserve = undefined; assert.equal(await em.commands.recoverApproval({ tenantId: s.t, cycleId: s.id, actor: r }), 1); };
+  try { await assert.rejects(em.commands.approveCycle({ tenantId: s.t, cycleId: s.id, actor: p }), /stopped by a recovery/); } finally { hooks.beforeReserve = undefined; }
+  assert.equal(holds.size, 0);
+  assert.equal((await em.questions.getCycle(s.t, s.id))!.approvedAt, null);
+
+  // The approval commits first: recovery finds nothing to stop and leaves the approval alone.
+  s = await readyForCycleApproval();
+  await em.commands.approveCycle({ tenantId: s.t, cycleId: s.id, actor: p });
+  assert.equal(await em.commands.recoverApproval({ tenantId: s.t, cycleId: s.id, actor: r }), 0);
+  assert.deepEqual(await attemptStates(s.t, s.id), ["COMMITTED"]);
+  assert.ok((await em.questions.getCycle(s.t, s.id))!.approvedAt);
+
+  // Genuinely concurrent: whichever order the cycle lock gives, the outcome is consistent.
+  let approved = 0; let stopped = 0;
+  for (let i = 0; i < 6; i++) {
+    s = await readyForCycleApproval();
+    const [a] = await Promise.all([settle(em.commands.approveCycle({ tenantId: s.t, cycleId: s.id, actor: p })), em.commands.recoverApproval({ tenantId: s.t, cycleId: s.id, actor: r })]);
+    const done = (await em.questions.getCycle(s.t, s.id))!.approvedAt !== null;
+    const states = await attemptStates(s.t, s.id);
+    assert.equal(a.ok, done, "the approval reports what happened");
+    assert.equal(states.includes("COMMITTED"), done, "an attempt is COMMITTED exactly when the cycle was approved");
+    assert.equal(holds.size, 0, "nothing stays reserved");
+    done ? approved++ : stopped++;
+  }
+  assert.equal(approved + stopped, 6);
 });

@@ -177,24 +177,35 @@ export function cycleCommands(db: Db, access: IdentityPort, decisions: Decisions
 
   /**
    * Approve Cycle. With segregation of duties off, one transaction. With it on, the decision about who accepted or overrode a hedge lives in
-   * Hedge Recommendation's database, so no single transaction can see both: the approval first reserves itself there (which atomically checks the
-   * approver is not already a decider and stops them becoming one), then commits here, then lets the reservation go. A reservation that is not
-   * released (a crash, or Hedge Recommendation unreachable at that moment) only keeps its holder from winning hedge decisions on this cycle; it is
-   * cleared when the cycle is approved, skipped or deleted, and a retried approval makes its own, so retrying is safe.
+   * Hedge Recommendation's database, so no single transaction can see both. The approval is then an attempt, recorded durably here:
+   *   1. one transaction checks state and policy and, finding the policy on, records the attempt as IN_FLIGHT;
+   *   2. it reserves itself in Hedge Recommendation (which atomically checks the approver has not already decided, and stops them doing so);
+   *   3. one transaction re-checks state, requires the attempt to still be IN_FLIGHT, approves, and marks it COMMITTED;
+   *   4. it releases the reservation and, if it did not commit, marks itself FAILED.
+   * An attempt that stops before step 3 commits leaves a reservation behind, which only keeps its holder from winning hedge decisions on the cycle.
+   * `recoverApproval` is the way out; it stops such attempts for good (an attempt can commit only while IN_FLIGHT) before it releases anything.
    */
   async function approveCycle(input: { tenantId: TenantId; cycleId: string; actor: Actor }): Promise<void> {
     const program = await find(input.tenantId, input.cycleId);
     await require_(access, input.tenantId, input.actor, "cycle:approve", program);
-    const approve = async (tx: Tx, withPolicy: boolean): Promise<"DONE" | "RESERVE"> => {
+    const attemptId = randomUUID();
+    const approve = async (tx: Tx, mode: "FIRST" | "COMMIT"): Promise<"DONE" | "RESERVE"> => {
       const c = await lock(tx, input.tenantId, input.cycleId);
       if (!c) throw new CycleRefused("cycle not found");
       if (c.approved_at !== null) throw new CycleRefused("the cycle is already approved");
       if (c.outcome !== null) throw new CycleRefused(`the cycle was ${c.outcome.toLowerCase()}`);
       if (c.stage !== "COMPLETED") throw new CycleRefused("only a completed cycle can be approved");
       if (c.exposure_approved_at === null) throw new CycleRefused("approve the exposure before approving the cycle");
-      if (withPolicy) {
+      if (mode === "FIRST") {
         await lockTenantPolicy(tx, input.tenantId, "shared");
-        if (await segregationOn(tx, input.tenantId)) return "RESERVE";
+        if (await segregationOn(tx, input.tenantId)) {
+          await q(tx).insertInto("approval_attempts").values({ tenant_id: input.tenantId, attempt_id: attemptId, cycle_id: input.cycleId, approver: who(input.actor), state: "IN_FLIGHT", started_at: clock() }).execute();
+          return "RESERVE";
+        }
+      } else {
+        // Under the cycle lock, so a recovery is wholly before this (the attempt is ABANDONED and cannot commit) or wholly after (it finds COMMITTED and leaves it).
+        const moved = await q(tx).updateTable("approval_attempts").set({ state: "COMMITTED", ended_at: clock() }).where("tenant_id", "=", input.tenantId).where("attempt_id", "=", attemptId).where("state", "=", "IN_FLIGHT").executeTakeFirst();
+        if (Number(moved.numUpdatedRows) === 0) throw new CycleRefused("this approval was stopped by a recovery before it could finish; approve the cycle again");
       }
       await q(tx).updateTable("cycles").set({ approved_at: clock(), approved_by: who(input.actor) }).where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).execute();
       await note(tx, input.tenantId, input.cycleId, "APPROVED", who(input.actor));
@@ -203,17 +214,42 @@ export function cycleCommands(db: Db, access: IdentityPort, decisions: Decisions
       return "DONE";
     };
 
-    if ((await db.transaction().execute((tx) => approve(tx, true))) === "DONE") return;
-    const hold = await decisions.reserveApproval(input.tenantId, input.cycleId as CycleId, who(input.actor));
-    if (!hold.held) return refuseDuty("CYCLE", input, program, CYCLE_WHY);
+    if ((await db.transaction().execute((tx) => approve(tx, "FIRST"))) === "DONE") return;
     try {
-      // The reservation was made while the policy was on. If it has been switched off since, approving is allowed anyway, so the cycle lock and
-      // state checks are all that is re-read here.
-      await db.transaction().execute((tx) => approve(tx, false));
+      const hold = await decisions.reserveApproval(input.tenantId, input.cycleId as CycleId, who(input.actor), attemptId);
+      if (!hold.held) return await refuseDuty("CYCLE", input, program, CYCLE_WHY);
+      // The reservation was made while the policy was on. If it has been switched off since, approving is allowed anyway.
+      await db.transaction().execute((tx) => approve(tx, "COMMIT"));
     } finally {
-      // A failure to release must not hide the outcome of the approval; the reservation is cleared when the cycle closes (see above).
-      await decisions.releaseApproval(input.tenantId, hold.holdId).catch(() => undefined);
+      // Whatever happened, let the reservation go and close the attempt. If either step fails the attempt stays IN_FLIGHT, which is what recovery looks for;
+      // the failure must not hide the approval's own outcome.
+      try {
+        await decisions.releaseApproval(input.tenantId, attemptId);
+        await q(db).updateTable("approval_attempts").set({ state: "FAILED", ended_at: clock() }).where("tenant_id", "=", input.tenantId).where("attempt_id", "=", attemptId).where("state", "=", "IN_FLIGHT").execute();
+      } catch { /* left for recovery */ }
     }
+  }
+
+  /**
+   * Recovery for an Approve Cycle that stopped before it committed and left its reservation behind (decision 0013). Needs `cycle:approve`.
+   * Under the cycle lock it marks every IN_FLIGHT attempt on the cycle ABANDONED, which an attempt can no longer commit from, and records that once.
+   * Only then does it release reservations, for every abandoned attempt of the cycle (so a reservation that arrives late is cleared by running it again).
+   * Repeating it is safe and changes nothing once there is nothing left. Returns how many attempts this call stopped.
+   */
+  async function recoverApproval(input: { tenantId: TenantId; cycleId: string; actor: Actor }): Promise<number> {
+    const program = await find(input.tenantId, input.cycleId);
+    await require_(access, input.tenantId, input.actor, "cycle:approve", program);
+    const stopped = await db.transaction().execute(async (tx) => {
+      await lock(tx, input.tenantId, input.cycleId);
+      const r = await q(tx).updateTable("approval_attempts").set({ state: "ABANDONED", ended_at: clock(), ended_by: who(input.actor) })
+        .where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).where("state", "=", "IN_FLIGHT").executeTakeFirst();
+      const n = Number(r.numUpdatedRows);
+      if (n > 0) await recordChange(tx, { tenantId: input.tenantId, programId: program, actor: who(input.actor), action: "cycle.approval-recovered", targetType: "cycle", targetId: input.cycleId, fields: [] });
+      return n;
+    });
+    const abandoned = await q(db).selectFrom("approval_attempts").select("attempt_id").where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).where("state", "=", "ABANDONED").execute();
+    for (const a of abandoned) await decisions.releaseApproval(input.tenantId, a.attempt_id);
+    return stopped;
   }
 
   return {
@@ -225,5 +261,6 @@ export function cycleCommands(db: Db, access: IdentityPort, decisions: Decisions
     deleteCycle: (input: { tenantId: TenantId; cycleId: string; reason: string; actor: Actor }) => close("DELETED", input),
     approveExposure,
     approveCycle,
+    recoverApproval,
   };
 }
