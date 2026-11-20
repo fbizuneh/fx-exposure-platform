@@ -38,7 +38,7 @@ Date: 2026-11-18. Service: exposure-analysis (core tier). Sources: the product o
 Build order for these: Master Data (NDF flag on currencies, question, change-set support), Exposure Management (override setting, migration, validation), then Exposure Analysis (the default logic and override in the run).
 
 ## Not built yet
-Hedge rows and net exposure, forecast and AR/AP adapters, "entity by product, project or business unit" netting, per-pair exposure currency, purging of old runs.
+Hedge rows and net exposure, forecast and AR/AP adapters, "entity by product, project or business unit" netting, per-pair exposure currency (done in decision 0015), purging of old runs.
 
 ## Revisit when
 FX Trade supplies hedges, or a second source adapter needs a period other than the as-of date.

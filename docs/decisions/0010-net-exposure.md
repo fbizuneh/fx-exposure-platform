@@ -19,7 +19,7 @@ Date: 2026-11-19. Service: exposure-analysis (amends 0008). Sources: Hedging Pro
 13. **Precision.** Gross, hedge and net amounts keep two decimals. The contractual hedge amount is never changed to make displayed totals reconcile; a one-unit difference when the UI shows zero decimals is accepted.
 
 ## Follow-up, not in this change
-Client configuration mapping a currency pair to an exposure currency, so clients can align those rows on purpose. The existing override and default are not a substitute for the deal-currency rule here.
+Client configuration mapping a currency pair to an exposure currency, so clients can align those rows on purpose. Done in decision 0015. The existing override and default are not a substitute for the deal-currency rule here.
 
 ## Defaults I chose, to confirm or change
 - Trades traded after the as-of date are not outstanding at that date, even if the run happens later.

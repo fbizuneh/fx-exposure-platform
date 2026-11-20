@@ -98,17 +98,21 @@ export function runCommands(db: Db, c: Collaborators, now: () => Date) {
 
     const baseline = buildBaseline(kept, rateOf, (code) => regions.get(code) ?? "UNASSIGNED");
     const ndf = new Set((await c.masterData.getCurrencies(tenant, asOf)).filter((x) => x.isNdf).map((x) => x.code));
-    const overrides = new Map((json<{ pair: string; exposureCurrency: string }[]>(run.exposure_currency_overrides)).map((o) => [overrideKey(...(o.pair.split("-") as [string, string])), o.exposureCurrency]));
+    // The pair's exposure currency, most specific first (decision 0015): the program's own override from its settings, then the program's mapping in Master Data as of the
+    // as-of date, then the default logic. Both are program-level, and both stand only where overrides apply (decision 0008): the merged map is that one rule.
+    const mappings = await c.masterData.getPairExposureCurrencies(tenant, run.program_id as never, asOf);
+    const overrides = new Map(mappings.map((m) => [m.pair, m.exposureCurrency] as const));
+    for (const o of json<{ pair: string; exposureCurrency: string }[]>(run.exposure_currency_overrides)) overrides.set(overrideKey(...(o.pair.split("-") as [string, string])), o.exposureCurrency);
     const rules = { ndf, overrides };
     const groups = netByLevel(baseline, level, run.as_of, display, rateOf, rules);
     const net = netExposure(baseline, hedge.rows, level, run.as_of, display, rateOf, rules, groups);
     startSaving();
-    return save(tenant, run.program_id, runId, { baseline, groups, hedgeRows: hedge.rows, hedgeCounts: hedge.counts, net, counts, warnings, blocked, needs, fetched });
+    return save(tenant, run.program_id, runId, { pairMappings: mappings, baseline, groups, hedgeRows: hedge.rows, hedgeCounts: hedge.counts, net, counts, warnings, blocked, needs, fetched });
   }
 
   async function save(
     tenant: TenantId, program: string, runId: string,
-    r: { baseline: Baseline[]; groups: GroupResult[]; hedgeRows: HedgeRow[]; hedgeCounts: HedgeCounts; net: NetGroupResult[]; counts: unknown; warnings: RateWarning[]; blocked: number; needs: ReturnType<typeof requiredRates>; fetched: Map<string, Awaited<ReturnType<Collaborators["rates"]["getRate"]>>> },
+    r: { pairMappings: readonly { pair: string; exposureCurrency: string }[]; baseline: Baseline[]; groups: GroupResult[]; hedgeRows: HedgeRow[]; hedgeCounts: HedgeCounts; net: NetGroupResult[]; counts: unknown; warnings: RateWarning[]; blocked: number; needs: ReturnType<typeof requiredRates>; fetched: Map<string, Awaited<ReturnType<Collaborators["rates"]["getRate"]>>> },
   ): Promise<RunOutcome> {
     return db.transaction().execute(async (tx) => {
       const run = await q(tx).selectFrom("runs").select(["status", "cycle_id", "display_currency", "as_of"]).where("tenant_id", "=", tenant).where("run_id", "=", runId).executeTakeFirst();
@@ -159,7 +163,7 @@ export function runCommands(db: Db, c: Collaborators, now: () => Date) {
       });
       if (rateRows.length > 0) await q(tx).insertInto("rates_used").values(rateRows).execute();
       await q(tx).updateTable("runs").set({
-        status: "FINISHED", wait_reason: null, counts: JSON.stringify(r.counts), hedge_counts: JSON.stringify(r.hedgeCounts), blocked_count: r.blocked, warnings: JSON.stringify(r.warnings), attempted_at: now(), finished_at: now(),
+        status: "FINISHED", wait_reason: null, counts: JSON.stringify(r.counts), hedge_counts: JSON.stringify(r.hedgeCounts), pair_mappings: JSON.stringify(r.pairMappings), blocked_count: r.blocked, warnings: JSON.stringify(r.warnings), attempted_at: now(), finished_at: now(),
       }).where("tenant_id", "=", tenant).where("run_id", "=", runId).execute();
       const base = { tenantId: tenant, cycleId: toCycleId(run!.cycle_id), programId: toProgramId(program), runId };
       await announce(tx, { type: "exposure-analysis.run-started", ...base });

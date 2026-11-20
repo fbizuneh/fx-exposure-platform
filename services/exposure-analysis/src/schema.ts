@@ -17,6 +17,7 @@ export interface ExposureAnalysisDatabase {
     netting_level: string;
     display_currency: string;
     exposure_currency_overrides: JsonIn;
+    pair_mappings: JsonOrNull;
     counts: JsonOrNull;
     hedge_counts: JsonOrNull;
     blocked_count: number | null;

@@ -7,9 +7,9 @@ import { q, type Db, type Tx } from "./db.ts";
 import { DEFAULT_MAX_END_SHARE, plan, shouldHold, stable, type OpenRow, type Plan } from "./diff.ts";
 import { byPerson, recordChange } from "./change-record.ts";
 import { announce } from "./outbox.ts";
-import { chartKey, type AccountRow, type CalendarRow, type CurrencyRow, type EntityRow, type HierarchyNodeRow, type Kind, type Mode } from "./rows.ts";
+import { chartKey, type AccountRow, type CalendarRow, type CurrencyRow, type EntityRow, type HierarchyNodeRow, type Kind, type Mode, type PairExposureCurrencyRow, normalPair } from "./rows.ts";
 import { WEEKDAYS } from "../contract/index.ts";
-import { ChangeSetInvalid, validateAccounts, validateCalendars, validateCurrencies, validateEntities, validateHierarchy } from "./validate.ts";
+import { ChangeSetInvalid, validateAccounts, validateCalendars, validateCurrencies, validateEntities, validateHierarchy, validatePairExposureCurrencies } from "./validate.ts";
 
 /** The change set cannot be applied as things stand: out of date, a repeat with other content, or not held. */
 export class ChangeSetRefused extends Error {}
@@ -83,7 +83,7 @@ async function ensureCharts(tx: Tx, tenant: TenantId, codes: Iterable<string>, h
   }
 }
 
-async function closeVersion(tx: Tx, table: "entities" | "gl_hierarchy_nodes" | "accounts" | "currencies" | "calendars", idCol: string, tenant: string, id: string, validFrom: string, asOf: string) {
+async function closeVersion(tx: Tx, table: "entities" | "gl_hierarchy_nodes" | "accounts" | "currencies" | "calendars" | "pair_exposure_currencies", idCol: string, tenant: string, id: string, validFrom: string, asOf: string) {
   const db = q(tx) as unknown as Kysely<any>;
   if (validFrom === asOf) {
     // A version that starts the same day is replaced in place, so no empty range is ever stored.
@@ -313,7 +313,42 @@ const calendarOps: Ops<CalendarRow> = {
   },
 };
 
-const OPS = { ENTITY: entityOps, HIERARCHY: hierarchyOps, ACCOUNT: accountOps, CURRENCY: currencyOps, CALENDAR: calendarOps } as unknown as Record<Kind, Ops<unknown>>;
+const pairKeyOf = (program: string, pair: string): string => JSON.stringify([program, normalPair(pair)]);
+
+const pairExposureOps: Ops<PairExposureCurrencyRow> = {
+  kind: "EXPOSURE_CURRENCY",
+  keyOf: (r) => pairKeyOf(r.programCode, r.pair),
+  attrsOf: (r) => ({ exposureCurrency: r.exposureCurrency }),
+  async load(tx, tenant, asOf) {
+    const l = emptyLoaded();
+    const rows = await q(tx).selectFrom("pair_exposure_currencies").selectAll().where("tenant_id", "=", tenant).orderBy("valid_from").execute();
+    for (const r of rows) {
+      const key = pairKeyOf(r.program_id, r.pair);
+      l.ids.set(key, r.mapping_id);
+      l.maxValidFrom = later(l.maxValidFrom, r.valid_from);
+      if (isOpen(r, asOf)) l.open.set(key, { id: r.mapping_id, validFrom: r.valid_from, source: r.source_system, attrs: stable({ exposureCurrency: r.exposure_currency }) });
+    }
+    return l;
+  },
+  validate: (rows) => validatePairExposureCurrencies(rows),
+  async write(tx, w) {
+    const ids = new Map(w.loaded.ids);
+    for (const k of w.plan.creates) if (!ids.has(k)) ids.set(k, randomUUID());
+    for (const k of [...w.plan.changes, ...w.plan.ends]) {
+      const cur = w.loaded.open.get(k)!;
+      await closeVersion(tx, "pair_exposure_currencies", "mapping_id", w.tenant, cur.id, cur.validFrom, w.asOf);
+    }
+    for (const k of [...w.plan.creates, ...w.plan.changes]) {
+      const r = w.rows.get(k)!;
+      await q(tx).insertInto("pair_exposure_currencies").values({
+        tenant_id: w.tenant, mapping_id: ids.get(k)!, valid_from: w.asOf, valid_to: null, source_system: w.source, batch_id: w.batchId,
+        program_id: r.programCode, pair: normalPair(r.pair), exposure_currency: r.exposureCurrency,
+      }).execute();
+    }
+  },
+};
+
+const OPS = { ENTITY: entityOps, HIERARCHY: hierarchyOps, ACCOUNT: accountOps, CURRENCY: currencyOps, CALENDAR: calendarOps, EXPOSURE_CURRENCY: pairExposureOps } as unknown as Record<Kind, Ops<unknown>>;
 
 async function maxEndShare(tx: Tx, tenant: TenantId): Promise<number> {
   const row = await q(tx).selectFrom("tenant_settings").select("max_end_share").where("tenant_id", "=", tenant).executeTakeFirst();
@@ -407,6 +442,7 @@ export function applyCommands(db: Db) {
     applyAccounts: (sub: Submission<AccountRow>) => execute(db, { tenant: sub.tenantId, kind: "ACCOUNT", sub }),
     applyCurrencies: (sub: Submission<CurrencyRow>) => execute(db, { tenant: sub.tenantId, kind: "CURRENCY", sub }),
     applyCalendars: (sub: Submission<CalendarRow>) => execute(db, { tenant: sub.tenantId, kind: "CALENDAR", sub }),
+    applyPairExposureCurrencies: (sub: Submission<PairExposureCurrencyRow>) => execute(db, { tenant: sub.tenantId, kind: "EXPOSURE_CURRENCY", sub }),
 
     /** Applies a held snapshot now. It is checked again against what exists today. */
     releaseChangeSet: (tenant: TenantId, batchId: string, by: string) => execute(db, { tenant, release: { batchId, by } }),

@@ -7,6 +7,7 @@ Tier: supporting.
 - Charts of accounts, the GL hierarchy and accounts, with statement type, normal balance and the monetary and FX-relevant flags
 - Currencies, with whether each trades as an NDF (decision 0008), versioned like the rest
 - A business-day calendar per currency: weekend days, holidays and the date they are known through (decision 0014)
+- Per hedging program, the exposure currency of a currency pair (decision 0015)
 - The history of all of these: every version has a valid-from and valid-to
 - Every change set received, and the safeguard that holds a snapshot ending too much
 See docs/decisions/0004-master-data.md.
@@ -17,6 +18,7 @@ See docs/decisions/0004-master-data.md.
 - The accounts on a hierarchy node and beneath it, as of a date
 - Functional currencies of entities, as of a date
 - The calendars of currencies, as of a date
+- A program's pair-to-exposure-currency mappings, as of a date
 Each is defined in contract/.
 
 ## Announces

@@ -11,6 +11,7 @@ import type { ExecutedTrade } from "@services/fx-trade/contract";
 import type { Account, Entity } from "@services/master-data/contract";
 import { migrate } from "../../../scripts/migrate.mjs";
 import { connect, createExposureAnalysis, type Db } from "./index.ts";
+import { q } from "./db.ts";
 
 const url = process.env.TEST_DATABASE_URL;
 const enabled = url !== undefined && /\/[^/?]*_test(\?|$)/.test(url);
@@ -24,6 +25,8 @@ interface World {
   rates: Map<string, Pick<Rate, "rate" | "quality">>;
   cycles: Map<string, Cycle>;
   ndf: string[];
+  /** Master Data's pair-to-exposure-currency mappings, by program (decision 0015). */
+  mappings?: Record<string, { pair: string; exposureCurrency: string }[]>;
   /** When true the rate service throws, as if it were unreachable. */
   down?: boolean;
   /** Executed trades FX Trade would return. */
@@ -56,6 +59,7 @@ const fakes = {
     async getEntities(_t: TenantId, codes: readonly string[]) { return codes.flatMap((c) => (ENTITIES.has(c) ? [ENTITIES.get(c)!] : [])); },
     async getAccounts(_t: TenantId, keys: readonly { accountNumber: string }[]) { return keys.flatMap((k) => (ACCOUNTS.has(k.accountNumber) ? [ACCOUNTS.get(k.accountNumber)!] : [])); },
     async getCurrencies(t: TenantId) { return world(t).ndf.map((code) => ({ code, isNdf: true })); },
+    async getPairExposureCurrencies(t: TenantId, program: string) { return world(t).mappings?.[program] ?? []; },
     async entityWalk(_t: TenantId, id: string) {
       const parent = [...ENTITIES.values()].find((e) => e.entityId === id)?.parentEntityId;
       return parent ? [...ENTITIES.values()].filter((e) => e.entityId === parent) : [];
@@ -344,4 +348,41 @@ dbTest("region by entity: the deal-currency rule applies too, and a program over
   const runB = (await ea.questions.currentRun(b.t, b.c))!;
   const pairB = (await ea.questions.netExposures(b.t, runB.runId)).filter((n) => n.currencyPair === pair);
   assert.deepEqual(pairB.map((n) => n.exposureCurrency), ["GBP"], "the override puts both trades in one row");
+});
+
+dbTest("a program's pair mapping in Master Data sets the exposure currency; the program's own override wins over it; another program's mapping is not used; the run keeps what it used (decision 0015)", async () => {
+  const exposure = async (s: ReturnType<typeof setup>, kind: "gross" | "net" = "gross") => {
+    assert.equal(await ea.commands.onCycleInitiated(s.event()), "FINISHED");
+    const run = (await ea.questions.currentRun(s.t, s.c))!;
+    const groups = kind === "gross" ? await ea.questions.exposures(s.t, run.runId) : await ea.questions.netExposures(s.t, run.runId);
+    return groups.map((g) => `${g.currencyPair}:${g.exposureCurrency}`);
+  };
+  const brl = (over: Partial<World>, level = "GROUP_NATURAL", overrides: { pair: string; exposureCurrency: string }[] = []) => setup({
+    balances: [bal("US01", "4000", "BRL", "500"), bal("US01", "4000", "EUR", "10")], ndf: ["BRL"],
+    rates: new Map([["USD|BRL", { rate: "5", quality: "VALID" }], ["EUR|USD", { rate: "1.1", quality: "VALID" }], ["BRL|USD", { rate: "0.2", quality: "VALID" }]]), ...over,
+  }, level, overrides);
+
+  // Without a mapping the NDF currency decides; with one for this program the mapping does.
+  assert.deepEqual(await exposure(brl({})), ["EUR-USD:EUR", "USD-BRL:BRL"]);
+  const mapped = brl({ mappings: { BS: [{ pair: "BRL-USD", exposureCurrency: "USD" }] } });
+  assert.deepEqual(await exposure(mapped), ["EUR-USD:EUR", "USD-BRL:USD"]);
+  const saved = await q(db).selectFrom("runs").select("pair_mappings").where("tenant_id", "=", mapped.t).where("cycle_id", "=", mapped.c).executeTakeFirst();
+  assert.deepEqual(saved!.pair_mappings, [{ pair: "BRL-USD", exposureCurrency: "USD" }], "the run saved the mapping it used");
+
+  // The program's override in its settings is more specific and wins.
+  assert.deepEqual(await exposure(brl({ mappings: { BS: [{ pair: "BRL-USD", exposureCurrency: "USD" }] } }, "GROUP_NATURAL", [{ pair: "BRL-USD", exposureCurrency: "BRL" }])), ["EUR-USD:EUR", "USD-BRL:BRL"]);
+  // A mapping for another program has no effect here.
+  assert.deepEqual(await exposure(brl({ mappings: { OTHER: [{ pair: "BRL-USD", exposureCurrency: "USD" }] } })), ["EUR-USD:EUR", "USD-BRL:BRL"]);
+  // Portfolio level stays fixed: no mapping applies.
+  assert.deepEqual(await exposure(brl({ mappings: { BS: [{ pair: "EUR-USD", exposureCurrency: "USD" }] } }, "GROUP_PORTFOLIO")), ["EUR-USD:EUR", "USD-BRL:BRL"]);
+
+  // Hedge rows with neither leg in the entity's functional currency fall back to the deal currency; a mapping aligns them (decision 0010 follow-up).
+  const trades = [hedge("US01", "BUY", "EUR", "100", "GBP", "87", "2027-01-15", "m1"), hedge("US01", "SELL", "GBP", "50", "EUR", "57", "2027-01-15", "m2")];
+  const split = setup({ balances: [bal("US01", "4000", "EUR", "1000")], trades }, "REGION_BY_ENTITY");
+  assert.equal(await ea.commands.onCycleInitiated(split.event()), "FINISHED");
+  const splitRows = (await ea.questions.netExposures(split.t, (await ea.questions.currentRun(split.t, split.c))!.runId)).filter((n) => n.currencyPair.includes("GBP") && n.currencyPair.includes("EUR"));
+  assert.deepEqual(splitRows.map((n) => n.exposureCurrency).sort(), ["EUR", "GBP"], "without a mapping the deal currency splits the pair in two");
+  const pair = splitRows[0]!.currencyPair;
+  const aligned = setup({ balances: [bal("US01", "4000", "EUR", "1000")], trades, mappings: { BS: [{ pair: [...pair.split("-")].sort().join("-"), exposureCurrency: "GBP" }] } }, "REGION_BY_ENTITY");
+  assert.deepEqual((await exposure(aligned, "net")).filter((l) => l.startsWith(pair)), [`${pair}:GBP`], "both hedges land in one row");
 });

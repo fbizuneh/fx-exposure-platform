@@ -115,6 +115,12 @@ export function masterDataQuestions(db: Db): MasterDataQuestions {
       }));
     },
 
+    async getPairExposureCurrencies(tenant, program, asOf) {
+      const rows = await q(db).selectFrom("pair_exposure_currencies").select(["pair", "exposure_currency"]).where("tenant_id", "=", tenant).where("program_id", "=", program).where("valid_from", "<=", asOf)
+        .where((eb) => eb.or([eb("valid_to", "is", null), eb("valid_to", ">", asOf)])).orderBy("pair").execute();
+      return rows.map((r) => ({ pair: r.pair, exposureCurrency: r.exposure_currency }));
+    },
+
     async hierarchyPaths(tenant, chartCode, nodeCodes, asOf) {
       const chartId = (await charts(db, tenant)).byCode.get(chartCode);
       if (!chartId || nodeCodes.length === 0) return [];

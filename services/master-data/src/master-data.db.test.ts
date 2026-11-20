@@ -4,7 +4,7 @@ import type { MasterDataEvents } from "../contract/index.ts";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { asOfDate, entityId, tenantId, type EntityId, type TenantId } from "@shared/kernel";
+import { asOfDate, entityId, programId, tenantId, type EntityId, type TenantId } from "@shared/kernel";
 import { migrate } from "../../../scripts/migrate.mjs";
 import { ChangeSetInvalid, ChangeSetRefused, connect, createMasterData, type AccountRow, type Db, type EntityRow, type HierarchyNodeRow } from "./index.ts";
 import { q } from "./db.ts";
@@ -312,4 +312,40 @@ dbTest("calendars: a bad calendar is refused with every problem named", async ()
   assert.match(await bad(cal("EUR", { holidays: [{ date: "2026-13-01", name: null }] })), /real date/);
   assert.match(await bad(cal("EUR", { holidays: [{ date: "2026-05-01", name: " " }] })), /blank name/);
   assert.equal((await md.questions.getCalendars(t, ["EUR"], D1)).length, 0, "nothing was written");
+});
+
+const pairRow = (programCode: string, pair: string, exposureCurrency: string) => ({ programCode, pair, exposureCurrency });
+
+dbTest("pair exposure currencies: kept per program and versioned; a pair written either way is one row; another program's mapping is not returned", async () => {
+  const t = newTenant();
+  const a = await md.commands.applyPairExposureCurrencies(snap(t, [pairRow("BS", "GBP-EUR", "GBP"), pairRow("BS", "BRL-USD", "USD"), pairRow("CF", "EUR-GBP", "EUR")], D1));
+  assert.deepEqual([a.status, a.created], ["APPLIED", 3]);
+  assert.deepEqual(await md.questions.getPairExposureCurrencies(t, programId("BS"), D1), [{ pair: "BRL-USD", exposureCurrency: "USD" }, { pair: "EUR-GBP", exposureCurrency: "GBP" }], "stored alphabetical, by pair");
+  assert.deepEqual(await md.questions.getPairExposureCurrencies(t, programId("CF"), D1), [{ pair: "EUR-GBP", exposureCurrency: "EUR" }], "two programs can map the same pair differently");
+  assert.deepEqual(await md.questions.getPairExposureCurrencies(t, programId("NONE"), D1), []);
+  assert.deepEqual(await md.questions.getPairExposureCurrencies(newTenant(), programId("BS"), D1), [], "another tenant sees nothing");
+
+  // Sent again with the pair written the other way round: no change. A real change is versioned from its date.
+  const same = await md.commands.applyPairExposureCurrencies(snap(t, [pairRow("BS", "EUR-GBP", "GBP"), pairRow("BS", "USD-BRL", "USD"), pairRow("CF", "GBP-EUR", "EUR")], D2));
+  assert.deepEqual([same.changed, same.unchanged, same.ended], [0, 3, 0]);
+  const next = await md.commands.applyPairExposureCurrencies(snap(t, [pairRow("BS", "EUR-GBP", "EUR"), pairRow("BS", "BRL-USD", "USD"), pairRow("CF", "EUR-GBP", "EUR")], D3));
+  assert.deepEqual([next.changed, next.unchanged], [1, 2]);
+  assert.equal((await md.questions.getPairExposureCurrencies(t, programId("BS"), D2)).find((m) => m.pair === "EUR-GBP")!.exposureCurrency, "GBP", "before the change the old mapping stood");
+  assert.equal((await md.questions.getPairExposureCurrencies(t, programId("BS"), D3)).find((m) => m.pair === "EUR-GBP")!.exposureCurrency, "EUR");
+  assert.equal((await events(t)).filter((e) => e.kind === "EXPOSURE_CURRENCY").length, 2, "the repeat announced nothing");
+});
+
+dbTest("pair exposure currencies: a bad mapping is refused with every problem named", async () => {
+  const t = newTenant();
+  const bad = async (...rows: unknown[]) => {
+    try { await md.commands.applyPairExposureCurrencies(part(t, rows as never, D1)); } catch (e) { assert.ok(e instanceof ChangeSetInvalid); return (e as ChangeSetInvalid).problems.join(" | "); }
+    return "accepted";
+  };
+  assert.match(await bad(pairRow("BS", "EURGBP", "EUR")), /two different currency codes/);
+  assert.match(await bad(pairRow("BS", "EUR-EUR", "EUR")), /two different currency codes/);
+  assert.match(await bad(pairRow("BS", "eur-GBP", "EUR")), /two different currency codes/);
+  assert.match(await bad(pairRow("BS", "EUR-GBP", "USD")), /must be one of the pair/);
+  assert.match(await bad(pairRow(" ", "EUR-GBP", "EUR")), /program code is required/);
+  assert.match(await bad(pairRow("BS", "EUR-GBP", "EUR"), pairRow("BS", "GBP-EUR", "GBP")), /appears twice/);
+  assert.deepEqual(await md.questions.getPairExposureCurrencies(t, programId("BS"), D1), [], "nothing was written");
 });

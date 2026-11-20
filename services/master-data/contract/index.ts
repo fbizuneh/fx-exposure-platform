@@ -1,6 +1,6 @@
 // Published questions and events of Master Data. Other services import this file, never src/.
 import type { ChangeRecordFields } from "@services/audit/contract";
-import type { AccountId, AsOfDate, EntityId, TenantId } from "@shared/kernel";
+import type { AccountId, AsOfDate, EntityId, ProgramId, TenantId } from "@shared/kernel";
 
 export const ENTITY_TYPES = [
   "GROUP",
@@ -79,6 +79,12 @@ export interface CurrencyCalendar {
   readonly holidays: readonly { readonly date: string; readonly name: string | null }[];
 }
 
+/** Which currency of a pair is the exposure currency for a hedging program (decision 0015). The pair is written in alphabetical order, "EUR-GBP". */
+export interface PairExposureCurrency {
+  readonly pair: string;
+  readonly exposureCurrency: string;
+}
+
 /** Every question reads the version valid on `asOf`, so history does not change when master data does. */
 export interface MasterDataQuestions {
   getEntity(tenantId: TenantId, code: string, asOf: AsOfDate): Promise<Entity | null>;
@@ -95,6 +101,8 @@ export interface MasterDataQuestions {
   getCurrencies(tenantId: TenantId, asOf: AsOfDate): Promise<readonly Currency[]>;
   /** The calendars of the currencies asked about, as on the date. A currency with no calendar on record is left out. */
   getCalendars(tenantId: TenantId, currencies: readonly string[], asOf: AsOfDate): Promise<readonly CurrencyCalendar[]>;
+  /** The program's pair-to-exposure-currency mappings, as on the date, by pair. Another program's mappings are never included. */
+  getPairExposureCurrencies(tenantId: TenantId, programId: ProgramId, asOf: AsOfDate): Promise<readonly PairExposureCurrency[]>;
   /** For each hierarchy node: its own code, then its ancestors nearest first. Unknown nodes are left out. */
   hierarchyPaths(
     tenantId: TenantId,
@@ -121,7 +129,7 @@ export interface MasterDataChanged {
   readonly tenantId: TenantId;
   readonly occurredAt: string;
   readonly batchId: string;
-  readonly kind: "ENTITY" | "HIERARCHY" | "ACCOUNT" | "CURRENCY" | "CALENDAR";
+  readonly kind: "ENTITY" | "HIERARCHY" | "ACCOUNT" | "CURRENCY" | "CALENDAR" | "EXPOSURE_CURRENCY";
   readonly asOf: AsOfDate;
 }
 
