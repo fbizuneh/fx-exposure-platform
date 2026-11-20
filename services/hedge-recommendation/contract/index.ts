@@ -32,7 +32,8 @@ export interface HedgePolicy {
 
 /** DECIDING: an accept or override has won and its pre-trade is being made; it ends as accepted, overridden, or back to open if FX Trade refuses. */
 export type RecommendationStatus = "OPEN" | "DECIDING" | "ACCEPTED" | "OVERRIDDEN" | "DISMISSED" | "LAPSED" | "SUPERSEDED" | "NONE";
-export type FollowUp = "NOT_STARTED" | "OPEN" | "PARTLY_EXECUTED" | "EXECUTED" | "CANCELLED";
+/** EXECUTED_REST_CANCELLED: every part is finished, some executed and some cancelled (decision 0017). Only a whole recommendation has it, never a part. */
+export type FollowUp = "NOT_STARTED" | "OPEN" | "PARTLY_EXECUTED" | "EXECUTED" | "EXECUTED_REST_CANCELLED" | "CANCELLED";
 export type NoActionReason = "WITHIN_TARGET" | "ROUNDS_TO_ZERO" | "BELOW_MINIMUM" | "NO_RATE" | "NO_TRADING_ENTITY";
 /** What to tell the user for each reason a group has no actionable recommendation. */
 export const NO_ACTION_MESSAGES: Readonly<Record<NoActionReason, string>> = {

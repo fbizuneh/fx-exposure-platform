@@ -37,7 +37,7 @@ Events carry identifiers only.
 - `decide` (accept, override, dismiss) needs the matching `hedge-recommendation:*` permission. The first decision wins atomically; only a winning accept or override reaches FX Trade, from its recorded amount (decision 0011 item 11).
 - The pre-trade is booked by the group's entity when the netting level has one, else the policy's default trading entity; with neither, no actionable recommendation.
 - `onCycleClosed` lapses what is still open when a cycle is approved, skipped or deleted.
-- `refreshFollowUp` follows the pre-trade's status.
+- `refreshFollowUp` follows the pre-trade's status. A split recommendation is executed, cancelled, closed out (every part executed or cancelled, some of each), partly executed or open (decision 0017).
 
 ## Schema
 `hedge_recommendation`. Its tables are defined by this service's migrations.
