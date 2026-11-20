@@ -7,8 +7,8 @@ Tier: generic.
 - Who changed what and when, as identifiers, an action and the names of the fields that changed (no values)
 
 ## Answers
-- A tenant's trail, filtered by program, actor, action, target or time, and paged (needs audit:read)
-- Whether a tenant's chain is intact (needs audit:read)
+- A tenant's trail, filtered by program, actor, action, target or time, and paged (needs audit:read; a reader limited to some programs sees only those programs' records)
+- Whether a tenant's chain is intact (needs audit:read and no program limit)
 Each is defined in contract/.
 
 ## Announces

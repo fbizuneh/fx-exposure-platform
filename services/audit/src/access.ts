@@ -2,7 +2,7 @@
 import type { TenantId, ProgramId } from "@shared/kernel";
 import type { Actor, DenyReason, IdentityQuestions, Permission } from "@services/identity/contract";
 
-export type IdentityPort = Pick<IdentityQuestions, "checkAccess">;
+export type IdentityPort = Pick<IdentityQuestions, "checkAccess" | "programScope">;
 
 export class AccessDenied extends Error {
   readonly reason: DenyReason;

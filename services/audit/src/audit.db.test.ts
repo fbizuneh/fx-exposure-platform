@@ -17,7 +17,12 @@ const dbTest = (name: string, fn: () => Promise<void>) => test(name, { skip: !en
 
 // A fake Identity: a user may read the trail only with audit:read, in the programs they are given.
 const grants = new Map<string, { permissions: Set<Permission>; programs: Set<string> | null }>();
-const access: Pick<IdentityQuestions, "checkAccess"> = {
+const access: Pick<IdentityQuestions, "checkAccess" | "programScope"> = {
+  async programScope(_t, actor) {
+    if (actor.kind === "platform") return { restricted: false, programs: [] };
+    const g = grants.get(actor.userId);
+    return g?.programs ? { restricted: true, programs: [...g.programs].map(programId) } : { restricted: false, programs: [] };
+  },
   async checkAccess({ actor, permission, programId: p }) {
     if (actor.kind === "platform") return { allowed: true, via: "platform-role" };
     const g = grants.get(actor.userId);
@@ -159,4 +164,49 @@ dbTest("reading needs audit:read, in the program when one is asked for; filters 
   const p2 = await audit.questions.trail({ tenantId: t, actor: who, limit: 3, afterSeq: p1.nextAfterSeq! });
   assert.deepEqual([p2.records.map((r) => r.action), p2.nextAfterSeq], [["user.added"], null]);
   assert.deepEqual((await audit.questions.trail({ tenantId: newTenant(), actor: who })).records, [], "another tenant's trail is empty");
+});
+
+dbTest("program scope applies to every read: a restricted reader's unfiltered trail holds only their programs' records, never tenant-wide ones, and cannot verify the chain", async () => {
+  const t = newTenant();
+  for (const r of [
+    { action: "cycle.started", programId: programId("BS"), targetId: "c1" }, { action: "program.defined", programId: programId("FC"), targetType: "program", targetId: "FC" },
+    { action: "user.added", programId: null, targetType: "user", targetId: "u1" }, { action: "cycle.approved", programId: programId("BS"), targetId: "c1" },
+    { action: "cycle.started", programId: programId("FC"), targetId: "c9" }, { action: "role.granted", programId: null, targetType: "user-role", targetId: "u1/VIEWER" },
+  ]) await audit.commands.record(change(t, r));
+  const actions = async (actor: Actor, extra: object = {}) => (await audit.questions.trail({ tenantId: t, actor, ...extra })).records.map((r) => `${r.seq}:${r.action}:${r.programId ?? "-"}`);
+
+  const open = user(["audit:read"]);
+  assert.equal((await actions(open)).length, 6, "no program limit: the whole tenant trail, tenant-wide records included");
+  assert.equal((await actions({ kind: "platform", platformUserId: "ops" as never })).length, 6);
+
+  const bs = user(["audit:read"], ["BS"]);
+  assert.deepEqual(await actions(bs), ["1:cycle.started:BS", "4:cycle.approved:BS"], "unfiltered: only BS; the FC records and the tenant-wide ones are not there");
+  assert.deepEqual(await actions(bs, { programId: programId("BS") }), ["1:cycle.started:BS", "4:cycle.approved:BS"], "filtered to its own program: the same");
+  await assert.rejects(audit.questions.trail({ tenantId: t, actor: bs, programId: programId("FC") }), /program-restricted/);
+  assert.deepEqual(await actions(bs, { targetType: "user" }), [], "asking for tenant-wide records by target finds none");
+  assert.deepEqual(await actions(bs, { by: "user:alice", limit: 1 }), ["1:cycle.started:BS"]);
+  const page = await audit.questions.trail({ tenantId: t, actor: bs, limit: 1 });
+  assert.equal(page.nextAfterSeq, 1, "paging counts only what the reader may see");
+
+  const both = user(["audit:read"], ["BS", "FC"]);
+  assert.deepEqual(await actions(both), ["1:cycle.started:BS", "2:program.defined:FC", "4:cycle.approved:BS", "5:cycle.started:FC"], "restricted to both programs is still not tenant-wide");
+
+  await assert.rejects(audit.questions.verify(t, bs), /not allowed \(audit:read\): program-restricted/);
+  await assert.rejects(audit.questions.verify(t, both), /program-restricted/);
+  assert.equal((await audit.questions.verify(t, open)).ok, true);
+});
+
+dbTest("verifying while records are being appended never reports a false break", async () => {
+  const t = newTenant();
+  for (let i = 0; i < 5; i++) await audit.commands.record(change(t, { targetId: `seed${i}` }));
+  const who = reader();
+  let appending = true;
+  const appender = (async () => { for (let i = 0; i < 60; i++) await audit.commands.record(change(t, { targetId: `live${i}` })); appending = false; })();
+  const results = [];
+  while (appending) results.push(await audit.questions.verify(t, who));
+  await appender;
+  results.push(await audit.questions.verify(t, who));
+  assert.ok(results.length > 1, "verified more than once while the appends ran");
+  assert.deepEqual(results.filter((r) => !r.ok), []);
+  assert.deepEqual(results.at(-1), { ok: true, checked: 65, brokenAtSeq: null });
 });

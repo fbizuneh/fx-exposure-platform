@@ -21,6 +21,13 @@ export function identityQuestions(db: Db): IdentityQuestions {
     async enabledPrograms(tenant) {
       return loadEnabledPrograms(db, tenant);
     },
+    async programScope(tenant, actor) {
+      const facts = await loadAccessFacts(db, { tenantId: tenant, actor, permission: "audit:read" });
+      if (facts.platformRole !== null) return { restricted: false, programs: [] };
+      const restriction = facts.user?.programRestriction ?? null;
+      if (facts.user === null || facts.user.status !== "ACTIVE") return { restricted: true, programs: [] };
+      return restriction === null ? { restricted: false, programs: [] } : { restricted: true, programs: restriction };
+    },
   };
 }
 
