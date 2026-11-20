@@ -35,6 +35,17 @@ export function identityCommands(db: Db) {
       return row.platform_user_id as PlatformUserId;
     },
 
+    /** The platform user for this issuer and subject: made if there is none, otherwise the one that exists (a disabled one stays disabled). The runtime uses it for the scheduler (decision 0023). */
+    async ensurePlatformUser(u: { issuer: string; externalSubject: string; displayName?: string }): Promise<PlatformUserId> {
+      const row = await q(db)
+        .insertInto("platform_users")
+        .values({ issuer: u.issuer, external_subject: u.externalSubject, email: null, display_name: u.displayName ?? null, platform_role: "SYSTEM_ADMIN" })
+        .onConflict((oc) => oc.columns(["issuer", "external_subject"]).doUpdateSet({ issuer: u.issuer }))
+        .returning("platform_user_id")
+        .executeTakeFirstOrThrow();
+      return row.platform_user_id as PlatformUserId;
+    },
+
     /** `by` is the id of whoever does this: a user or a platform user. */
     async addUser(tenant: TenantId, u: NewUser, by: string): Promise<UserId> {
       const roles = u.roles.map(role);

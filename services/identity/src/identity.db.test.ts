@@ -135,3 +135,28 @@ dbTest("unknown roles are refused", async () => {
 dbTest("running the migrations again applies nothing", async () => {
   assert.deepEqual(await migrate(url!), []);
 });
+
+dbTest("activeTenants lists active tenants in a stable order and leaves out a disabled one", async () => {
+  const a = (await tenantWith("Active one")).tenant;
+  const b = (await tenantWith("To be disabled")).tenant;
+  const c = (await tenantWith("Active two")).tenant;
+  await q(db).updateTable("tenants").set({ status: "DISABLED" }).where("tenant_id", "=", b as string).execute();
+  const listed = await id.questions.activeTenants();
+  assert.ok(listed.includes(a) && listed.includes(c));
+  assert.ok(!listed.includes(b), "a disabled tenant is not listed");
+  assert.ok(listed.indexOf(a) < listed.indexOf(c), "earlier tenants come first");
+  assert.deepEqual(await id.questions.activeTenants(), listed, "the same order every time");
+});
+
+dbTest("ensurePlatformUser makes the user once and returns the same one after", async () => {
+  const subject = randomUUID();
+  const first = await id.commands.ensurePlatformUser({ issuer: "platform", externalSubject: subject });
+  const again = await id.commands.ensurePlatformUser({ issuer: "platform", externalSubject: subject });
+  assert.equal(again, first);
+  const other = await id.commands.ensurePlatformUser({ issuer: "platform", externalSubject: randomUUID() });
+  assert.notEqual(other, first);
+  await q(db).updateTable("platform_users").set({ status: "DISABLED" }).where("platform_user_id", "=", first as string).execute();
+  assert.equal(await id.commands.ensurePlatformUser({ issuer: "platform", externalSubject: subject }), first, "a disabled user is returned as it is, not reenabled");
+  const { tenant } = await tenantWith("Ensure test");
+  assert.deepEqual(await id.questions.checkAccess({ tenantId: tenant, actor: { kind: "platform", platformUserId: first }, permission: "authorization:manage" }), { allowed: false, reason: "no-user" });
+});

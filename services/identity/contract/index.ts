@@ -96,6 +96,8 @@ export interface IdentityQuestions {
   enabledPrograms(tenantId: TenantId): Promise<readonly ProgramId[]>;
   /** The program scope of an actor in a tenant, for services that list records across programs (decision 0001). */
   programScope(tenantId: TenantId, actor: Actor): Promise<ProgramScope>;
+  /** Platform level, no tenant: the IDs of the tenants that are active, in a stable order. Only the runtime's timer loop calls it (decision 0023). */
+  activeTenants(): Promise<readonly TenantId[]>;
 }
 
 /** Events carry identifiers only; the receiver asks Identity for detail. */
