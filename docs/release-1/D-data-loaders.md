@@ -16,7 +16,7 @@ Master Data, Data Source, FX Rate and FX Trade take their data through commands,
 
 ## Decisions this task relies on
 
-Overview table (README) **#3** (parsers live in the owning service), **#4** (one CSV per kind, snake_case headers, all or nothing) and **#5** (SNAPSHOT for full loads). Write the layouts below as the starting point of D1 and change them only with Fikre's agreement.
+Overview table (README) **#3** (parsers live in the owning service), **#4** (one CSV per kind, snake_case headers, all or nothing), **#5** (SNAPSHOT for full loads) and **#10** (where the CSV reader lives). Write the layouts below as the starting point of D1 and change them only with Fikre's agreement.
 
 ## Steps
 
@@ -47,9 +47,15 @@ Rules to write into the document:
 
 Done when: the document is merged and Fikre has said the layouts are agreed. **E step E3 starts from this.**
 
-### D2. One CSV reader for everyone
+### D2. Where the CSV reader lives (decision first; D3 waits for it)
 
-`splitCsv` is in FX Trade. Move it to `@shared/kernel` (`csv.ts`) with its tests, and let FX Trade import it from there with no change in behaviour. This is the only change to code outside the four loaders. Done when the existing FX Trade tests still pass untouched and the move is a separate commit.
+`splitCsv` is in FX Trade (`services/fx-trade/src/file.ts`). Master Data, Data Source and FX Rate need the same reader, and a service cannot import another service's `src/`. `shared/kernel` is not an option: AGENTS.md reserves it for the seven shared identifiers and says nothing else is shared. **Do not move or copy the reader until Fikre has chosen.** Write DECISION REQUIRED with these options:
+
+- **A (recommended).** Each of the four services keeps its own small `csv.ts` (FX Trade's existing code and tests, copied). Costs: four copies that can drift; reduce it by giving every copy the same test cases. Needs no change to AGENTS.md or the checks.
+- **B.** A new package `shared/csv` holding one pure function from text to rows, with nothing about FX in it. Costs: one copy, but it widens the shared set, so it needs a decision record (the next free number) that amends AGENTS.md, and the import-boundary check must be taught the package.
+- **C.** FX Trade exports it through its contract. Not recommended: three services would depend on a trade service for a utility.
+
+Done when the choice is recorded in a decision record and, for A or B, the code is in place as its own commit with every existing FX Trade test passing untouched.
 
 ### D3. Parsers, one per kind, no database
 
@@ -59,7 +65,7 @@ Each parser is a pure function from text to a result:
 parseXFile(text): { rows: Row[]; problems: { rowNo: number | null; column: string | null; message: string }[] }
 ```
 
-Place and name them: `services/master-data/src/files.ts` (`parseEntitiesFile`, `parseHierarchyFile`, `parseAccountsFile`, `parseCurrenciesFile`, `parseCalendarsFile`, `parseExposureCurrenciesFile`), `services/data-source/src/file.ts` (`parseGlFile`), `services/fx-rate/src/file.ts` (`parseRatesFile`). Export each from its service's entry point. The executed-trade parser already exists.
+Use the reader chosen in D2. Place and name the parsers: `services/master-data/src/files.ts` (`parseEntitiesFile`, `parseHierarchyFile`, `parseAccountsFile`, `parseCurrenciesFile`, `parseCalendarsFile`, `parseExposureCurrenciesFile`), `services/data-source/src/file.ts` (`parseGlFile`), `services/fx-rate/src/file.ts` (`parseRatesFile`). Export each from its service's entry point. The executed-trade parser already exists.
 
 Rules for all of them:
 
@@ -96,7 +102,7 @@ Each one parses; if there are any problems it returns them without calling the s
 
 ### D6. Tests that run the whole path
 
-Database tests through `composeApp`, one per loader: a valid file stores what it should; the same file again is `DUPLICATE`; a file with one bad row stores nothing and names the row; a refusal from the service is reported as `REFUSED` and nothing is stored; a CLI test runs the command as a child process and checks the exit codes. One test loads a generated 20,000-row GL file and checks the time is under 60 seconds. **If it is slower, do not tune Data Source here: report the stage and open an issue.** (Stream A measured a 20,000-row batch through `submitGlBatch` at about 0.8 seconds locally, so parsing and the file path are what this test adds.)
+Database tests through `composeApp`, one per loader: a valid file stores what it should; the same file again is `DUPLICATE`; a file with one bad row stores nothing and names the row; a refusal from the service is reported as `REFUSED` and nothing is stored; a CLI test runs the command as a child process and checks the exit codes. One test loads a generated 20,000-row GL file and checks the time is under 60 seconds. Two fixtures from E3 are used, and they must stay separate: the **malformed** GL file (parser refusal: expect `INVALID_FILE`, exit 1, every planted problem named by row and column, **no rows stored**) and the **parser-valid dirty** GL file (every row is accepted by the loader and stored; the service-level issues it contains are checked in E's rehearsal, not here). **If it is slower, do not tune Data Source here: report the stage and open an issue.** (Stream A measured a 20,000-row batch through `submitGlBatch` at about 0.8 seconds locally, so parsing and the file path are what this test adds.)
 
 ### D7. Control-total option (last, after J's task J1 merges)
 
@@ -108,7 +114,7 @@ ERP-native layouts and mapping from them; any other data type than the four abov
 
 ## Done when
 
-1. D1 merged and agreed; D2 to D6 merged (D7 when J1 is in), with a decision record covering #3, #4 and #5.
+1. D1 merged and agreed; D2's decision recorded; D3 to D6 merged (D7 when J1 is in), with a decision record covering #3, #4 and #5.
 2. A file of each kind loads from the command line against a fresh database, and a bad file stores nothing.
 3. `npx tsc --noEmit`, `npm run check`, `npm test` pass, and the speed numbers are in the PR.
 4. Each touched service README (60 lines or fewer) lists its file parser; `docs/STATUS.md` is updated.

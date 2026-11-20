@@ -32,9 +32,12 @@ Defaults, to be refined and agreed with Fikre in the PR:
 - **Chart of accounts**: one chart with about 25 hierarchy nodes and 40 accounts; 30 are monetary and FX-relevant (cash, trade receivables and payables, intercompany loans and balances, deposits, accruals); the rest are not (inventory, equipment, equity) and are excluded by the mapping rules.
 - **GL balances**: 20,000 rows per daily file. Each legal entity holds its functional currency and 6 to 12 others; each row is unique on entity, account, currency and dimensions; some rows carry a `cost_center` dimension. About 5% of rows are non-FX accounts. The file balances are realistic, not random: payables roughly offset receivables in some pairs (natural netting is visible), some entities are net long and some net short, and intercompany balances exist in both directions.
 - **History**: 20 consecutive business days of GL files (day-over-day moves of a few percent), 12 months of daily rates, 12 months of executed hedge trades.
-- **A dirty file**: one extra GL file of the same size with exactly 40 planted problems of known kinds (unknown account, unknown entity, missing currency, balance and debit together, a currency with no rate), listed in the data guide, so the data-quality scenarios have known answers.
+- **Two fixtures for bad data, kept apart by where the failure must happen.** Each has exact expected results, written to `packs/uat/expected/` and the data guide.
+  1. **Malformed file** (`gl-malformed.csv`, 20,000 rows): exactly 40 planted file-level problems that D's parser must refuse: balance together with debit or credit, neither balance nor debit/credit, a bad date, a bad currency code, a non-numeric amount, a missing required cell. Expected: `INVALID_FILE`, exit code 1, all 40 problems listed by row number and column, and **no rows stored**. Nothing in this file is meant to reach a service.
+  2. **Parser-valid dirty file** (`gl-dirty.csv`, 20,000 rows): every row passes the parser and is accepted for storage, and a known number of rows have service-level problems: an unknown entity, an unknown account, an account the mapping rules exclude. Expected: the load is `APPLIED`, and the service's own data-quality result (Data Source's batch result and the issues Exposure Analysis raises) counts exactly these rows by kind. Read what those services return today and write the expected counts from it; if the contract cannot show the count for a kind, write DECISION REQUIRED rather than guess.
+  A **missing rate** is a rates-stage condition, not a file problem: it belongs to the rates data (see E3) and is checked where rates are checked (the exposure or recommendation step, e.g. `NO_RATE`), never in either fixture above.
 - **Programs**: two balance sheet programs on the same GL (the other program types need data we deferred): `BS-ENT` daily, ENTITY netting; `BS-REG` weekly, REGION netting. Different mapping rules for each. (Overview table **#9**.)
-- **Hedge policy**: ratio 75% by default with one pair at 90%; a minimum hedge amount; rounding by currency; tenor 3M; a trading entity; a maximum hedge; an amount-threshold override on one pair; one program rolls with Adjust + Swap, the other has no roll.
+- **Hedge policy** (decision 0020 allows one strategy per program, and threshold overrides by netting level only): `BS-ENT` uses hedge-ratio-adjustment at 75% with one pair at 90% (the per-pair ratio override) and rolls with Adjust + Swap; `BS-REG` uses amount-threshold with one program threshold in USD, no override, and has no roll. Both have a minimum hedge amount, rounding by currency, tenor 3M, a trading entity and a maximum hedge. Keep the sample inside the current contract (`PolicyInput` in `policy.ts`); do not use a combination the policy check refuses.
 - **Users**: one tenant admin, one analyst, one reviewer, one approver, one viewer, and one platform user. Segregation of duties stays **on**, as a real customer would run it, so approvals need two different people.
 
 Done when: the design is merged and Fikre agrees.
@@ -51,11 +54,11 @@ Done when: a test runs it twice on a `_test` database, the second run refuses, a
 
 ### E3. Generator (after D1 is merged)
 
-`npm run uat:generate -- --seed 20261120 --out packs/uat/generated` in `scripts/uat/generate.ts`. It writes, in the layouts of `docs/file-layouts.md`: the six master-data files; 20 daily GL files plus the dirty one; 12 months of daily rate files (spot for 39 pairs against USD; forwards for 1M, 3M, 6M, 12M); and the history of executed trades in the executed-trade layout. Rates move as a seeded random walk with realistic daily volatility per currency, and forward points follow from interest differentials in the config.
+`npm run uat:generate -- --seed 20261120 --out packs/uat/generated` in `scripts/uat/generate.ts`. It writes, in the layouts of `docs/file-layouts.md`: the six master-data files; 20 daily GL files plus the two bad-data fixtures (malformed and parser-valid dirty); 12 months of daily rate files (spot for 39 pairs against USD; forwards for 1M, 3M, 6M, 12M); and the history of executed trades in the executed-trade layout. Rates move as a seeded random walk with realistic daily volatility per currency, and forward points follow from interest differentials in the config.
 
-Plant, and list in the data guide, these things: a missing rate on one day for one pair; a stale rate; an outlier rate that is flagged; a holiday on a value date; one currency whose balances flip from long to short between two days; one entity with all its balances excluded. Run the generator twice and compare checksums: a test fails on any difference.
+Plant, and list in the data guide, these things in the rates and balances (the two bad-data GL fixtures in E1 are generated as well, with their expected results): a missing rate on one day for one pair; a stale rate; an outlier rate that is flagged; a holiday on a value date; one currency whose balances flip from long to short between two days; one entity with all its balances excluded. Run the generator twice and compare checksums: a test fails on any difference.
 
-Done when: the files load with D's loader without a single problem (except the dirty file's planted ones, which are reported exactly), and the checksums are in the manifest.
+Done when: the regular files load with D's loader without a single problem; the malformed file is refused with exactly its 40 problems and stores nothing; the dirty file loads and its service-level issues match the expected counts, and the checksums are in the manifest.
 
 ### E4. Independent expected results
 
@@ -73,7 +76,7 @@ Done when: a database test takes a recommendation through approval, release, the
 
 ### E6. Data guide
 
-`docs/uat/data-guide.md`: the company at a glance, how to load the pack (the exact commands in order), each planted condition and where it is, and a table mapping each UAT scenario in the outline to the files and dates that trigger it and the expected result (cite the expected CSV). Fikre's edit to scenario 9, "Next cycle begins with all outstanding hedges including the ones executed in the prior cycle", is the rule for that scenario.
+`docs/uat/data-guide.md`: the company at a glance, how to load the pack (the exact commands in order), each planted condition, the stage that must catch it (parser, service data-quality, or rates) and its exact expected result, and a table mapping each UAT scenario in the outline to the files and dates that trigger it and the expected result (cite the expected CSV). Fikre's edit to scenario 9, "Next cycle begins with all outstanding hedges including the ones executed in the prior cycle", is the rule for that scenario.
 
 ### E7. Rehearsal (needs A, D and J merged)
 
