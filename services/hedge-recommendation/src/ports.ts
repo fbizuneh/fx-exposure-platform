@@ -7,9 +7,11 @@ import type { FxTradeQuestions } from "@services/fx-trade/contract";
 import type { IdentityQuestions } from "@services/identity/contract";
 import type { MasterDataQuestions } from "@services/master-data/contract";
 
-/** The recommended pre-trade handed to FX Trade; the recommendation ID makes the call safe to repeat. */
+/** The recommended pre-trade handed to FX Trade; the recommendation ID and part number make the call safe to repeat. */
 export interface PreTradeRequest {
   readonly recommendationId: string;
+  /** Which part of the recommendation, from 1 (decision 0016). */
+  readonly partNo: number;
   readonly tradingEntityCode: string;
   readonly instrument: "FORWARD" | "NDF";
   readonly legs: readonly {
@@ -32,5 +34,5 @@ export interface Collaborators {
   readonly rates: Pick<FxRateQuestions, "getRate">;
   readonly preTrades: Pick<FxTradeQuestions, "getPreTrade" | "preTrades">;
   /** FX Trade's command, handed in by app/. */
-  readonly createPreTrades: (input: { tenantId: TenantId; cycleId: CycleId; items: readonly PreTradeRequest[]; by: string }) => Promise<readonly { recommendationId: string; preTradeId: string }[]>;
+  readonly createPreTrades: (input: { tenantId: TenantId; cycleId: CycleId; items: readonly PreTradeRequest[]; by: string }) => Promise<readonly { recommendationId: string; partNo: number; preTradeId: string }[]>;
 }

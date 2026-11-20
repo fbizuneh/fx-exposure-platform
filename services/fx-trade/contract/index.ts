@@ -31,6 +31,8 @@ export interface PreTrade {
   readonly programId: ProgramId;
   readonly cycleId: CycleId | null;
   readonly recommendationId: string | null;
+  /** Which part of its recommendation this is (a split hedge has several, decision 0016); null for a manual pre-trade. */
+  readonly partNo: number | null;
   readonly origin: "RECOMMENDATION" | "MANUAL";
   readonly status: PreTradeStatus;
   readonly tradingEntityCode: string;

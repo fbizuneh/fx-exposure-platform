@@ -28,11 +28,14 @@ export interface NewPreTradeBody {
   readonly legs: readonly LegInput[];
 }
 export interface RecommendedPreTrade extends NewPreTradeBody {
-  /** Idempotency key: sending the same recommendation again returns the pre-trade already made. */
+  /** With the part number, the idempotency key: sending the same recommendation part again returns the pre-trade already made. */
   readonly recommendationId: string;
+  /** Which part of the recommendation, from 1; a recommendation that is not split is part 1 (the default). */
+  readonly partNo?: number;
 }
 export interface Created {
   readonly recommendationId: string;
+  readonly partNo: number;
   readonly preTradeId: string;
   readonly reference: string;
   readonly created: boolean;
@@ -51,10 +54,10 @@ export function preTradeCommands(db: Db, c: Collaborators, clock: () => Date) {
     return out;
   }
 
-  async function insert(tx: Tx, tenant: TenantId, program: string, cycle: string | null, recommendationId: string | null, origin: "RECOMMENDATION" | "MANUAL", body: NewPreTradeBody, by: string) {
+  async function insert(tx: Tx, tenant: TenantId, program: string, cycle: string | null, recommendationId: string | null, partNo: number | null, origin: "RECOMMENDATION" | "MANUAL", body: NewPreTradeBody, by: string) {
     const preTradeId = randomUUID();
     await q(tx).insertInto("pre_trades").values({
-      tenant_id: tenant, pre_trade_id: preTradeId, reference: referenceOf(preTradeId), program_id: program, cycle_id: cycle, recommendation_id: recommendationId,
+      tenant_id: tenant, pre_trade_id: preTradeId, reference: referenceOf(preTradeId), program_id: program, cycle_id: cycle, recommendation_id: recommendationId, part_no: partNo,
       origin, status: "DRAFT", trading_entity_code: body.tradingEntityCode, instrument: body.instrument, released_at: null, sent_at: null, created_by: by,
     }).execute();
     await q(tx).insertInto("pre_trade_legs").values(body.legs.map((l, i) => ({
@@ -71,13 +74,15 @@ export function preTradeCommands(db: Db, c: Collaborators, clock: () => Date) {
     if (cycle.outcome !== null || cycle.approvedAt !== null) throw new PreTradeInvalid(["pre-trades can only be added to an open cycle that is not approved"]);
     const problems: string[] = [];
     const seen = new Set<string>();
+    const keyOf = (item: RecommendedPreTrade) => `${item.recommendationId}#${item.partNo ?? 1}`;
     for (const [i, item] of input.items.entries()) {
-      if (seen.has(item.recommendationId)) problems.push(`item ${i + 1}: recommendation ${item.recommendationId} appears twice`);
-      seen.add(item.recommendationId);
+      if (!Number.isInteger(item.partNo ?? 1) || (item.partNo ?? 1) < 1) problems.push(`item ${i + 1}: the part number must be a whole number from 1`);
+      if (seen.has(keyOf(item))) problems.push(`item ${i + 1}: part ${item.partNo ?? 1} of recommendation ${item.recommendationId} appears twice`);
+      seen.add(keyOf(item));
     }
-    const existing = new Map((await readPreTrades(db, input.tenantId, { recommendationIds: [...seen] })).map((p) => [p.recommendationId!, p]));
+    const existing = new Map((await readPreTrades(db, input.tenantId, { recommendationIds: [...new Set(input.items.map((i) => i.recommendationId))] })).map((p) => [`${p.recommendationId}#${p.partNo}`, p]));
     for (const [i, item] of input.items.entries()) {
-      if (existing.has(item.recommendationId)) continue;
+      if (existing.has(keyOf(item))) continue;
       for (const p of await problemsOf(input.tenantId, item, cycle.asOf)) problems.push(`item ${i + 1} (${item.recommendationId}): ${p}`);
     }
     if (problems.length > 0) throw new PreTradeInvalid(problems);
@@ -85,10 +90,11 @@ export function preTradeCommands(db: Db, c: Collaborators, clock: () => Date) {
     return db.transaction().execute(async (tx) => {
       const out: Created[] = [];
       for (const item of input.items) {
-        const known = existing.get(item.recommendationId);
-        if (known) { out.push({ recommendationId: item.recommendationId, preTradeId: known.preTradeId, reference: known.reference, created: false }); continue; }
-        const made = await insert(tx, input.tenantId, cycle.programId, cycle.cycleId, item.recommendationId, "RECOMMENDATION", item, input.by);
-        out.push({ recommendationId: item.recommendationId, ...made, created: true });
+        const partNo = item.partNo ?? 1;
+        const known = existing.get(keyOf(item));
+        if (known) { out.push({ recommendationId: item.recommendationId, partNo, preTradeId: known.preTradeId, reference: known.reference, created: false }); continue; }
+        const made = await insert(tx, input.tenantId, cycle.programId, cycle.cycleId, item.recommendationId, partNo, "RECOMMENDATION", item, input.by);
+        out.push({ recommendationId: item.recommendationId, partNo, ...made, created: true });
       }
       return out;
     });
@@ -101,7 +107,7 @@ export function preTradeCommands(db: Db, c: Collaborators, clock: () => Date) {
     const problems = await problemsOf(input.tenantId, input.body, clock().toISOString().slice(0, 10));
     if (problems.length > 0) throw new PreTradeInvalid(problems);
     return db.transaction().execute(async (tx) => {
-      const made = await insert(tx, input.tenantId, input.programId, null, null, "MANUAL", input.body, who(input.actor));
+      const made = await insert(tx, input.tenantId, input.programId, null, null, null, "MANUAL", input.body, who(input.actor));
       await recordChange(tx, { tenantId: input.tenantId, programId: input.programId, actor: who(input.actor), action: "pre-trade.created", targetType: "pre-trade", targetId: made.preTradeId, fields: [] });
       return made;
     });

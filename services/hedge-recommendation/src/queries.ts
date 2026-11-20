@@ -1,6 +1,6 @@
 // Reads: the policy with defaults filled in, and the cycle's recommendations.
 import type { CycleId, ProgramId, TenantId } from "@shared/kernel";
-import type { CalendarGap, FollowUp, HedgePolicy, HedgeRecommendationQuestions, NoActionReason, Recommendation, RecommendationStatus, Strategy } from "../contract/index.ts";
+import type { CalendarGap, FollowUp, HedgePolicy, HedgeRecommendationQuestions, NoActionReason, Recommendation, RecommendationPart, RecommendationStatus, SplitMethod, Strategy } from "../contract/index.ts";
 import type { Selectable } from "kysely";
 import { q, type Db, type Queryable } from "./db.ts";
 import type { HedgeRecommendationDatabase } from "./schema.ts";
@@ -11,12 +11,13 @@ const opt = (v: string | null): string | null => (v === null ? null : amount(v))
 /** A ratio column (6 places) as a plain decimal: "1.000000" is "1", "0.800000" is "0.8". */
 const ratio = (v: string): string => (v.includes(".") ? v.replace(/0+$/, "").replace(/\.$/, "") : v);
 
-export const DEFAULTS = { defaultRatio: "1", minHedgeDisplay: "0", roundingDefault: "1000", tenor: "1M" } as const;
+export const DEFAULTS = { defaultRatio: "1", minHedgeDisplay: "0", roundingDefault: "1000", tenor: "1M", splitMethod: "EVEN" } as const;
 
 export async function readPolicy(db: Queryable, tenant: TenantId, program: ProgramId): Promise<HedgePolicy> {
   const row = await q(db).selectFrom("policies").selectAll().where("tenant_id", "=", tenant).where("program_id", "=", program).executeTakeFirst();
   const ratios = await q(db).selectFrom("ratio_overrides").selectAll().where("tenant_id", "=", tenant).where("program_id", "=", program).orderBy("currency_pair").execute();
   const roundings = await q(db).selectFrom("rounding_overrides").selectAll().where("tenant_id", "=", tenant).where("program_id", "=", program).orderBy("currency").execute();
+  const maxes = await q(db).selectFrom("max_hedge_overrides").selectAll().where("tenant_id", "=", tenant).where("program_id", "=", program).orderBy("netting_level").execute();
   return {
     programId: program,
     defaultRatio: row ? ratio(row.default_ratio) : DEFAULTS.defaultRatio,
@@ -26,20 +27,32 @@ export async function readPolicy(db: Queryable, tenant: TenantId, program: Progr
     roundingOverrides: roundings.map((r) => ({ currency: r.currency, rounding: amount(r.rounding) })),
     tenor: row ? row.tenor : DEFAULTS.tenor,
     tradingEntityCode: row ? row.trading_entity_code : null,
+    maxHedgeDisplay: row ? opt(row.max_hedge_display) : null,
+    maxHedgeOverrides: maxes.map((m) => ({ nettingLevel: m.netting_level, maxHedgeDisplay: amount(m.max_hedge_display) })),
+    splitMethod: row ? (row.split_method as SplitMethod) : DEFAULTS.splitMethod,
     saved: row !== undefined,
   };
 }
 
 type Row = Selectable<HedgeRecommendationDatabase["recommendations"]>;
-export const toRecommendation = (r: Row): Recommendation => ({
+export const toRecommendation = (r: Row, parts: readonly Selectable<HedgeRecommendationDatabase["recommendation_parts"]>[] = []): Recommendation => ({
   recommendationId: r.recommendation_id, programId: r.program_id as ProgramId, cycleId: r.cycle_id as CycleId, runId: r.run_id, strategy: r.strategy as Strategy,
   groupNo: r.group_no, nettingLevel: r.netting_level, region: r.region, entityCode: r.entity_code, currencyPair: r.currency_pair, exposureCurrency: r.exposure_currency,
   otherCurrency: r.other_currency, tradingEntityCode: r.trading_entity_code, grossExposure: amount(r.gross_exposure), hedgedAmount: amount(r.hedged_amount), ratio: ratio(r.ratio), targetHedge: amount(r.target_hedge),
   neededAmount: amount(r.needed_amount), rounding: amount(r.rounding), minExposureAmount: opt(r.min_exposure_amount), action: r.action as Recommendation["action"],
   reason: r.reason as NoActionReason | null, direction: r.direction as Recommendation["direction"], amount: opt(r.amount), instrument: r.instrument as Recommendation["instrument"],
   valueDate: r.value_date, fixingDate: r.fixing_date, calendarGaps: (typeof r.calendar_gaps === "string" ? JSON.parse(r.calendar_gaps) : r.calendar_gaps) as CalendarGap[], status: r.status as RecommendationStatus, decidedAmount: opt(r.decided_amount), decidedBy: r.decided_by,
-  decidedAt: r.decided_at === null ? null : r.decided_at.toISOString(), decisionNote: r.decision_note, preTradeId: r.pre_trade_id, followUp: r.follow_up as FollowUp,
+  decidedAt: r.decided_at === null ? null : r.decided_at.toISOString(), decisionNote: r.decision_note, preTradeId: parts[0]?.pre_trade_id ?? null, followUp: r.follow_up as FollowUp,
+  maxExposureAmount: opt(r.max_exposure_amount), splitMethod: r.split_method as SplitMethod | null, splitNote: r.split_note,
+  parts: parts.map((x): RecommendationPart => ({ partNo: x.part_no, amount: amount(x.amount), preTradeId: x.pre_trade_id, followUp: x.follow_up as FollowUp })),
 });
+
+/** The recommendations with their parts, read together. */
+export async function withParts(db: Queryable, tenant: TenantId, rows: readonly Row[]): Promise<Recommendation[]> {
+  if (rows.length === 0) return [];
+  const parts = await q(db).selectFrom("recommendation_parts").selectAll().where("tenant_id", "=", tenant).where("recommendation_id", "in", rows.map((r) => r.recommendation_id)).orderBy("part_no").execute();
+  return rows.map((r) => toRecommendation(r, parts.filter((x) => x.recommendation_id === r.recommendation_id)));
+}
 
 export function hedgeRecommendationQuestions(db: Db): HedgeRecommendationQuestions {
   return {
@@ -47,7 +60,7 @@ export function hedgeRecommendationQuestions(db: Db): HedgeRecommendationQuestio
     async recommendations(tenant, cycle) {
       const rows = await q(db).selectFrom("recommendations").selectAll().where("tenant_id", "=", tenant).where("cycle_id", "=", cycle).where("status", "<>", "SUPERSEDED")
         .orderBy("action", "asc").orderBy("group_no").execute();
-      return rows.map(toRecommendation);
+      return withParts(db, tenant, rows);
     },
     async deciders(tenant, cycle) {
       const rows = await q(db).selectFrom("recommendations").select("decided_by").distinct().where("tenant_id", "=", tenant).where("cycle_id", "=", cycle)
@@ -60,7 +73,7 @@ export function hedgeRecommendationQuestions(db: Db): HedgeRecommendationQuestio
     },
     async getRecommendation(tenant, id) {
       const r = await q(db).selectFrom("recommendations").selectAll().where("tenant_id", "=", tenant).where("recommendation_id", "=", id).executeTakeFirst();
-      return r ? toRecommendation(r) : null;
+      return r ? (await withParts(db, tenant, [r]))[0]! : null;
     },
   };
 }

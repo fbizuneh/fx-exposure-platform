@@ -3,7 +3,7 @@
 Tier: supporting.
 
 ## Owns
-- Pre-trades (draft, ready, sent, partly executed, executed, cancelled) and executed trades (append-only versions)
+- Pre-trades (draft, ready, sent, partly executed, executed, cancelled), numbered by part when a recommendation is split into several (decision 0016) and executed trades (append-only versions)
 - The link between them, and the executed-trade files that were received, with their blocked rows
 - Its part of a cycle's saved record, frozen at approval
 

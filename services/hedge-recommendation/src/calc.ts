@@ -1,6 +1,6 @@
 // The hedge-ratio-adjustment calculation and the date rules. Pure: no database, no clock (decision 0011).
 import { Decimal } from "decimal.js";
-import type { NoActionReason } from "../contract/index.ts";
+import type { NoActionReason, SplitMethod } from "../contract/index.ts";
 
 export const D = Decimal.clone({ precision: 40, rounding: Decimal.ROUND_HALF_UP });
 type Num = InstanceType<typeof D>;
@@ -44,6 +44,54 @@ export function recommend(n: Needed): Outcome {
   if (rounded.isZero()) return none("ROUNDS_TO_ZERO");
   if (n.minExposure !== null && rounded.lt(n.minExposure)) return none("BELOW_MINIMUM");
   return { target, needed, action: "HEDGE", direction: needed.isNegative() ? "SELL" : "BUY", amount: rounded, reason: null };
+}
+
+/** The most parts one hedge is split into; beyond it the pieces are made larger than the maximum rather than create more trades (decision 0016). */
+export const MAX_PARTS = 50;
+const SMALLEST = new D("0.0001");
+
+export interface Split {
+  /** Positive, in order; they add up to the total. */
+  readonly parts: Num[];
+  /** Why the pieces differ from the plain split, when they do. */
+  readonly note: string | null;
+}
+
+/**
+ * Split an amount above the maximum into n = roundup(total / maximum) pieces (decision 0016). Pieces are whole steps of the rounding when the total is.
+ * EVEN: equal pieces, the leftover steps going to the first pieces (450 at a maximum of 200: 150, 150, 150).
+ * THRESHOLD_REMAINDER: pieces of the maximum (rounded down to a step) and one piece for what is left (200, 200, 50). A last piece below the minimum is
+ * added to the one before it. With EVEN, pieces below the minimum make it use one piece fewer, until none is. Either way those pieces then exceed the maximum.
+ * No maximum, or a total within it, is one piece.
+ */
+export function splitAmount(total: Num, maximum: Num | null, method: SplitMethod, step: Num, minimum: Num | null): Split {
+  if (maximum === null || total.lte(maximum)) return { parts: [total], note: null };
+  const unit = total.mod(step).isZero() ? step : SMALLEST;
+  const even = (n: number): Num[] => {
+    const base = total.div(n).div(unit).floor().times(unit);
+    const extra = total.minus(base.times(n)).div(unit).toNumber();
+    return Array.from({ length: n }, (_, i) => (i < extra ? base.plus(unit) : base));
+  };
+  const wanted = total.div(maximum).ceil().toNumber();
+  if (wanted > MAX_PARTS) return { parts: even(MAX_PARTS), note: `Split into ${MAX_PARTS} parts, the most allowed, so the parts are larger than the maximum.` };
+  if (method === "EVEN") {
+    let n = wanted;
+    let parts = even(n);
+    while (n > 1 && minimum !== null && parts.some((x) => x.lt(minimum))) parts = even(--n);
+    return { parts, note: n < wanted ? "Fewer parts than the maximum calls for, because the equal parts were below the minimum hedge amount." : null };
+  }
+  const piece = maximum.div(unit).floor().times(unit);
+  if (piece.isZero()) return { parts: [total], note: "The maximum is smaller than the smallest amount that can be traded, so the hedge was not split." };
+  const full = total.div(piece).floor().toNumber();
+  const rest = total.minus(piece.times(full));
+  const parts: Num[] = Array.from({ length: full }, () => piece);
+  if (rest.isZero()) return { parts, note: null };
+  if (minimum !== null && rest.lt(minimum) && full >= 1) {
+    parts[full - 1] = piece.plus(rest);
+    return { parts, note: "The last part was below the minimum hedge amount, so it was added to the part before it." };
+  }
+  parts.push(rest);
+  return { parts, note: null };
 }
 
 const iso = (d: Date): string => d.toISOString().slice(0, 10);

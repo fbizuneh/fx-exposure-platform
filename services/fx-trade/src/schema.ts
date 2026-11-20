@@ -23,6 +23,7 @@ export interface FxTradeDatabase {
     program_id: string;
     cycle_id: string | null;
     recommendation_id: string | null;
+    part_no: number | null;
     origin: "RECOMMENDATION" | "MANUAL";
     status: "DRAFT" | "READY" | "SENT" | "PARTLY_EXECUTED" | "EXECUTED" | "CANCELLED";
     trading_entity_code: string;

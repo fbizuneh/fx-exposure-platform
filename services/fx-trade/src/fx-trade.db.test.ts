@@ -9,6 +9,7 @@ import type { Actor } from "@services/identity/contract";
 import type { Entity } from "@services/master-data/contract";
 import { migrate } from "../../../scripts/migrate.mjs";
 import { AccessDenied, connect, createFxTrade, parseExecutedFile, PreTradeInvalid, type Db, type ExecutedRow, type NewPreTradeBody } from "./index.ts";
+import { q } from "./db.ts";
 import type { LegInput } from "./model.ts";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -101,6 +102,30 @@ dbTest("recommended pre-trades are drafts under the cycle, made once per recomme
   await assert.rejects(ft.commands.createPreTrades({ tenantId: t, cycleId: openCycle(t, { approvedAt: "2026-11-09" }), items: [{ recommendationId: randomUUID(), ...fwd() }], by: "rec" }), /open cycle that is not approved/);
   await assert.rejects(ft.commands.createPreTrades({ tenantId: t, cycleId: cycleId(randomUUID()), items: [], by: "rec" }), /does not exist/);
   await assert.rejects(ft.commands.createPreTrades({ tenantId: t, cycleId: c, items: [{ recommendationId: randomUUID(), ...fwd({ dealCurrency: "USD" }) }], by: "rec" }), /must differ/);
+});
+
+dbTest("one recommendation can have several pre-trades, one per part, made together and once each (decision 0016)", async () => {
+  const t = tenant();
+  const c = openCycle(t);
+  const rec = randomUUID();
+  const parts = await ft.commands.createPreTrades({ tenantId: t, cycleId: c, items: [1, 2, 3].map((n) => ({ recommendationId: rec, partNo: n, ...fwd({ dealAmount: String(n * 100) }) })), by: "rec" });
+  assert.deepEqual(parts.map((p) => [p.partNo, p.created]), [[1, true], [2, true], [3, true]]);
+  const held = await ft.questions.preTrades(t, { cycleId: c });
+  assert.deepEqual(held.map((p) => [p.recommendationId === rec, p.partNo, p.legs[0]!.dealAmount]), [[true, 1, "100.0000"], [true, 2, "200.0000"], [true, 3, "300.0000"]], "in part order");
+  // Sending it again, or with one part more, returns what exists and makes only the new part.
+  const again = await ft.commands.createPreTrades({ tenantId: t, cycleId: c, items: [1, 2, 3, 4].map((n) => ({ recommendationId: rec, partNo: n, ...fwd({ dealAmount: "5" }) })), by: "rec" });
+  assert.deepEqual(again.map((p) => [p.partNo, p.created]), [[1, false], [2, false], [3, false], [4, true]]);
+  assert.deepEqual(again.slice(0, 3).map((p) => p.preTradeId), parts.map((p) => p.preTradeId));
+  // A part that is sent twice in one call, or a bad part number, is refused, and nothing is made.
+  const other = randomUUID();
+  await assert.rejects(ft.commands.createPreTrades({ tenantId: t, cycleId: c, items: [{ recommendationId: other, partNo: 1, ...fwd() }, { recommendationId: other, partNo: 1, ...fwd() }], by: "rec" }), /part 1 of recommendation .* appears twice/);
+  await assert.rejects(ft.commands.createPreTrades({ tenantId: t, cycleId: c, items: [{ recommendationId: other, partNo: 0, ...fwd() }], by: "rec" }), /part number must be a whole number from 1/);
+  // Without a part number it is part 1: a caller that does not split is unchanged.
+  const [plain] = await ft.commands.createPreTrades({ tenantId: t, cycleId: c, items: [{ recommendationId: other, ...fwd() }], by: "rec" });
+  assert.equal((await ft.questions.getPreTrade(t, plain!.preTradeId))!.partNo, 1);
+  assert.equal((await ft.questions.preTrades(t, { cycleId: c })).filter((p) => p.recommendationId === other).length, 1);
+  // The database itself holds one pre-trade per recommendation part.
+  await assert.rejects(q(db).insertInto("pre_trades").values({ tenant_id: t, pre_trade_id: randomUUID(), reference: "PT-DUP", program_id: "BS", cycle_id: c, recommendation_id: rec, part_no: 2, origin: "RECOMMENDATION", status: "DRAFT", trading_entity_code: "US01", instrument: "FORWARD", released_at: null, sent_at: null, created_by: "x" }).execute(), /duplicate key|unique/);
 });
 
 dbTest("approval releases the cycle's drafts once, export sends them once, and a skipped cycle cancels them", async () => {

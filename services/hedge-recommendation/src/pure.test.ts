@@ -107,3 +107,55 @@ test("a pair override is the same pair whichever currency is written first, and 
   assert.match(policyProblems({ ...ok, ratioOverrides: [{ pair: "EUR-USD", ratio: "0.5" }, { pair: "USD-EUR", ratio: "0.8" }] })[0]!, /appears twice/);
   assert.match(policyProblems({ ...ok, ratioOverrides: [{ pair: "EUR-EUR", ratio: "0.5" }] })[0]!, /same currency twice/);
 });
+
+import { splitAmount, MAX_PARTS } from "./calc.ts";
+const split = (total: string, max: string | null, method: "EVEN" | "THRESHOLD_REMAINDER", step = "1", min: string | null = null) =>
+  splitAmount(new D(total), max === null ? null : new D(max), method, new D(step), min === null ? null : new D(min));
+const amounts = (s: { parts: { toString(): string }[] }) => s.parts.map((x) => x.toString());
+
+test("split: the owner's example, 450 at a maximum of 200, is 3 parts either way", () => {
+  assert.deepEqual(amounts(split("450", "200", "EVEN")), ["150", "150", "150"]);
+  assert.deepEqual(amounts(split("450", "200", "THRESHOLD_REMAINDER")), ["200", "200", "50"]);
+});
+test("split: no maximum, or a total within it, is one part", () => {
+  assert.deepEqual(amounts(split("450", null, "EVEN")), ["450"]);
+  assert.deepEqual(amounts(split("200", "200", "THRESHOLD_REMAINDER")), ["200"]);
+  assert.deepEqual(amounts(split("199", "200", "EVEN")), ["199"]);
+});
+test("split: even parts are whole steps, the leftover steps going to the first parts, and the parts add up", () => {
+  const s = split("10000", "3000", "EVEN", "1000"); // 4 parts, 2500 each is not a step multiple
+  assert.deepEqual(amounts(s), ["3000", "3000", "2000", "2000"]);
+  assert.equal(s.parts.reduce((a, b) => a.plus(b), new D(0)).toString(), "10000");
+  assert.deepEqual(amounts(split("10", "3", "EVEN")), ["3", "3", "2", "2"]);
+});
+test("split: threshold parts use the maximum rounded down to a step; an exact multiple has no remainder", () => {
+  assert.deepEqual(amounts(split("5000", "1500", "THRESHOLD_REMAINDER", "1000")), ["1000", "1000", "1000", "1000", "1000"]);
+  assert.deepEqual(amounts(split("600", "200", "THRESHOLD_REMAINDER")), ["200", "200", "200"]);
+});
+test("split: a last part below the minimum is added to the one before it; even parts below it use fewer parts", () => {
+  const t = split("410", "200", "THRESHOLD_REMAINDER", "1", "50");
+  assert.deepEqual(amounts(t), ["200", "210"]);
+  assert.match(t.note!, /added to the part before/);
+  assert.deepEqual(amounts(split("410", "200", "THRESHOLD_REMAINDER", "1", "5")), ["200", "200", "10"], "a remainder at or above the minimum stands alone");
+  const e = split("250", "200", "EVEN", "1", "150"); // 125 and 125 are below 150
+  assert.deepEqual(amounts(e), ["250"]);
+  assert.match(e.note!, /Fewer parts/);
+});
+test("split: an override amount that is not a step multiple splits in the smallest unit; absurd counts are capped", () => {
+  assert.deepEqual(amounts(split("100.5", "50", "EVEN", "1000")), ["33.5", "33.5", "33.5"]);
+  assert.deepEqual(amounts(split("100.0001", "50", "EVEN", "1000")), ["33.3334", "33.3334", "33.3333"]);
+  const huge = split("1000000", "1", "THRESHOLD_REMAINDER");
+  assert.equal(huge.parts.length, MAX_PARTS);
+  assert.equal(huge.parts.reduce((a, b) => a.plus(b), new D(0)).toString(), "1000000");
+});
+
+import { overallFollowUp } from "./decide.ts";
+test("follow-up of the whole: executed when every part is, partly once any is, cancelled when every part is", () => {
+  assert.equal(overallFollowUp(["EXECUTED", "EXECUTED"]), "EXECUTED");
+  assert.equal(overallFollowUp(["EXECUTED", "OPEN"]), "PARTLY_EXECUTED");
+  assert.equal(overallFollowUp(["PARTLY_EXECUTED", "OPEN"]), "PARTLY_EXECUTED");
+  assert.equal(overallFollowUp(["EXECUTED", "CANCELLED"]), "PARTLY_EXECUTED", "the part that was cancelled does not make the rest less done");
+  assert.equal(overallFollowUp(["CANCELLED", "CANCELLED"]), "CANCELLED");
+  assert.equal(overallFollowUp(["OPEN", "CANCELLED"]), "OPEN");
+  assert.equal(overallFollowUp(["NOT_STARTED"]), "NOT_STARTED");
+});
