@@ -347,3 +347,14 @@ dbTest("one tenant never sees another's pre-trades or executed trades", async ()
   const other = await ft.commands.importExecutedTrades({ tenantId: b, rows: csv(line("X1", { ref: s.reference })), by: "bank" });
   assert.deepEqual([other.status, other.stored, other.unmatched], ["APPLIED", 1, 1], "the same file for another tenant is its own batch and cannot match the first tenant's pre-trade");
 });
+
+dbTest("a matched executed trade has its pre-trade's program, and a trade with no program is never matched: the database says so (decision 0018)", async () => {
+  const t = tenant();
+  const s = await sentPreTrade(t);
+  await ft.commands.importExecutedTrades({ tenantId: t, rows: csv(line("F1", { ref: s.reference })), by: "bank" });
+  const matched = await q(db).selectFrom("executed_trades").select(["executed_trade_id", "program_id", "pre_trade_id"]).where("tenant_id", "=", t).executeTakeFirstOrThrow();
+  assert.ok(matched.pre_trade_id !== null && matched.program_id !== null);
+  await assert.rejects(q(db).updateTable("executed_trades").set({ program_id: "OTHER" }).where("tenant_id", "=", t).execute(), { code: "23503" }, "another program than the pre-trade's");
+  await assert.rejects(q(db).updateTable("executed_trades").set({ program_id: null }).where("tenant_id", "=", t).execute(), { code: "23514" }, "matched, but no program");
+  await assert.rejects(q(db).updateTable("pre_trades").set({ program_id: "OTHER" }).where("tenant_id", "=", t).execute(), { code: "23503" }, "the pre-trade cannot move from under its trade");
+});

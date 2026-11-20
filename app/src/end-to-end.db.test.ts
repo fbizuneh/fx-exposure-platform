@@ -9,6 +9,7 @@ import type { Actor } from "@services/identity/contract";
 import { migrate } from "../../scripts/migrate.mjs";
 import { composeApp, type App } from "./compose.ts";
 import { NO_ACTION_MESSAGES } from "../../services/hedge-recommendation/contract/index.ts";
+import { sql } from "kysely";
 import { connect as connectHr, createHedgeRecommendation } from "../../services/hedge-recommendation/src/index.ts";
 import { connect as connectEm, createExposureManagement } from "../../services/exposure-management/src/index.ts";
 import { parseExecutedFile } from "../../services/fx-trade/src/index.ts";
@@ -1084,6 +1085,23 @@ e2e("an override that never got its pre-trades lapses with the cycle, and the or
   await run({ maxHedgeDisplay: "220", minHedgeDisplay: "110" }, { parts: ["200.00", "200.00", "200.00", "200.00", "200.00"], note: null });
   // The override drops the original's note; the lapse brings it back.
   await run({ minHedgeDisplay: "120" }, { parts: ["300.00", "300.00", "400.00"], note: /added to the part before it/ });
+});
+
+e2e("a part belongs to its recommendation's program, and a policy's overrides to the policy: the database refuses anything else (decision 0018)", async () => {
+  const x = await finishedCycle(split({ splitMethod: "THRESHOLD_REMAINDER", ratioOverrides: [{ pair: "EUR-USD", ratio: "0.5" }] }));
+  const rec = us01(x.recs);
+  const db = connectHr(url!);
+  const refused = async (statement: ReturnType<typeof sql>, why: string) => { await assert.rejects(statement.execute(db), { code: "23503" }, why); };
+  try {
+    await refused(sql`update hedge_recommendation.recommendation_parts set program_id = 'OTHER' where tenant_id = ${x.t} and recommendation_id = ${rec.recommendationId}`, "a part under another program");
+    await refused(sql`update hedge_recommendation.recommendations set program_id = 'OTHER' where tenant_id = ${x.t} and recommendation_id = ${rec.recommendationId}`, "a recommendation moved from under its parts");
+    await refused(sql`insert into hedge_recommendation.ratio_overrides (tenant_id, program_id, currency_pair, ratio) values (${x.t}, 'NOPE', 'EUR-USD', 1)`, "an override for a program with no policy");
+    await refused(sql`insert into hedge_recommendation.rounding_overrides (tenant_id, program_id, currency, rounding) values (${x.t}, 'NOPE', 'EUR', 1)`, "a rounding override for a program with no policy");
+    await refused(sql`insert into hedge_recommendation.max_hedge_overrides (tenant_id, program_id, netting_level, max_hedge_display) values (${x.t}, 'NOPE', 'ENTITY', 1)`, "a maximum override for a program with no policy");
+  } finally { await db.destroy(); }
+  // Saving a policy again replaces its overrides and the policy together.
+  await app.hedgeRecommendation.commands.setPolicy({ tenantId: x.t, programId: programId("BS"), policy: { ...split({ ratioOverrides: [{ pair: "EUR-USD", ratio: "0.4" }] }) }, actor: x.admin } as never);
+  assert.deepEqual((await app.hedgeRecommendation.questions.policy(x.t, programId("BS")))!.ratioOverrides, [{ pair: "EUR-USD", ratio: "0.4" }]);
 });
 
 e2e("deciders: accepting, overriding and a decision still waiting on FX Trade count; a refused claim and a dismissal do not", async () => {
