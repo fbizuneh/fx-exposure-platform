@@ -1058,6 +1058,34 @@ e2e("a failed status read after confirmation does not undo the decision: the pre
   assert.equal(await drain(app), 0, "nothing is left pending");
 });
 
+e2e("an override that never got its pre-trades lapses with the cycle, and the original parts and note come back; no override is recorded", async () => {
+  const unsure = () => withFxTrade(async () => { throw new Error("FX Trade unreachable"); }, true);
+  const view = async (t: TenantId, id: string) => { const r = (await app.hedgeRecommendation.questions.getRecommendation(t, id))!; return [r.status, r.parts.map((p) => p.amount), r.splitNote, r.decidedAmount ?? null]; };
+  const run = async (over: object, original: { parts: string[]; note: RegExp | null }) => {
+    const x = await finishedCycle(split({ splitMethod: "THRESHOLD_REMAINDER", ...over }));
+    const rec = us01(x.recs);
+    assert.deepEqual(rec.parts.map((p) => p.amount), original.parts);
+    const down = unsure();
+    try { await assert.rejects(down.hr.commands.decide({ tenantId: x.t, recommendationId: rec.recommendationId, actor: x.admin, action: "OVERRIDE", amount: "450" })); } finally { await down.done(); }
+    const [status, parts, note] = await view(x.t, rec.recommendationId);
+    assert.equal(status, "DECIDING");
+    assert.notDeepEqual(parts, original.parts, "the override re-split the amount");
+    await app.exposureManagement.commands.approveCycle({ tenantId: x.t, cycleId: x.cycle, actor: x.admin });
+    await drain(app);
+    const [s2, p2, n2, d2] = await view(x.t, rec.recommendationId);
+    assert.deepEqual([s2, p2, d2], ["LAPSED", original.parts, null]);
+    if (original.note === null) assert.equal(n2, null); else assert.match(n2 as string, original.note);
+    const got = (await app.hedgeRecommendation.questions.getRecommendation(x.t, rec.recommendationId))!;
+    assert.equal(got.decidedBy ?? null, null);
+    assert.equal((await trailOf(x.t)).filter((r) => r.action === "recommendation.overridden").length, 0, "no override record");
+    assert.deepEqual(await drafts(x.t, x.cycle, rec.recommendationId), []);
+  };
+  // The override adds a note (merged remainder); the original had none.
+  await run({ maxHedgeDisplay: "220", minHedgeDisplay: "110" }, { parts: ["200.00", "200.00", "200.00", "200.00", "200.00"], note: null });
+  // The override drops the original's note; the lapse brings it back.
+  await run({ minHedgeDisplay: "120" }, { parts: ["300.00", "300.00", "400.00"], note: /added to the part before it/ });
+});
+
 e2e("deciders: accepting, overriding and a decision still waiting on FX Trade count; a refused claim and a dismissal do not", async () => {
   const label = async (t: TenantId) => (await trailOf(t)).find((r) => r.action === "program.defined")!.actor;
   const hedge = (recs: readonly { action: string; recommendationId: string }[]) => recs.find((r) => r.action === "HEDGE")!.recommendationId;

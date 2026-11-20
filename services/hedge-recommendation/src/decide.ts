@@ -182,9 +182,15 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
       const pre = held.get(d.recommendation_id);
       const parts = await partsOf(tenant, d.recommendation_id);
       if (pre && parts.length > 0 && parts.every((part) => pre.has(part.part_no))) { await confirm(tenant, d.recommendation_id, pre); changed++; continue; }
-      // No pre-trade exists and the cycle can no longer take one, so this decision did not take effect.
-      await q(db).updateTable("recommendations").set({ status: "LAPSED", decision_kind: null, decided_amount: null, decided_by: null, decided_at: null, decision_note: null })
-        .where("tenant_id", "=", tenant).where("recommendation_id", "=", d.recommendation_id).where("status", "=", "DECIDING").execute();
+      // No pre-trade exists and the cycle can no longer take one, so this decision did not take effect. An override had re-split the amount: put the original
+      // parts and note back in the same transaction that lapses it, as a refusal does, so the read model never shows parts that do not add up to the amount.
+      await db.transaction().execute(async (tx) => {
+        const rec = await q(tx).selectFrom("recommendations").selectAll().where("tenant_id", "=", tenant).where("recommendation_id", "=", d.recommendation_id).forUpdate().executeTakeFirst();
+        if (!rec || rec.status !== "DECIDING") return;
+        await q(tx).updateTable("recommendations").set({ status: "LAPSED", decision_kind: null, decided_amount: null, decided_by: null, decided_at: null, decision_note: null })
+          .where("tenant_id", "=", tenant).where("recommendation_id", "=", d.recommendation_id).execute();
+        if (rec.decision_kind === "OVERRIDE") await writeParts(tx, tenant, rec, rec.amount!);
+      });
       changed++;
     }
     return db.transaction().execute(async (tx) => {
