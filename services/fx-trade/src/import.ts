@@ -10,6 +10,7 @@ import { q, type Db, type Tx } from "./db.ts";
 import type { ExecutedRow } from "./file.ts";
 import { AccessDenied, require_, who } from "./access.ts";
 import { fixed4, legProblems, matchTrade, misfit, realDate, type LegInput } from "./model.ts";
+import { recordChange } from "./change-record.ts";
 import { announce } from "./outbox.ts";
 import type { Collaborators } from "./ports.ts";
 import { openPreTrades, recomputeStatus } from "./store.ts";
@@ -185,6 +186,7 @@ export function importCommands(db: Db, c: Collaborators) {
       await q(tx).updateTable("executed_trades").set({ is_current: false }).where("tenant_id", "=", tenant).where("executed_trade_id", "=", cur.executed_trade_id).execute();
       await writeTrade(tx, tenant, t, null, cur.version + 1, true, { preTradeId: cur.pre_trade_id, status: cur.match_status, note: cur.match_note, candidates: typeof cur.candidates === "string" ? JSON.parse(cur.candidates) : cur.candidates });
       if (cur.pre_trade_id) await recomputeStatus(tx, tenant, cur.pre_trade_id);
+      await recordChange(tx, { tenantId: tenant, programId: cur.program_id === null ? null : toProgramId(cur.program_id), actor: input.by, action: "executed-trade.cancelled", targetType: "executed-trade", targetId: cur.executed_trade_id, fields: [] });
       return true;
     });
   }
@@ -206,6 +208,7 @@ export function importCommands(db: Db, c: Collaborators) {
       await q(tx).updateTable("executed_trades").set({ pre_trade_id: pre.preTradeId, match_status: "MATCHED", match_note: `matched by ${who(input.actor)}`, candidates: "[]" }).where("tenant_id", "=", tenant).where("executed_trade_id", "=", e.executed_trade_id).execute();
       await announce(tx, { type: "fx-trade.executed-trade-received", tenantId: tenant, executedTradeId: e.executed_trade_id, programId: toProgramId(e.program_id), preTradeId: pre.preTradeId });
       await recomputeStatus(tx, tenant, pre.preTradeId);
+      await recordChange(tx, { tenantId: tenant, programId: toProgramId(e.program_id), actor: who(input.actor), action: "executed-trade.matched", targetType: "executed-trade", targetId: e.executed_trade_id, fields: ["pre-trade"] });
     });
   }
 

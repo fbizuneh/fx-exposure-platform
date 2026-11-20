@@ -39,7 +39,9 @@ async function tenantWith(name: string, programs: ProgramId[] = []) {
   return { tenant, by };
 }
 const asUser = (tenant: TenantId, userId: UserId) => ({ tenantId: tenant, actor: { kind: "user", userId } }) as const;
-const eventsFor = async (tenant: TenantId) => (await id.outbox.pending(1000)).filter((e) => e.tenantId === tenant);
+const everythingFor = async (tenant: TenantId) => (await id.outbox.pending(1000)).filter((e) => e.tenantId === tenant);
+const eventsFor = async (tenant: TenantId) => (await everythingFor(tenant)).filter((e) => e.type !== "identity.change-recorded"); // what other services react to
+const changesFor = async (tenant: TenantId) => (await everythingFor(tenant)).flatMap((e) => (e.type === "identity.change-recorded" ? [`${e.action} ${e.targetType}`] : [])); // what Audit is told
 
 dbTest("access end to end: roles, enabled programs, restriction, disabled user", async () => {
   const { tenant, by } = await tenantWith("Acme", [DAILY, MONTHLY]);
@@ -51,10 +53,10 @@ dbTest("access end to end: roles, enabled programs, restriction, disabled user",
   assert.deepEqual(await ask("authorization:manage"), { allowed: false, reason: "permission-missing" });
   assert.deepEqual(await ask("cycle:approve", WEEKLY), { allowed: false, reason: "program-not-enabled" });
 
-  await id.commands.setProgramRestriction(tenant, user, [MONTHLY]);
+  await id.commands.setProgramRestriction(tenant, user, [MONTHLY], "test");
   assert.deepEqual(await ask("cycle:approve", DAILY), { allowed: false, reason: "program-restricted" });
   assert.deepEqual(await ask("cycle:approve", MONTHLY), { allowed: true, via: "user" });
-  await id.commands.setProgramRestriction(tenant, user, null);
+  await id.commands.setProgramRestriction(tenant, user, null, "test");
   assert.deepEqual(await ask("cycle:approve", DAILY), { allowed: true, via: "user" });
 
   await id.commands.grantRole(tenant, user, "TREASURY_ADMIN", by);
@@ -104,6 +106,7 @@ dbTest("enabling and disabling a program announces once per change, with identif
 
   const events = await eventsFor(tenant);
   assert.deepEqual(events.map((e) => e.type), ["identity.program-enabled", "identity.program-disabled", "identity.program-enabled"]);
+  assert.deepEqual((await changesFor(tenant)).filter((c) => c.endsWith(" program")), ["program.enabled program", "program.disabled program", "program.enabled program"], "a repeat that changes nothing records nothing");
   for (const e of events) assert.deepEqual(Object.keys(e).sort(), ["eventId", "occurredAt", "programId", "tenantId", "type"]);
 
   await id.outbox.markPublished(events.map((e) => e.eventId));

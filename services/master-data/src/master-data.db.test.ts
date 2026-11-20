@@ -1,5 +1,6 @@
 // Database tests. They need a PostgreSQL database whose name ends in _test, because they reset the
 // master_data schema. Set TEST_DATABASE_URL (docker compose up -d starts one). Without it they are skipped.
+import type { MasterDataEvents } from "../contract/index.ts";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -42,7 +43,11 @@ const acct = (accountNumber: string, hierarchyNodeCode: string | null, name = `A
 });
 const snap = <R>(tenant: TenantId, rows: R[], asOf = D1, source = "erp") => ({ tenantId: tenant, sourceSystem: source, asOf, mode: "SNAPSHOT" as const, rows, by: "test" });
 const part = <R>(tenant: TenantId, rows: R[], asOf = D1, source = "manual") => ({ tenantId: tenant, sourceSystem: source, asOf, mode: "PARTIAL" as const, rows, by: "test" });
-const events = async (t: TenantId) => (await md.outbox.pending(1000)).filter((e) => e.tenantId === t);
+const events = async (t: TenantId) => {
+  const changed: Extract<MasterDataEvents, { type: "master-data.changed" }>[] = []; // the announcement other services use; change records are checked in the Audit tests
+  for (const e of await md.outbox.pending(1000)) if (e.tenantId === t && e.type === "master-data.changed") changed.push(e);
+  return changed;
+};
 
 dbTest("history: a lookup reads the version valid on the date, and the id stays the same", async () => {
   const t = newTenant();

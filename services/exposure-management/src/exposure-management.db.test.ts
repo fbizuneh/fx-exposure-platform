@@ -59,7 +59,9 @@ const newTenant = (...programs: string[]) => {
 const settings = { nettingLevel: "ENTITY", bucketScheme: { kind: "DAYS", boundaries: [0, 30, 90] } as const, schedule: null };
 const define = (t: TenantId, id: string, over: Partial<NewProgram> = {}) =>
   em.commands.defineProgram({ tenantId: t, programId: id, name: `Program ${id}`, type: "BALANCE_SHEET", settings, effectiveFrom: "2026-01-01", actor: admin, ...over });
-const events = async (t: TenantId) => (await em.outbox.pending(1000)).filter((e) => e.tenantId === t);
+const everything = async (t: TenantId) => (await em.outbox.pending(1000)).filter((e) => e.tenantId === t);
+const events = async (t: TenantId) => (await everything(t)).filter((e) => e.type !== "exposure-management.change-recorded"); // what other services react to
+const changes = async (t: TenantId) => (await everything(t)).flatMap((e) => (e.type === "exposure-management.change-recorded" ? [`${e.action} ${e.targetType}`] : [])); // what Audit is told
 const types = async (t: TenantId) => (await events(t)).map((e) => e.type.replace("exposure-management.", ""));
 const runs = (t: TenantId, c: CycleId) => ({ tenantId: t, cycleId: c as string, runId: randomUUID() });
 
@@ -225,6 +227,7 @@ dbTest("approval: only a completed cycle, only with the approve permission, and 
   assert.ok(c.approvedAt);
   assert.equal(c.history.at(-1)?.kind, "APPROVED");
   assert.deepEqual((await events(t)).at(-1)?.type, "exposure-management.cycle-approved");
+  assert.deepEqual((await changes(t)).filter((c) => c.endsWith(" cycle")), ["cycle.started cycle", "exposure.approved cycle", "cycle.approved cycle"], "the gates are recorded once each; refusals record nothing");
   await assert.rejects(em.commands.approveCycle({ tenantId: t, cycleId: id, actor: ap }), /already approved/);
   await assert.rejects(em.commands.rerunCycle({ tenantId: t, cycleId: id, actor: ap }), /approved cycle cannot be rerun/);
   await assert.rejects(em.commands.skipCycle({ tenantId: t, cycleId: id, reason: "x", actor: ap }), /approved cycle/);

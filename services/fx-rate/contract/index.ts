@@ -1,4 +1,5 @@
 // Published questions and events of FX Rate. Other services import this file, never src/.
+import type { ChangeRecordFields } from "@services/audit/contract";
 import type { AsOfDate, TenantId } from "@shared/kernel";
 
 export const RATE_QUALITIES = ["VALID", "STALE", "OUTLIER"] as const;
@@ -49,4 +50,11 @@ export interface RatesLoaded {
   readonly source: string;
   readonly businessDate: AsOfDate;
 }
-export type FxRateEvents = RatesLoaded;
+
+/** A change record for Audit (decision 0012): who did what to which record. Identifiers and field names only. */
+export interface FxRateChangeRecorded extends ChangeRecordFields {
+  readonly type: "fx-rate.change-recorded";
+  readonly eventId: string;
+  readonly occurredAt: string;
+}
+export type FxRateEvents = RatesLoaded | FxRateChangeRecorded;

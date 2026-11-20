@@ -62,3 +62,8 @@ test("a program must be enabled, and a restricted user must list it", () => {
 test("a platform user is allowed in any tenant and says so", () => {
   assert.deepEqual(decide(q("authorization:manage", "WEEKLY"), facts(null, "SYSTEM_ADMIN")), { allowed: true, via: "platform-role" });
 });
+
+test("the audit trail is read by approvers and admins only (decision 0012)", () => {
+  const holders = TENANT_ROLES.filter((r) => ROLE_PERMISSIONS[r].has("audit:read"));
+  assert.deepEqual([...holders].sort(), ["TREASURY_ADMIN", "TREASURY_APPROVER"]);
+});

@@ -5,6 +5,7 @@ import { asOfDate, cycleId as toCycleId, programId as toProgramId, type CycleId,
 import type { Actor } from "@services/identity/contract";
 import { require_, who, type IdentityPort } from "./access.ts";
 import { q, type Db, type Queryable, type Tx } from "./db.ts";
+import { recordChange } from "./change-record.ts";
 import { announce } from "./outbox.ts";
 import { settingsOn } from "./queries.ts";
 import { realDate } from "./rules.ts";
@@ -62,6 +63,7 @@ export function cycleCommands(db: Db, access: IdentityPort, clock: () => Date) {
       }).execute();
       await note(tx, tenant, id, "INITIATED", who(input.actor));
       await announce(tx, { type: "exposure-management.cycle-initiated", tenantId: tenant, cycleId: toCycleId(id), programId: toProgramId(input.programId), asOf: asOfDate(input.asOf) });
+      await recordChange(tx, { tenantId: tenant, programId: toProgramId(input.programId), actor: who(input.actor), action: "cycle.started", targetType: "cycle", targetId: id, fields: [] });
       return toCycleId(id);
     });
   }
@@ -105,6 +107,7 @@ export function cycleCommands(db: Db, access: IdentityPort, clock: () => Date) {
       await q(tx).updateTable("cycles").set({ stage: "INITIATED", current_run_id: null, rerun_count: c.rerun_count + 1 }).where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).execute();
       await note(tx, input.tenantId, input.cycleId, "RERUN", who(input.actor), `rerun ${c.rerun_count + 1}`);
       await announce(tx, { type: "exposure-management.cycle-initiated", tenantId: input.tenantId, cycleId: toCycleId(input.cycleId), programId: toProgramId(c.program_id), asOf: asOfDate(c.as_of) });
+      await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(c.program_id), actor: who(input.actor), action: "cycle.rerun", targetType: "cycle", targetId: input.cycleId, fields: [] });
     });
   }
 
@@ -123,6 +126,7 @@ export function cycleCommands(db: Db, access: IdentityPort, clock: () => Date) {
         type: kind === "SKIPPED" ? "exposure-management.cycle-skipped" : "exposure-management.cycle-deleted",
         tenantId: input.tenantId, cycleId: toCycleId(input.cycleId), programId: toProgramId(c.program_id),
       });
+      await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(c.program_id), actor: who(input.actor), action: kind === "SKIPPED" ? "cycle.skipped" : "cycle.deleted", targetType: "cycle", targetId: input.cycleId, fields: ["reason"] });
     });
   }
 
@@ -143,6 +147,7 @@ export function cycleCommands(db: Db, access: IdentityPort, clock: () => Date) {
       await q(tx).updateTable("cycles").set({ exposure_approved_at: clock(), exposure_approved_by: who(input.actor), exposure_approved_run_id: c.current_run_id }).where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).execute();
       await note(tx, input.tenantId, input.cycleId, "EXPOSURE_APPROVED", who(input.actor), `run ${c.current_run_id}`);
       await announce(tx, { type: "exposure-management.exposure-approved", tenantId: input.tenantId, cycleId: toCycleId(input.cycleId), programId: toProgramId(c.program_id), runId: c.current_run_id });
+      await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(c.program_id), actor: who(input.actor), action: "exposure.approved", targetType: "cycle", targetId: input.cycleId, fields: [] });
     });
   }
 
@@ -159,6 +164,7 @@ export function cycleCommands(db: Db, access: IdentityPort, clock: () => Date) {
       await q(tx).updateTable("cycles").set({ approved_at: clock(), approved_by: who(input.actor) }).where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).execute();
       await note(tx, input.tenantId, input.cycleId, "APPROVED", who(input.actor));
       await announce(tx, { type: "exposure-management.cycle-approved", tenantId: input.tenantId, cycleId: toCycleId(input.cycleId), programId: toProgramId(c.program_id) });
+      await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(c.program_id), actor: who(input.actor), action: "cycle.approved", targetType: "cycle", targetId: input.cycleId, fields: [] });
     });
   }
 

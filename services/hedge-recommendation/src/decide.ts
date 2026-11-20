@@ -10,6 +10,7 @@ import type { Actor } from "@services/identity/contract";
 import type { FollowUp, Recommendation } from "../contract/index.ts";
 import { require_, who } from "./access.ts";
 import { q, type Db } from "./db.ts";
+import { recordChange } from "./change-record.ts";
 import { firstTime } from "./events.ts";
 import { announce } from "./outbox.ts";
 import type { Collaborators } from "./ports.ts";
@@ -35,6 +36,8 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
       if (rec.status !== "DECIDING") return;
       await q(tx).updateTable("recommendations").set({ status: rec.decision_kind === "OVERRIDE" ? "OVERRIDDEN" : "ACCEPTED", pre_trade_id: preTradeId, follow_up: "OPEN" }).where("tenant_id", "=", tenant).where("recommendation_id", "=", id).execute();
       await announce(tx, { type: "hedge-recommendation.pre-trade-created", tenantId: tenant, recommendationId: id, preTradeId, cycleId: rec.cycle_id as CycleId, programId: rec.program_id as never });
+      // The decision stands once its pre-trade exists, so this is where it is written to the trail: in the transaction that confirms it, once, by whoever won the claim.
+      await recordChange(tx, { tenantId: tenant, programId: rec.program_id as never, actor: rec.decided_by!, action: rec.decision_kind === "OVERRIDE" ? "recommendation.overridden" : "recommendation.accepted", targetType: "recommendation", targetId: id, fields: rec.decision_kind === "OVERRIDE" ? ["amount"] : [] });
     });
     return reread(tenant, id);
   }
@@ -93,8 +96,14 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
     };
 
     if (input.action === "DISMISS") {
-      const r = await q(db).updateTable("recommendations").set({ status: "DISMISSED", decided_by: by, decided_at: clock(), decision_note: note }).where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).where("status", "=", "OPEN").executeTakeFirst();
-      if (Number(r.numUpdatedRows) === 0) return lost();
+      // The winning decision and its change record are written together, so a decision that lost leaves nothing in the trail.
+      const won = await db.transaction().execute(async (tx) => {
+        const r = await q(tx).updateTable("recommendations").set({ status: "DISMISSED", decided_by: by, decided_at: clock(), decision_note: note }).where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).where("status", "=", "OPEN").executeTakeFirst();
+        if (Number(r.numUpdatedRows) === 0) return false;
+        await recordChange(tx, { tenantId: tenant, programId: rec.program_id as never, actor: by, action: "recommendation.dismissed", targetType: "recommendation", targetId: rec.recommendation_id, fields: note === null ? [] : ["note"] });
+        return true;
+      });
+      if (!won) return lost();
       return reread(tenant, rec.recommendation_id);
     }
 
@@ -104,6 +113,7 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
       amount = input.amount;
     }
     if (rec.trading_entity_code === null) throw new RecommendationError("this recommendation has no trading entity");
+    // Claiming is not yet a decision: FX Trade may still refuse, which reopens the recommendation. Audit hears of it when it is confirmed.
     const won = await q(db).updateTable("recommendations").set({ status: "DECIDING", decision_kind: input.action, decided_amount: amount, decided_by: by, decided_at: clock(), decision_note: note })
       .where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).where("status", "=", "OPEN").executeTakeFirst();
     if (Number(won.numUpdatedRows) === 0) return lost();

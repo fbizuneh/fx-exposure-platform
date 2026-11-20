@@ -1,4 +1,5 @@
 // Published questions and events of Master Data. Other services import this file, never src/.
+import type { ChangeRecordFields } from "@services/audit/contract";
 import type { AccountId, AsOfDate, EntityId, TenantId } from "@shared/kernel";
 
 export const ENTITY_TYPES = [
@@ -108,4 +109,11 @@ export interface MasterDataChanged {
   readonly kind: "ENTITY" | "HIERARCHY" | "ACCOUNT" | "CURRENCY";
   readonly asOf: AsOfDate;
 }
-export type MasterDataEvents = MasterDataChanged;
+
+/** A change record for Audit (decision 0012): who did what to which record. Identifiers and field names only. */
+export interface MasterDataChangeRecorded extends ChangeRecordFields {
+  readonly type: "master-data.change-recorded";
+  readonly eventId: string;
+  readonly occurredAt: string;
+}
+export type MasterDataEvents = MasterDataChanged | MasterDataChangeRecorded;

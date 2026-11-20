@@ -4,8 +4,10 @@ import { randomUUID } from "node:crypto";
 import type { FxRateEvents } from "../contract/index.ts";
 import { q, type Db, type Queryable } from "./db.ts";
 
-export async function announce(tx: Queryable, event: Omit<FxRateEvents, "eventId" | "occurredAt">): Promise<FxRateEvents> {
-  const full: FxRateEvents = { ...event, eventId: randomUUID(), occurredAt: new Date().toISOString() };
+type NewEvent = FxRateEvents extends infer E ? (E extends FxRateEvents ? Omit<E, "eventId" | "occurredAt"> : never) : never;
+
+export async function announce(tx: Queryable, event: NewEvent): Promise<FxRateEvents> {
+  const full = { ...event, eventId: randomUUID(), occurredAt: new Date().toISOString() } as FxRateEvents;
   await q(tx)
     .insertInto("outbox")
     .values({ event_id: full.eventId, tenant_id: full.tenantId, type: full.type, payload: JSON.stringify(full) })

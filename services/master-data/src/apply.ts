@@ -5,6 +5,7 @@ import { sql, type Kysely } from "kysely";
 import type { AsOfDate, TenantId } from "@shared/kernel";
 import { q, type Db, type Tx } from "./db.ts";
 import { DEFAULT_MAX_END_SHARE, plan, shouldHold, stable, type OpenRow, type Plan } from "./diff.ts";
+import { byPerson, recordChange } from "./change-record.ts";
 import { announce } from "./outbox.ts";
 import { chartKey, type AccountRow, type CurrencyRow, type EntityRow, type HierarchyNodeRow, type Kind, type Mode } from "./rows.ts";
 import { ChangeSetInvalid, validateAccounts, validateCurrencies, validateEntities, validateHierarchy } from "./validate.ts";
@@ -351,6 +352,8 @@ async function execute(db: Db, req: Request): Promise<SubmitResult> {
     }
     if (p.creates.length + p.changes.length + p.ends.length > 0) {
       await announce(tx, { type: "master-data.changed", tenantId: tenant, batchId, kind, asOf: sub.asOf });
+      const by = releasing ? releasing.by : sub.by;
+      if (byPerson(by)) await recordChange(tx, { tenantId: tenant, programId: null, actor: by, action: `master-data.${String(kind).toLowerCase()}-changed`, targetType: "change-set", targetId: batchId, fields: [] });
     }
     return { status: "APPLIED", batchId, created: p.creates.length, changed: p.changes.length, ended: p.ends.length, unchanged: p.unchanged };
   });

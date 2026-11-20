@@ -1,4 +1,5 @@
 // Published questions and events of Identity. Other services import this file, never src/.
+import type { ChangeRecordFields } from "@services/audit/contract";
 import type { ProgramId, TenantId } from "@shared/kernel";
 
 declare const brand: unique symbol;
@@ -82,10 +83,19 @@ export type AccessDecision =
   | { readonly allowed: true; readonly via: "user" | "platform-role" }
   | { readonly allowed: false; readonly reason: DenyReason };
 
+/** Which programs an actor is limited to. Not restricted means every program the tenant has, including ones enabled later. */
+export interface ProgramScope {
+  readonly restricted: boolean;
+  /** The programs the actor is limited to when restricted; empty when not restricted or when the actor has no access. */
+  readonly programs: readonly ProgramId[];
+}
+
 /** The questions Identity answers. Inside the deployable this is a direct call. */
 export interface IdentityQuestions {
   checkAccess(query: AccessQuery): Promise<AccessDecision>;
   enabledPrograms(tenantId: TenantId): Promise<readonly ProgramId[]>;
+  /** The program scope of an actor in a tenant, for services that list records across programs (decision 0001). */
+  programScope(tenantId: TenantId, actor: Actor): Promise<ProgramScope>;
 }
 
 /** Events carry identifiers only; the receiver asks Identity for detail. */
@@ -102,4 +112,11 @@ export interface ProgramDisabled extends IdentityEvent {
   readonly type: "identity.program-disabled";
   readonly programId: ProgramId;
 }
-export type IdentityEvents = ProgramEnabled | ProgramDisabled;
+
+/** A change record for Audit (decision 0012): who did what to which record. Identifiers and field names only. */
+export interface IdentityChangeRecorded extends ChangeRecordFields {
+  readonly type: "identity.change-recorded";
+  readonly eventId: string;
+  readonly occurredAt: string;
+}
+export type IdentityEvents = ProgramEnabled | ProgramDisabled | IdentityChangeRecorded;

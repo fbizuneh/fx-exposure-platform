@@ -1,4 +1,5 @@
 // Published questions and events of FX Trade. Other services import this file, never src/.
+import type { ChangeRecordFields } from "@services/audit/contract";
 import type { AsOfDate, CycleId, ProgramId, TenantId } from "@shared/kernel";
 
 export const INSTRUMENTS = ["SPOT", "FORWARD", "NDF", "SWAP"] as const;
@@ -104,4 +105,11 @@ export interface ExecutedTradeReceived extends Announcement {
   readonly programId: ProgramId | null;
   readonly preTradeId: string | null;
 }
-export type FxTradeEvents = PreTradeReady | ExecutedTradeReceived;
+
+/** A change record for Audit (decision 0012): who did what to which record. Identifiers and field names only. */
+export interface FxTradeChangeRecorded extends ChangeRecordFields {
+  readonly type: "fx-trade.change-recorded";
+  readonly eventId: string;
+  readonly occurredAt: string;
+}
+export type FxTradeEvents = PreTradeReady | ExecutedTradeReceived | FxTradeChangeRecorded;

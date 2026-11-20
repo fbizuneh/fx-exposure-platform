@@ -6,6 +6,11 @@ import type { App } from "./compose.ts";
 type Announced = { readonly type: string; readonly tenantId: TenantId; readonly eventId: string; readonly [k: string]: unknown };
 
 async function deliver(app: App, e: Announced): Promise<void> {
+  // Every service announces its change records the same way; Audit takes them all (decision 0012).
+  if (e.type.endsWith(".change-recorded")) {
+    await app.audit.commands.record(e as never);
+    return;
+  }
   switch (e.type) {
     case "identity.program-enabled":
       await app.exposureManagement.commands.onProgramEnabled(e as never);
