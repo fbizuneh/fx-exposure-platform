@@ -40,6 +40,7 @@ const md: MasterDataQuestions = {
   async functionalCurrencies() { return []; },
   async getCurrencies() { return []; },
   async getCalendars() { return []; },
+  async getPairExposureCurrencies() { return []; },
 };
 
 let db: Db;

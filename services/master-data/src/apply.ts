@@ -2,14 +2,14 @@
 // together with its event. A snapshot that would end too much is held until someone releases or rejects it.
 import { createHash, randomUUID } from "node:crypto";
 import { sql, type Kysely } from "kysely";
-import type { AsOfDate, TenantId } from "@shared/kernel";
+import { programId, type AsOfDate, type TenantId } from "@shared/kernel";
 import { q, type Db, type Tx } from "./db.ts";
 import { DEFAULT_MAX_END_SHARE, plan, shouldHold, stable, type OpenRow, type Plan } from "./diff.ts";
 import { byPerson, recordChange } from "./change-record.ts";
 import { announce } from "./outbox.ts";
-import { chartKey, type AccountRow, type CalendarRow, type CurrencyRow, type EntityRow, type HierarchyNodeRow, type Kind, type Mode } from "./rows.ts";
+import { chartKey, type AccountRow, type CalendarRow, type CurrencyRow, type EntityRow, type HierarchyNodeRow, type Kind, type Mode, type PairExposureCurrencyRow, normalPair } from "./rows.ts";
 import { WEEKDAYS } from "../contract/index.ts";
-import { ChangeSetInvalid, validateAccounts, validateCalendars, validateCurrencies, validateEntities, validateHierarchy } from "./validate.ts";
+import { ChangeSetInvalid, validateAccounts, validateCalendars, validateCurrencies, validateEntities, validateHierarchy, validatePairExposureCurrencies } from "./validate.ts";
 
 /** The change set cannot be applied as things stand: out of date, a repeat with other content, or not held. */
 export class ChangeSetRefused extends Error {}
@@ -22,6 +22,8 @@ export interface Submission<R> {
   readonly rows: readonly R[];
   /** Who or what sent it: a user id, a platform user id or a connector name. */
   readonly by: string;
+  /** Only for kinds kept per hedging program (exposure currencies): the program this change set is for. It scopes version checks, snapshot omissions, the safeguard and the change record. */
+  readonly programCode?: string;
 }
 
 export interface SubmitResult {
@@ -52,13 +54,17 @@ interface WriteCtx<R> {
   rows: Map<string, R>;
   plan: Plan;
   loaded: Loaded;
+  /** The program of a program-scoped change set; null for the rest. */
+  scope: string | null;
 }
 
 interface Ops<R> {
   kind: Kind;
+  /** True when every change set names one hedging program and only that program's rows are looked at. */
+  scoped?: boolean;
   keyOf(r: R): string;
   attrsOf(r: R): object;
-  load(tx: Tx, tenant: TenantId, asOf: string): Promise<Loaded>;
+  load(tx: Tx, tenant: TenantId, asOf: string, scope: string | null): Promise<Loaded>;
   validate(rows: readonly R[], l: Loaded, mode: Mode): string[];
   write(tx: Tx, w: WriteCtx<R>): Promise<void>;
 }
@@ -83,7 +89,7 @@ async function ensureCharts(tx: Tx, tenant: TenantId, codes: Iterable<string>, h
   }
 }
 
-async function closeVersion(tx: Tx, table: "entities" | "gl_hierarchy_nodes" | "accounts" | "currencies" | "calendars", idCol: string, tenant: string, id: string, validFrom: string, asOf: string) {
+async function closeVersion(tx: Tx, table: "entities" | "gl_hierarchy_nodes" | "accounts" | "currencies" | "calendars" | "pair_exposure_currencies", idCol: string, tenant: string, id: string, validFrom: string, asOf: string) {
   const db = q(tx) as unknown as Kysely<any>;
   if (validFrom === asOf) {
     // A version that starts the same day is replaced in place, so no empty range is ever stored.
@@ -313,7 +319,48 @@ const calendarOps: Ops<CalendarRow> = {
   },
 };
 
-const OPS = { ENTITY: entityOps, HIERARCHY: hierarchyOps, ACCOUNT: accountOps, CURRENCY: currencyOps, CALENDAR: calendarOps } as unknown as Record<Kind, Ops<unknown>>;
+const pairExposureOps: Ops<PairExposureCurrencyRow> = {
+  kind: "EXPOSURE_CURRENCY",
+  scoped: true,
+  keyOf: (r) => normalPair(r.pair),
+  attrsOf: (r) => ({ exposureCurrency: r.exposureCurrency }),
+  async load(tx, tenant, asOf, scope) {
+    const l = emptyLoaded();
+    const rows = await q(tx).selectFrom("pair_exposure_currencies").selectAll().where("tenant_id", "=", tenant).where("program_id", "=", scope ?? "").orderBy("valid_from").execute();
+    for (const r of rows) {
+      const key = r.pair;
+      l.ids.set(key, r.mapping_id);
+      if (isOpen(r, asOf)) l.open.set(key, { id: r.mapping_id, validFrom: r.valid_from, source: r.source_system, attrs: stable({ exposureCurrency: r.exposure_currency }) });
+    }
+    // The guard reads the durable latest effective date, not the surviving versions: a same-day removal deletes its version and would leave nothing to see.
+    const last = await q(tx).selectFrom("pair_exposure_currency_history").select("latest_effective").where("tenant_id", "=", tenant).where("program_id", "=", scope ?? "").executeTakeFirst();
+    l.maxValidFrom = last?.latest_effective ?? null;
+    return l;
+  },
+  validate: (rows) => validatePairExposureCurrencies(rows),
+  async write(tx, w) {
+    const ids = new Map(w.loaded.ids);
+    for (const k of w.plan.creates) if (!ids.has(k)) ids.set(k, randomUUID());
+    for (const k of [...w.plan.changes, ...w.plan.ends]) {
+      const cur = w.loaded.open.get(k)!;
+      await closeVersion(tx, "pair_exposure_currencies", "mapping_id", w.tenant, cur.id, cur.validFrom, w.asOf);
+    }
+    for (const k of [...w.plan.creates, ...w.plan.changes]) {
+      const r = w.rows.get(k)!;
+      await q(tx).insertInto("pair_exposure_currencies").values({
+        tenant_id: w.tenant, mapping_id: ids.get(k)!, valid_from: w.asOf, valid_to: null, source_system: w.source, batch_id: w.batchId,
+        program_id: w.scope!, pair: normalPair(r.pair), exposure_currency: r.exposureCurrency,
+      }).execute();
+    }
+    if (w.plan.creates.length + w.plan.changes.length + w.plan.ends.length > 0) {
+      const db = q(tx);
+      await db.insertInto("pair_exposure_currency_history").values({ tenant_id: w.tenant, program_id: w.scope!, latest_effective: w.asOf })
+        .onConflict((oc) => oc.columns(["tenant_id", "program_id"]).doUpdateSet({ latest_effective: sql<string>`GREATEST(pair_exposure_currency_history.latest_effective, excluded.latest_effective)` })).execute();
+    }
+  },
+};
+
+const OPS = { ENTITY: entityOps, HIERARCHY: hierarchyOps, ACCOUNT: accountOps, CURRENCY: currencyOps, CALENDAR: calendarOps, EXPOSURE_CURRENCY: pairExposureOps } as unknown as Record<Kind, Ops<unknown>>;
 
 async function maxEndShare(tx: Tx, tenant: TenantId): Promise<number> {
   const row = await q(tx).selectFrom("tenant_settings").select("max_end_share").where("tenant_id", "=", tenant).executeTakeFirst();
@@ -331,7 +378,7 @@ async function execute(db: Db, req: Request): Promise<SubmitResult> {
     const cs = await q(db).selectFrom("change_sets").selectAll().where("tenant_id", "=", req.tenant).where("batch_id", "=", req.release.batchId).executeTakeFirst();
     if (!cs || cs.status !== "HELD") throw new ChangeSetRefused("only a held change set can be released");
     kind = cs.kind as Kind;
-    sub = { tenantId: req.tenant, sourceSystem: cs.source_system, asOf: cs.as_of as AsOfDate, mode: cs.mode as Mode, rows: cs.rows as unknown[], by: req.release.by };
+    sub = { tenantId: req.tenant, sourceSystem: cs.source_system, asOf: cs.as_of as AsOfDate, mode: cs.mode as Mode, rows: cs.rows as unknown[], by: req.release.by, ...(cs.scope_key === "" ? {} : { programCode: cs.scope_key }) };
   } else {
     kind = req.kind;
     sub = req.sub;
@@ -339,6 +386,9 @@ async function execute(db: Db, req: Request): Promise<SubmitResult> {
   const ops = OPS[kind];
   const tenant = req.tenant;
   const releasing = "release" in req ? req.release : null;
+  const scope = ops.scoped ? (typeof sub.programCode === "string" ? sub.programCode.trim() : "") : null;
+  if (ops.scoped && scope === "") throw new ChangeSetInvalid(["the program code is required: an exposure currency change set is for one hedging program"]);
+  const scopeKey = scope ?? "";
 
   return db.transaction().execute(async (tx) => {
     await sql`SELECT pg_advisory_xact_lock(hashtext(${`${tenant}:${kind}`}))`.execute(tx);
@@ -354,19 +404,19 @@ async function execute(db: Db, req: Request): Promise<SubmitResult> {
 
     if (!releasing && sub.mode === "SNAPSHOT") {
       const dup = await q(tx).selectFrom("change_sets").select(["batch_id", "content_hash", "status"])
-        .where("tenant_id", "=", tenant).where("source_system", "=", sub.sourceSystem).where("kind", "=", kind)
+        .where("tenant_id", "=", tenant).where("source_system", "=", sub.sourceSystem).where("kind", "=", kind).where("scope_key", "=", scopeKey)
         .where("as_of", "=", sub.asOf).where("mode", "=", "SNAPSHOT").where("status", "<>", "REJECTED").executeTakeFirst();
       if (dup) {
         if (dup.content_hash !== hash) {
-          throw new ChangeSetRefused(`a ${kind} snapshot from ${sub.sourceSystem} dated ${sub.asOf} was already sent with different content; reject it or use a new date`);
+          throw new ChangeSetRefused(`a ${kind} snapshot${scope ? ` for program ${scope}` : ""} from ${sub.sourceSystem} dated ${sub.asOf} was already sent with different content; reject it or use a new date`);
         }
         return { status: dup.status === "HELD" ? "HELD" : "DUPLICATE", batchId: dup.batch_id, created: 0, changed: 0, ended: 0, unchanged: 0 };
       }
     }
 
-    const loaded = await ops.load(tx, tenant, sub.asOf);
+    const loaded = await ops.load(tx, tenant, sub.asOf, scope);
     if (loaded.maxValidFrom !== null && loaded.maxValidFrom > sub.asOf) {
-      throw new ChangeSetRefused(`${kind} master data already has a version from ${loaded.maxValidFrom}; a change set dated ${sub.asOf} would rewrite history`);
+      throw new ChangeSetRefused(`${kind} master data${scope ? ` for program ${scope}` : ""} already has a version from ${loaded.maxValidFrom}; a change set dated ${sub.asOf} would rewrite history`);
     }
     const problems = ops.validate(sub.rows, loaded, sub.mode);
     if (problems.length > 0) throw new ChangeSetInvalid(problems);
@@ -382,19 +432,21 @@ async function execute(db: Db, req: Request): Promise<SubmitResult> {
       await q(tx).insertInto("change_sets").values({
         tenant_id: tenant, batch_id: batchId, source_system: sub.sourceSystem, kind, mode: sub.mode, as_of: sub.asOf, content_hash: hash,
         status: hold ? "HELD" : "APPLIED", rows: JSON.stringify(sub.rows), open_count: openForSource, end_count: p.ends.length,
-        held_reason: heldReason ?? null, created_by: sub.by,
+        held_reason: heldReason ?? null, created_by: sub.by, scope_key: scopeKey,
       }).execute();
     }
     if (hold) return { status: "HELD", batchId, created: 0, changed: 0, ended: 0, unchanged: 0, heldReason };
 
-    await ops.write(tx, { tenant, asOf: sub.asOf, source: sub.sourceSystem, batchId, rows, plan: p, loaded });
+    await ops.write(tx, { tenant, asOf: sub.asOf, source: sub.sourceSystem, batchId, rows, plan: p, loaded, scope });
     if (releasing) {
       await q(tx).updateTable("change_sets").set({ status: "APPLIED", decided_by: releasing.by, decided_at: new Date() }).where("tenant_id", "=", tenant).where("batch_id", "=", batchId).execute();
     }
     if (p.creates.length + p.changes.length + p.ends.length > 0) {
-      await announce(tx, { type: "master-data.changed", tenantId: tenant, batchId, kind, asOf: sub.asOf });
+      const base = { type: "master-data.changed", tenantId: tenant, batchId, asOf: sub.asOf } as const;
+      if (kind === "EXPOSURE_CURRENCY") await announce(tx, { ...base, kind, programId: programId(scope!) });
+      else await announce(tx, { ...base, kind });
       const by = releasing ? releasing.by : sub.by;
-      if (byPerson(by)) await recordChange(tx, { tenantId: tenant, programId: null, actor: by, action: `master-data.${String(kind).toLowerCase()}-changed`, targetType: "change-set", targetId: batchId, fields: [] });
+      if (byPerson(by)) await recordChange(tx, { tenantId: tenant, programId: scope ? programId(scope) : null, actor: by, action: `master-data.${String(kind).toLowerCase()}-changed`, targetType: "change-set", targetId: batchId, fields: [] });
     }
     return { status: "APPLIED", batchId, created: p.creates.length, changed: p.changes.length, ended: p.ends.length, unchanged: p.unchanged };
   });
@@ -407,6 +459,7 @@ export function applyCommands(db: Db) {
     applyAccounts: (sub: Submission<AccountRow>) => execute(db, { tenant: sub.tenantId, kind: "ACCOUNT", sub }),
     applyCurrencies: (sub: Submission<CurrencyRow>) => execute(db, { tenant: sub.tenantId, kind: "CURRENCY", sub }),
     applyCalendars: (sub: Submission<CalendarRow>) => execute(db, { tenant: sub.tenantId, kind: "CALENDAR", sub }),
+    applyPairExposureCurrencies: (sub: Submission<PairExposureCurrencyRow> & { programCode: string }) => execute(db, { tenant: sub.tenantId, kind: "EXPOSURE_CURRENCY", sub }),
 
     /** Applies a held snapshot now. It is checked again against what exists today. */
     releaseChangeSet: (tenant: TenantId, batchId: string, by: string) => execute(db, { tenant, release: { batchId, by } }),

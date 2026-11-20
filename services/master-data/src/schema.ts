@@ -45,6 +45,8 @@ export interface MasterDataDatabase {
     monetary_flag: boolean;
     fx_relevant_flag: boolean;
   };
+  pair_exposure_currencies: Versioned & { mapping_id: string; program_id: string; pair: string; exposure_currency: string };
+  pair_exposure_currency_history: { tenant_id: string; program_id: string; latest_effective: string };
   calendars: Versioned & { calendar_id: string; code: string; weekend_days: string[]; covered_through: string; holidays: Json };
   currencies: Versioned & { currency_id: string; code: string; is_ndf: boolean };
   change_sets: {
@@ -60,6 +62,7 @@ export interface MasterDataDatabase {
     open_count: number;
     end_count: number;
     held_reason: string | null;
+    scope_key: Generated<string>;
     created_by: string;
     created_at: Generated<Date>;
     decided_by: string | null;

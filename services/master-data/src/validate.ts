@@ -1,6 +1,6 @@
 // Checks a change set before anything is written. Pure: the caller passes in what already exists.
 import { ENTITY_TYPES, HIERARCHY_CLASSIFICATIONS, NORMAL_BALANCES, STATEMENT_TYPES, WEEKDAYS } from "../contract/index.ts";
-import { chartKey, type AccountRow, type CalendarRow, type CurrencyRow, type EntityRow, type HierarchyNodeRow, type Mode } from "./rows.ts";
+import { chartKey, type AccountRow, type CalendarRow, type CurrencyRow, type PairExposureCurrencyRow, type EntityRow, type HierarchyNodeRow, type Mode } from "./rows.ts";
 import { findCycle } from "./tree.ts";
 
 const CURRENCY = /^[A-Z]{3}$/;
@@ -120,6 +120,17 @@ export function validateCalendars(rows: readonly CalendarRow[]): string[] {
       if (REAL_DATE(r.coveredThrough) && h.date > r.coveredThrough) out.push(`${at}: holiday ${h.date} is after the covered-through date ${r.coveredThrough}`);
       if (h.name !== null && (typeof h.name !== "string" || h.name.trim() === "")) out.push(`${at}: holiday ${h.date} has a blank name`);
     }
+  }
+  return out;
+}
+
+export function validatePairExposureCurrencies(rows: readonly PairExposureCurrencyRow[]): string[] {
+  const out = duplicates(rows.map((r) => (typeof r.pair === "string" ? r.pair.split("-").sort().join("-") : String(r.pair))), "pair");
+  for (const r of rows) {
+    const at = `exposure currency ${String(r.pair)}`;
+    const ccys = typeof r.pair === "string" ? r.pair.split("-") : [];
+    if (ccys.length !== 2 || ccys.some((c) => !CURRENCY.test(c)) || ccys[0] === ccys[1]) { out.push(`${at}: the pair must be two different currency codes like EUR-GBP`); continue; }
+    if (!ccys.includes(r.exposureCurrency)) out.push(`${at}: the exposure currency must be one of the pair`);
   }
   return out;
 }

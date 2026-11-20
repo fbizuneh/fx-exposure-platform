@@ -8,7 +8,7 @@ import type { MasterDataQuestions } from "@services/master-data/contract";
 export interface Collaborators {
   readonly management: Pick<ExposureManagementQuestions, "getCycle">;
   readonly dataSource: Pick<DataSourceQuestions, "includedBalances" | "ingestionStatus">;
-  readonly masterData: Pick<MasterDataQuestions, "getEntities" | "getAccounts" | "entityWalk" | "getCurrencies">;
+  readonly masterData: Pick<MasterDataQuestions, "getEntities" | "getAccounts" | "entityWalk" | "getCurrencies" | "getPairExposureCurrencies">;
   readonly rates: Pick<FxRateQuestions, "getRate">;
   readonly trades: Pick<FxTradeQuestions, "executedTrades">;
 }

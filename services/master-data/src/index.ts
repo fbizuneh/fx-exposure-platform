@@ -16,4 +16,4 @@ export { connect };
 export type { Db };
 export { ChangeSetRefused } from "./apply.ts";
 export { ChangeSetInvalid } from "./validate.ts";
-export type { AccountRow, CalendarRow, CurrencyRow, EntityRow, HierarchyNodeRow } from "./rows.ts";
+export type { AccountRow, CalendarRow, CurrencyRow, EntityRow, HierarchyNodeRow, PairExposureCurrencyRow } from "./rows.ts";

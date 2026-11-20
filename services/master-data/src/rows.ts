@@ -46,8 +46,17 @@ export interface CalendarRow {
   readonly holidays: readonly { readonly date: string; readonly name: string | null }[];
 }
 
+/** Which currency of a pair is the exposure currency (decision 0015). A change set of these rows names its one hedging program (the submission's programCode); the pair may be written in either order. */
+export interface PairExposureCurrencyRow {
+  readonly pair: string;
+  readonly exposureCurrency: string;
+}
+
+/** A pair in alphabetical order, "EUR-GBP" for "GBP-EUR": the same pair written either way is the same row. */
+export const normalPair = (pair: string): string => (typeof pair === "string" ? pair.split("-").sort().join("-") : pair);
+
 export type Mode = "SNAPSHOT" | "PARTIAL";
-export type Kind = "ENTITY" | "HIERARCHY" | "ACCOUNT" | "CURRENCY" | "CALENDAR";
+export type Kind = "ENTITY" | "HIERARCHY" | "ACCOUNT" | "CURRENCY" | "CALENDAR" | "EXPOSURE_CURRENCY";
 
 /** Natural key of a hierarchy node or account within its chart. */
 export const chartKey = (chartCode: string, code: string): string => JSON.stringify([chartCode, code]);

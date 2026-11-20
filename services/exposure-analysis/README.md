@@ -22,7 +22,7 @@ Events carry identifiers only.
 
 ## Consumes
 - Included balances and ingestion status (Data Source)
-- Entities, accounts, regions and NDF currencies (Master Data)
+- Entities, accounts, regions and NDF currencies, and the program's pair mappings as of the as-of date (Master Data)
 - Spot rates (FX Rate)
 - The cycle and its settings copy (Exposure Management)
 - Executed trades (FX Trade), for outstanding hedges and net exposure
