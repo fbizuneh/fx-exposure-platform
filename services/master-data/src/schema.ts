@@ -61,6 +61,7 @@ export interface MasterDataDatabase {
     open_count: number;
     end_count: number;
     held_reason: string | null;
+    scope_key: Generated<string>;
     created_by: string;
     created_at: Generated<Date>;
     decided_by: string | null;

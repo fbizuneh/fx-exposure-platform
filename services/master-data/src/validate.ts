@@ -125,11 +125,9 @@ export function validateCalendars(rows: readonly CalendarRow[]): string[] {
 }
 
 export function validatePairExposureCurrencies(rows: readonly PairExposureCurrencyRow[]): string[] {
-  const norm = (r: PairExposureCurrencyRow) => JSON.stringify([r.programCode, typeof r.pair === "string" ? r.pair.split("-").sort().join("-") : r.pair]);
-  const out = duplicates(rows.map((r) => norm(r)), "program and pair").map((m) => m.replace(/\[|\]|"/g, "").replace(",", " "));
+  const out = duplicates(rows.map((r) => (typeof r.pair === "string" ? r.pair.split("-").sort().join("-") : String(r.pair))), "pair");
   for (const r of rows) {
-    const at = `exposure currency ${String(r.programCode)} ${String(r.pair)}`;
-    if (blank(r.programCode)) out.push(`${at}: the program code is required`);
+    const at = `exposure currency ${String(r.pair)}`;
     const ccys = typeof r.pair === "string" ? r.pair.split("-") : [];
     if (ccys.length !== 2 || ccys.some((c) => !CURRENCY.test(c)) || ccys[0] === ccys[1]) { out.push(`${at}: the pair must be two different currency codes like EUR-GBP`); continue; }
     if (!ccys.includes(r.exposureCurrency)) out.push(`${at}: the exposure currency must be one of the pair`);

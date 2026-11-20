@@ -18,3 +18,10 @@ CREATE TABLE master_data.pair_exposure_currencies (
 );
 ALTER TABLE master_data.change_sets DROP CONSTRAINT change_sets_kind_check;
 ALTER TABLE master_data.change_sets ADD CONSTRAINT change_sets_kind_check CHECK (kind IN ('ENTITY', 'HIERARCHY', 'ACCOUNT', 'CURRENCY', 'CALENDAR', 'EXPOSURE_CURRENCY'));
+
+-- A change set of mappings is for one hedging program: its snapshot key, its omissions and its safeguard count are that program's alone.
+ALTER TABLE master_data.change_sets ADD COLUMN scope_key text NOT NULL DEFAULT '';
+DROP INDEX master_data.change_sets_snapshot_key;
+CREATE UNIQUE INDEX change_sets_snapshot_key
+  ON master_data.change_sets (tenant_id, source_system, kind, scope_key, as_of)
+  WHERE mode = 'SNAPSHOT' AND status <> 'REJECTED';

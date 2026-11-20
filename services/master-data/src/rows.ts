@@ -46,9 +46,8 @@ export interface CalendarRow {
   readonly holidays: readonly { readonly date: string; readonly name: string | null }[];
 }
 
-/** Which currency of a pair is the exposure currency for one hedging program (decision 0015). The pair may be written in either order. */
+/** Which currency of a pair is the exposure currency (decision 0015). A change set of these rows names its one hedging program (the submission's programCode); the pair may be written in either order. */
 export interface PairExposureCurrencyRow {
-  readonly programCode: string;
   readonly pair: string;
   readonly exposureCurrency: string;
 }

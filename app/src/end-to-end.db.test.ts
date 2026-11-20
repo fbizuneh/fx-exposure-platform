@@ -739,6 +739,24 @@ e2e("a reader limited to a program (Identity's restriction) sees only that progr
   assert.ok(cycle);
 });
 
+e2e("an exposure-currency mapping change is recorded in its own program: a reviewer limited to that program sees it, not the other program's, and no mapping values reach Audit", async () => {
+  const { t, admin } = await finishedCycle(defaults);
+  const person = (await trailOf(t)).find((r) => r.action === "program.defined")!.actor;
+  const ops = (await app.identity.commands.createPlatformUser({ issuer: "platform", externalSubject: randomUUID() })) as string;
+  const limitedId = (await app.identity.commands.addUser(t, { issuer: "idp", externalSubject: randomUUID(), roles: ["TREASURY_APPROVER"] }, ops)) as never;
+  await app.identity.commands.setProgramRestriction(t, limitedId, [programId("BS")], ops);
+  const limited = { kind: "user", userId: limitedId } as Actor;
+  // The same source sends both programs' mappings.
+  await app.masterData.commands.applyPairExposureCurrencies({ tenantId: t, sourceSystem: "erp", asOf: D0, mode: "SNAPSHOT", programCode: "BS", rows: [{ pair: "EUR-GBP", exposureCurrency: "EUR" }], by: person });
+  await app.masterData.commands.applyPairExposureCurrencies({ tenantId: t, sourceSystem: "erp", asOf: D0, mode: "SNAPSHOT", programCode: "FC", rows: [{ pair: "EUR-GBP", exposureCurrency: "GBP" }], by: person });
+  await drain(app);
+  const mapping = (rs: readonly { action: string; programId: unknown }[]) => rs.filter((r) => r.action === "master-data.exposure_currency-changed").map((r) => r.programId);
+  assert.deepEqual(mapping((await app.audit.questions.trail({ tenantId: t, actor: admin, limit: 500 })).records).sort(), ["BS", "FC"]);
+  const mine = (await app.audit.questions.trail({ tenantId: t, actor: limited, limit: 500 })).records;
+  assert.deepEqual(mapping(mine), ["BS"], "the limited reviewer sees BS's mapping change and not FC's");
+  assert.ok(mine.filter((r) => r.action === "master-data.exposure_currency-changed").every((r) => r.fields.length === 0));
+});
+
 e2e("segregation of duties across the real services: the starter cannot approve the exposure, a decider cannot approve the cycle, others can, refusals are audited, and a draft is still released only at cycle approval", async () => {
   const { t, admin, cycle, recs } = await finishedCycle(defaults, "ENTITY", false, true); // admin started the cycle; the tenant has segregation of duties on
   assert.deepEqual(await app.exposureManagement.questions.tenantSettings(t), { segregationOfDuties: true });
