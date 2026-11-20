@@ -1237,8 +1237,8 @@ e2e("an interrupted approval strands its holder's hedge decisions; recovery lets
     decisions: {
       reserveApproval: async (tenant, c, approver, id) => { await hr.commands.reserveApproval(tenant, c, approver, id); throw new Error("process died"); },
       releaseApproval: async () => { throw new Error("unreachable"); },
-      checkExposureApproval: (tenant, c, runId) => hr.commands.checkExposureApproval(tenant, c, runId),
-      releaseExposureCheck: (tenant, c, runId) => hr.commands.releaseExposureCheck(tenant, c, runId),
+      checkExposureApproval: (tenant, c, runId, attemptId) => hr.commands.checkExposureApproval(tenant, c, runId, attemptId),
+      releaseExposureCheck: (tenant, c, attemptId) => hr.commands.releaseExposureCheck(tenant, c, attemptId),
     },
     now: () => clock.now,
   });
@@ -1660,12 +1660,13 @@ e2e("roll dates and the exposure approval are one after the other: a date edit i
   const hr = app.hedgeRecommendation.commands;
   const runId = (await app.exposureAnalysis.questions.currentRun(run.t, run.cycle))!.runId;
   // The approval looked first: the dates are locked for that run until it lets go.
-  assert.deepEqual(await hr.checkExposureApproval(run.t, run.cycle, runId), { allowed: true });
+  const attempt = randomUUID();
+  assert.deepEqual(await hr.checkExposureApproval(run.t, run.cycle, runId, attempt), { allowed: true });
   await assert.rejects(setDates(run, { nearDate: "2026-12-16", farDate: FAR }), /locked; rerun the cycle first/);
-  await hr.releaseExposureCheck(run.t, run.cycle, runId);
+  await hr.releaseExposureCheck(run.t, run.cycle, attempt);
   // The edit came first: the approval refuses, and a refused approval leaves nothing locked.
   await setDates(run, { nearDate: "2026-12-16", farDate: FAR });
-  const stale = await hr.checkExposureApproval(run.t, run.cycle, runId);
+  const stale = await hr.checkExposureApproval(run.t, run.cycle, runId, randomUUID());
   assert.equal(stale.allowed, false);
   await setDates(run, { nearDate: "2026-12-16", farDate: "2027-01-18" });
   // Both at once, repeatedly: whichever wins, an approved run never carries dates other than its recommendations were made from.
@@ -1739,7 +1740,7 @@ const holidayOn = (currencies: Record<string, string | null>) => (t: TenantId) =
 
 e2e("roll: a far date that is a holiday in one currency is not used; the group says which date and currency, offers the next joint business day, and uses a new date only once the user enters it", async () => {
   for (const [closed, expected] of [["EUR", ["EUR"]], ["USD", ["USD"]]] as const) {
-    const run = await rolledCycle({}, { nearDate: "2026-12-15", farDate: FAR }, { before: holidayOn({ EUR: closed === "EUR" ? FAR : null, USD: closed === "USD" ? FAR : null }) });
+    const run = await rolledCycle({}, { nearDate: "2026-12-15", farDate: FAR }, { approve: false, before: holidayOn({ EUR: closed === "EUR" ? FAR : null, USD: closed === "USD" ? FAR : null }) });
     const us = groupOf(run.recs, "US01");
     assert.deepEqual([us.action, us.reason, us.parts.length, us.valueDate, us.direction, us.amount], ["NONE", "FAR_DATE_CLOSED", 0, null, null, null], "no trade on the closed date");
     assert.deepEqual(us.rollIssue, { date: FAR, closedCurrencies: expected, suggestedDate: "2027-01-18" }, `${closed} closed`);
@@ -1763,4 +1764,52 @@ e2e("roll: a recommendation made from roll dates that have since changed cannot 
   try { await client.query("UPDATE hedge_recommendation.roll_parameters SET revision = revision + 1 WHERE tenant_id = $1", [run.t]); } finally { await client.end(); }
   await assert.rejects(app.hedgeRecommendation.commands.decide({ tenantId: run.t, recommendationId: us.recommendationId, actor: run.admin, action: "ACCEPT" }), /roll dates changed after this recommendation was made/);
   assert.equal((await app.hedgeRecommendation.questions.getRecommendation(run.t, us.recommendationId))!.status, "OPEN", "the claim was rolled back");
+});
+
+// Second review of PR 14.
+e2e("roll: Approve Exposure is refused while a group's far date is closed, leaves the cycle editable, and goes through once the user enters a valid date", async () => {
+  const run = await rolledCycle({}, { nearDate: "2026-12-15", farDate: FAR }, { approve: false, before: holidayOn({ EUR: FAR, USD: null }) });
+  assert.equal(groupOf(run.recs, "US01").reason, "FAR_DATE_CLOSED");
+  await assert.rejects(approveExposure(run.t, run.cycle as string), /far date entered for the roll is closed for some groups/);
+  assert.equal((await app.exposureManagement.questions.getCycle(run.t, run.cycle))!.exposureApprovedAt, null, "nothing was approved");
+  // Nothing is locked: the user chooses the date, reruns, and approves. The date was not moved for them.
+  assert.equal((await app.hedgeRecommendation.questions.rollParameters(run.t, run.cycle))!.farDate, FAR);
+  await setDates(run, { nearDate: "2026-12-15", farDate: groupOf(run.recs, "US01").rollIssue!.suggestedDate });
+  await rerun(run);
+  const fresh = groupOf(await app.hedgeRecommendation.questions.recommendations(run.t, run.cycle), "US01");
+  assert.deepEqual([fresh.action, fresh.rollIssue, fresh.valueDate], ["HEDGE", null, "2027-01-18"]);
+  await approveExposure(run.t, run.cycle as string);
+  assert.equal((await app.hedgeRecommendation.commands.decide({ tenantId: run.t, recommendationId: fresh.recommendationId, actor: run.admin, action: "ACCEPT" })).status, "ACCEPTED");
+});
+
+e2e("roll: an approval attempt that is refused cannot release the lock of another attempt that is about to commit", async () => {
+  const run = await rolledCycle({}, { nearDate: "2026-12-15", farDate: FAR }, { approve: false, segregation: true });
+  const hr = app.hedgeRecommendation.commands;
+  const ops = (await app.identity.commands.createPlatformUser({ issuer: "platform", externalSubject: randomUUID() })) as string;
+  const approver: Actor = { kind: "user", userId: (await app.identity.commands.addUser(run.t, { issuer: "idp", externalSubject: randomUUID(), roles: ["TREASURY_APPROVER"] }, ops)) as never };
+  // Attempt A is valid and is held after its check, before its approval commits (a second Exposure Management over the same database).
+  let reached!: () => void, proceed!: () => void;
+  const gated = new Promise<void>((r) => { reached = r; });
+  const release = new Promise<void>((r) => { proceed = r; });
+  const slowDb = connectEm(url!);
+  const slow = createExposureManagement(slowDb, {
+    access: app.identity.questions,
+    decisions: {
+      reserveApproval: (tenant, c, who, id) => hr.reserveApproval(tenant, c, who, id),
+      releaseApproval: (tenant, id) => hr.releaseApproval(tenant, id),
+      checkExposureApproval: async (tenant, c, runId, attemptId) => { const out = await hr.checkExposureApproval(tenant, c, runId, attemptId); reached(); await release; return out; },
+      releaseExposureCheck: (tenant, c, attemptId) => hr.releaseExposureCheck(tenant, c, attemptId),
+    },
+    now: () => clock.now,
+  });
+  const attemptA = slow.commands.approveExposure({ tenantId: run.t, cycleId: run.cycle as string, actor: approver });
+  await gated;
+  // Attempt B, the starter's, takes its own lock for the same run, is refused by segregation of duties and cleans up.
+  await assert.rejects(app.exposureManagement.commands.approveExposure({ tenantId: run.t, cycleId: run.cycle as string, actor: run.admin }), /you started or reran this cycle/);
+  await assert.rejects(setDates(run, { nearDate: "2026-12-16", farDate: FAR }), /locked; rerun the cycle first/, "A's lock is still there after B's cleanup");
+  proceed();
+  await attemptA;
+  await slowDb.destroy();
+  assert.ok((await app.exposureManagement.questions.getCycle(run.t, run.cycle))!.exposureApprovedAt, "A committed");
+  assert.equal((await app.hedgeRecommendation.questions.rollParameters(run.t, run.cycle))!.nearDate, "2026-12-15", "the dates are the ones A approved");
 });

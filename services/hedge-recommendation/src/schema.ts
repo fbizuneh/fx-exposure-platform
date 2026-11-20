@@ -8,7 +8,7 @@ export interface HedgeRecommendationDatabase {
     roll_type: Generated<string>; roll_adjustment: Generated<string>; roll_offset_days: Generated<number>;
   };
   roll_parameters: { tenant_id: string; program_id: string; cycle_id: string; near_date: string; far_date: string | null; offset_days: number | null; set_by: string; set_at: Date; revision: Generated<number> };
-  roll_locks: { tenant_id: string; program_id: string; cycle_id: string; run_id: string; locked_at: Date };
+  roll_locks: { tenant_id: string; program_id: string; cycle_id: string; attempt_id: string; run_id: string; locked_at: Date };
   amount_threshold_overrides: { tenant_id: string; program_id: string; netting_level: string; amount_threshold_display: string };
   max_hedge_overrides: { tenant_id: string; program_id: string; netting_level: string; max_hedge_display: string };
   recommendation_parts: { tenant_id: string; recommendation_id: string; program_id: string; part_no: number; amount: string; pre_trade_id: string | null; follow_up: Generated<string>; role: Generated<string>; direction: string | null; value_date: string | null; fixing_date: string | null; trading_entity_code: string | null };

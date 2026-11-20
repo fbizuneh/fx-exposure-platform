@@ -75,7 +75,7 @@ export function rollCommands(db: Db, c: Collaborators, clock: () => Date) {
    * Asked by Exposure Management before it approves the exposure of a run (decision 0021). A program that rolls may be approved only when the run's recommendations were
    * made from the roll dates as they stand now; it then locks the dates for that run. A run with no groups has no recommendations and passes.
    */
-  async function checkExposureApproval(tenant: TenantId, cycleId: CycleId, runId: string): Promise<{ allowed: true } | { allowed: false; reason: string }> {
+  async function checkExposureApproval(tenant: TenantId, cycleId: CycleId, runId: string, attemptId: string): Promise<{ allowed: true } | { allowed: false; reason: string }> {
     const cycle = await c.management.getCycle(tenant, cycleId);
     if (!cycle) return { allowed: true };
     const policy = await readPolicy(db, tenant, cycle.programId);
@@ -83,19 +83,23 @@ export function rollCommands(db: Db, c: Collaborators, clock: () => Date) {
     const groups = await c.analysis.netExposures(tenant, runId);
     return db.transaction().execute(async (tx) => {
       await lockCycleDecisions(tx, tenant, cycleId);
-      const recs = await q(tx).selectFrom("recommendations").select("roll_revision").where("tenant_id", "=", tenant).where("cycle_id", "=", cycleId).where("run_id", "=", runId).where("status", "<>", "SUPERSEDED").execute();
+      const recs = await q(tx).selectFrom("recommendations").select(["roll_revision", "reason"]).where("tenant_id", "=", tenant).where("cycle_id", "=", cycleId).where("run_id", "=", runId).where("status", "<>", "SUPERSEDED").execute();
       if (recs.length === 0 && groups.length > 0) return { allowed: false as const, reason: "the recommendations for this run are not made yet; try again shortly" };
       const now = await q(tx).selectFrom("roll_parameters").select("revision").where("tenant_id", "=", tenant).where("cycle_id", "=", cycleId).executeTakeFirst();
       if (recs.some((r) => r.roll_revision !== (now?.revision ?? null))) return { allowed: false as const, reason: "the roll dates changed after this run's recommendations were made; rerun the cycle before approving the exposure" };
-      await q(tx).deleteFrom("roll_locks").where("tenant_id", "=", tenant).where("cycle_id", "=", cycleId).execute();
-      await q(tx).insertInto("roll_locks").values({ tenant_id: tenant, program_id: cycle.programId, cycle_id: cycleId, run_id: runId, locked_at: clock() }).execute();
+      // A far date that is closed for a group's pair has to be replaced while the cycle can still be edited: once the exposure is approved the dates are frozen (review of PR 14).
+      if (recs.some((r) => r.reason === "FAR_DATE_CLOSED")) return { allowed: false as const, reason: "the far date entered for the roll is closed for some groups; enter another far date and rerun the cycle before approving the exposure" };
+      // Each attempt has its own lock, so one that fails cannot release another's. Locks of other runs are left over from reruns and no longer matter.
+      await q(tx).deleteFrom("roll_locks").where("tenant_id", "=", tenant).where("cycle_id", "=", cycleId).where("run_id", "<>", runId).execute();
+      await q(tx).insertInto("roll_locks").values({ tenant_id: tenant, program_id: cycle.programId, cycle_id: cycleId, attempt_id: attemptId, run_id: runId, locked_at: clock() })
+        .onConflict((oc) => oc.columns(["tenant_id", "program_id", "cycle_id", "attempt_id"]).doNothing()).execute();
       return { allowed: true as const };
     });
   }
 
-  /** The approval did not happen: unlock the dates again. One already gone is not an error. */
-  async function releaseExposureCheck(tenant: TenantId, cycleId: CycleId, runId: string): Promise<void> {
-    await q(db).deleteFrom("roll_locks").where("tenant_id", "=", tenant).where("cycle_id", "=", cycleId).where("run_id", "=", runId).execute();
+  /** This attempt's approval did not happen: drop its own lock, and only its own. One already gone is not an error. */
+  async function releaseExposureCheck(tenant: TenantId, cycleId: CycleId, attemptId: string): Promise<void> {
+    await q(db).deleteFrom("roll_locks").where("tenant_id", "=", tenant).where("cycle_id", "=", cycleId).where("attempt_id", "=", attemptId).execute();
   }
   return { setRollDates, checkExposureApproval, releaseExposureCheck };
 }

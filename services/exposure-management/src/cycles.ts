@@ -156,10 +156,11 @@ export function cycleCommands(db: Db, access: IdentityPort, decisions: Decisions
     await require_(access, input.tenantId, input.actor, "exposure:approve", program);
     // Hedge Recommendation is asked first whether the run's recommendations still match their roll dates, and locks the dates for the run (decision 0021). No transaction
     // spans the two, so the run is read once here and the approval below refuses if the cycle was rerun meanwhile; any other way out unlocks the dates again.
+    const attemptId = randomUUID(); // this attempt's own lock on the roll dates, so another attempt's cleanup cannot release it
     const pre = await q(db).selectFrom("cycles").select(["current_run_id", "stage"]).where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).executeTakeFirst();
     const gateRun = pre && pre.stage === "COMPLETED" ? pre.current_run_id : null;
     if (gateRun !== null) {
-      const gate = await decisions.checkExposureApproval(input.tenantId, input.cycleId as CycleId, gateRun);
+      const gate = await decisions.checkExposureApproval(input.tenantId, input.cycleId as CycleId, gateRun, attemptId);
       if (!gate.allowed) throw new CycleRefused(gate.reason);
     }
     let approved = false;
@@ -186,7 +187,7 @@ export function cycleCommands(db: Db, access: IdentityPort, decisions: Decisions
       approved = !refused;
       if (refused) await refuseDuty("EXPOSURE", input, program, EXPOSURE_WHY);
     } finally {
-      if (!approved && gateRun !== null) await decisions.releaseExposureCheck(input.tenantId, input.cycleId as CycleId, gateRun);
+      if (!approved && gateRun !== null) await decisions.releaseExposureCheck(input.tenantId, input.cycleId as CycleId, attemptId);
     }
   }
 

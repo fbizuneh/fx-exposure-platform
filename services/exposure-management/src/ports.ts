@@ -13,8 +13,8 @@ export interface DecisionsPort {
   releaseApproval(tenant: TenantId, reservationId: string): Promise<void>;
   /**
    * Asked before Approve Exposure approves `runId` (decision 0021): Hedge Recommendation says whether the run's recommendations still match the roll dates, and when they do
-   * locks the dates for that run. `releaseExposureCheck` unlocks them when the approval did not happen. Both are safe to repeat.
+   * locks the dates for that run under the attempt's own ID. `releaseExposureCheck` drops that attempt's lock, and only that one, when its approval did not happen. Both are safe to repeat.
    */
-  checkExposureApproval(tenant: TenantId, cycle: CycleId, runId: string): Promise<{ readonly allowed: true } | { readonly allowed: false; readonly reason: string }>;
-  releaseExposureCheck(tenant: TenantId, cycle: CycleId, runId: string): Promise<void>;
+  checkExposureApproval(tenant: TenantId, cycle: CycleId, runId: string, attemptId: string): Promise<{ readonly allowed: true } | { readonly allowed: false; readonly reason: string }>;
+  releaseExposureCheck(tenant: TenantId, cycle: CycleId, attemptId: string): Promise<void>;
 }
