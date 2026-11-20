@@ -12,7 +12,8 @@ import { loadConfig } from "./config.ts";
 import { createHttpServer } from "./http.ts";
 import { createLogger } from "./log.ts";
 import { checkReady, expectedMigrations } from "./ready.ts";
-import { startRuntime, type Runtime } from "./runtime.ts";
+import { startRuntime, ShutdownTimedOut, type Runtime } from "./runtime.ts";
+import net from "node:net";
 import { cycleTick, deliveryTick, newStats } from "./ticks.ts";
 import { deliveryProblems } from "./dispatch.ts";
 
@@ -183,4 +184,35 @@ dbTest("shutdown stops accepting requests and closes the database connections", 
   await assert.rejects(fetch(`http://127.0.0.1:${port}/healthz`));
   await other.shutdown(1000); // a second call is harmless
   assert.deepEqual((await deliveryProblems(runtime.app)).length, 0);
+});
+
+// Sends raw bytes so a request target that the URL parser rejects reaches the server exactly as a client could send it.
+const rawRequest = (port: number, target: string) => new Promise<string>((resolve, reject) => {
+  const socket = net.connect(port, "127.0.0.1", () => socket.write(`GET ${target} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`));
+  let data = "";
+  socket.on("data", (c) => { data += c.toString(); });
+  socket.on("end", () => resolve(data));
+  socket.on("error", reject);
+});
+
+dbTest("a request target that cannot be parsed gets a generic 400 and the server keeps serving", async () => {
+  const reply = await rawRequest(runtime.port, "//");
+  assert.match(reply, /^HTTP\/1\.1 400 /);
+  assert.match(reply, /"error":"bad request"/);
+  assert.equal((await get("/healthz")).status, 200); // the next request still works
+  assert.equal((await get("/nothing-here")).status, 404); // a valid but unknown route is still 404
+});
+
+dbTest("shutdown has one deadline: a stalled database close is logged, rejected, and requests are already refused", async () => {
+  const out: string[] = [];
+  const other = await startRuntime(loadConfig({ DATABASE_URL: url, PORT: "0", TIMER_ENABLED: "false", MIGRATE_ON_START: "false" }), createLogger("error", (l) => out.push(l)), { now: () => clock.now });
+  const port = other.port;
+  const realClose = other.app.close.bind(other.app);
+  (other.app as { close: () => Promise<void> }).close = () => new Promise<void>(() => {}); // a connection that never lets go
+  const began = Date.now();
+  await assert.rejects(other.shutdown(400), (e) => e instanceof ShutdownTimedOut && e.deadlineMs === 400);
+  assert.ok(Date.now() - began < 3000);
+  assert.ok(out.some((l) => l.includes("shutdown timed out")));
+  await assert.rejects(fetch(`http://127.0.0.1:${port}/healthz`)); // not accepting
+  await realClose(); // release the real connections so the test run can end
 });

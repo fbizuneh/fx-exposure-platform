@@ -50,10 +50,17 @@ export function createHttpServer(d: HttpDeps): http.Server {
   ];
   const routes = [...builtIn, ...(d.routes ?? [])];
   return http.createServer((req, res) => {
-    const url = new URL(req.url ?? "/", "http://localhost");
-    const route = routes.find((r) => r.method === req.method && r.path === url.pathname);
     void (async () => {
       try {
+        let pathname: string;
+        try {
+          pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+        } catch {
+          // A request target that cannot be parsed is the caller's mistake, not the server's. The target is not echoed.
+          res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: "bad request" }));
+          return;
+        }
+        const route = routes.find((r) => r.method === req.method && r.path === pathname);
         const out = route ? await route.handle(req) : { status: 404, body: { error: "not found" } };
         res.writeHead(out.status, { "content-type": "application/json" }).end(JSON.stringify(out.body));
       } catch {

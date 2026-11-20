@@ -11,6 +11,15 @@ import type { Logger } from "./log.ts";
 import { checkReady } from "./ready.ts";
 import { createLoop, cycleTick, deliveryTick, newStats, type Loop, type Stats } from "./ticks.ts";
 
+/** Shutdown could not finish inside its deadline (for example a stalled query holds a connection). */
+export class ShutdownTimedOut extends Error {
+  readonly deadlineMs: number;
+  constructor(deadlineMs: number) {
+    super(`shutdown did not finish within ${deadlineMs} ms`);
+    this.deadlineMs = deadlineMs;
+  }
+}
+
 export interface Runtime {
   readonly app: App;
   readonly stats: Stats;
@@ -18,8 +27,11 @@ export interface Runtime {
   readonly port: number;
   readonly delivery: Loop;
   readonly cycles: Loop;
-  /** Stops the timers, lets a running pass finish (up to `waitMs`), stops accepting requests and closes the database connections. */
-  shutdown(waitMs?: number): Promise<void>;
+  /**
+   * Stops accepting requests, stops the timers, lets a running pass finish, and closes the database connections, all inside one
+   * deadline (`deadlineMs`, default 20 s). If cleanup cannot finish in time it logs the timeout and rejects with ShutdownTimedOut.
+   */
+  shutdown(deadlineMs?: number): Promise<void>;
 }
 
 function version(): string {
@@ -62,15 +74,33 @@ export async function startRuntime(config: Config, log: Logger, options: { now?:
   let stopped: Promise<void> | null = null;
   return {
     app, stats, server, port, delivery, cycles,
-    shutdown(waitMs = 20_000) {
+    shutdown(deadlineMs = 20_000) {
       stopped ??= (async () => {
-        await Promise.all([delivery.stop(waitMs), cycles.stop(waitMs)]);
-        await new Promise<void>((resolve) => {
-          server.close(() => resolve());
+        // New connections are refused from the first moment; idle keep-alive connections are dropped too.
+        const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+        server.closeIdleConnections();
+        const cleanup = (async () => {
+          // Running passes get at most half the deadline, so closing the connections always has time left.
+          const loopWait = Math.floor(deadlineMs / 2);
+          await Promise.all([delivery.stop(loopWait), cycles.stop(loopWait)]);
           server.closeAllConnections();
+          await closed;
+          await Promise.all([pool.end(), app.close()]);
+        })();
+        let timer: NodeJS.Timeout | undefined;
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            log.error("shutdown timed out", { deadlineMs });
+            server.closeAllConnections();
+            reject(new ShutdownTimedOut(deadlineMs));
+          }, deadlineMs);
         });
-        await pool.end();
-        await app.close();
+        try {
+          await Promise.race([cleanup, timeout]);
+        } finally {
+          clearTimeout(timer);
+          cleanup.catch(() => {}); // a late failure after the deadline has already been reported
+        }
         log.info("stopped");
       })();
       return stopped;
