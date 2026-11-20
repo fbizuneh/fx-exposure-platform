@@ -156,4 +156,19 @@ e2e("approval releases a recommended pre-trade; a simulated platform returns the
   const after = (await app.exposureAnalysis.questions.currentRun(t, cycle as never))!;
   assert.deepEqual([after.runId, after.status, after.frozenAt !== null], [before.runId, "FINISHED", true], "a trade arriving after approval leaves the saved run alone");
   assert.equal(await drain(app), 0);
+
+  // The next day's cycle counts that trade as an outstanding hedge: net exposure is gross less the 1000 EUR sold forward.
+  clock.now = new Date("2026-11-12T23:00:00Z");
+  await sendRates(t, "2026-11-12", "1.1");
+  await sendBalances(t, "2026-11-12");
+  await drain(app);
+  const [next] = await startDueCycles(app, t, "2026-11-13", admins.get(t)!);
+  await drain(app);
+  const run2 = (await app.exposureAnalysis.questions.currentRun(t, next as never))!;
+  assert.equal(run2.status, "FINISHED");
+  assert.deepEqual(run2.hedgeCounts, { trades: 1, openLegs: 1, used: 1, noEntity: 0, excluded: [] });
+  const all = await app.exposureAnalysis.questions.netExposures(t, run2.runId);
+  const eur = all.find((g) => g.currencyPair === "EUR-USD" && g.entityCode === "US01")!;
+  assert.equal(eur.hedges.exposureAmount, "-1000.00");
+  assert.deepEqual([eur.gross.exposureAmount, eur.net.exposureAmount], ["1000.00", "0.00"]);
 });

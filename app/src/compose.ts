@@ -27,14 +27,15 @@ export function composeApp(connectionString: string, now: () => Date = () => new
   const fxRate = createFxRate(dbs.fxRate, { now });
   const dataSource = createDataSource(dbs.dataSource, { masterData: masterData.questions, now });
   const exposureManagement = createExposureManagement(dbs.exposureManagement, { access: identity.questions, now });
+  const fxTrade = createFxTrade(dbs.fxTrade, { access: identity.questions, masterData: masterData.questions, management: exposureManagement.questions }, { now });
   const exposureAnalysis = createExposureAnalysis(dbs.exposureAnalysis, {
     management: exposureManagement.questions,
     dataSource: dataSource.questions,
     masterData: masterData.questions,
     rates: fxRate.questions,
+    trades: fxTrade.questions,
     now,
   });
-  const fxTrade = createFxTrade(dbs.fxTrade, { access: identity.questions, masterData: masterData.questions, management: exposureManagement.questions }, { now });
   return {
     identity, masterData, fxRate, dataSource, exposureManagement, exposureAnalysis, fxTrade,
     async close(): Promise<void> {

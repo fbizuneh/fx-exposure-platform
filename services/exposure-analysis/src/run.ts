@@ -2,8 +2,8 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import { asOfDate, cycleId as toCycleId, programId as toProgramId, type CycleId, type TenantId } from "@shared/kernel";
-import type { RateWarning } from "../contract/index.ts";
-import { buildBaseline, filterBalances, accountKey, fixed4, netByLevel, overrideKey, requiredRates, type Baseline, type GroupResult } from "./calc.ts";
+import type { HedgeCounts, RateWarning } from "../contract/index.ts";
+import { buildBaseline, buildHedgeRows, filterBalances, accountKey, fixed4, netByLevel, netExposure, overrideKey, requiredRates, type Baseline, type GroupResult, type HedgeRow, type NetGroupResult } from "./calc.ts";
 import { q, type Db, type Queryable } from "./db.ts";
 import { announce } from "./outbox.ts";
 import type { Collaborators } from "./ports.ts";
@@ -67,7 +67,23 @@ export function runCommands(db: Db, c: Collaborators, now: () => Date) {
       regions.set(k.entity.code, above.find((e) => e.type === "REGION")?.code ?? "UNASSIGNED");
     }
 
-    const needs = requiredRates(kept, level, display);
+    // Outstanding hedges (decision 0010): open legs of executed trades, placed by their trading entity like balances are.
+    const trades = await c.trades.executedTrades(tenant, { programId: program, asOf });
+    const hedgeEntityCodes = [...new Set(trades.filter((t) => t.legs.some((l) => l.valueDate > run.as_of)).map((t) => t.tradingEntityCode))];
+    const unknown = hedgeEntityCodes.filter((code) => !entities.has(code));
+    if (unknown.length > 0) for (const e of await c.masterData.getEntities(tenant, unknown, asOf)) entities.set(e.code, e);
+    for (const code of hedgeEntityCodes) {
+      const e = entities.get(code);
+      if (!e || regions.has(code)) continue;
+      const above = await c.masterData.entityWalk(tenant, e.entityId, "ancestors", asOf);
+      regions.set(code, above.find((a) => a.type === "REGION")?.code ?? "UNASSIGNED");
+    }
+    const hedge = buildHedgeRows(trades, run.as_of, (code) => {
+      const e = entities.get(code);
+      return e ? { region: regions.get(code) ?? "UNASSIGNED", functional: e.functionalCurrency ?? "" } : null;
+    });
+
+    const needs = requiredRates(kept, level, display, hedge.rows);
     const fetched = new Map<string, Awaited<ReturnType<Collaborators["rates"]["getRate"]>>>();
     for (const n of needs) {
       const key = `${n.base}|${n.quote}`;
@@ -83,17 +99,19 @@ export function runCommands(db: Db, c: Collaborators, now: () => Date) {
     const baseline = buildBaseline(kept, rateOf, (code) => regions.get(code) ?? "UNASSIGNED");
     const ndf = new Set((await c.masterData.getCurrencies(tenant, asOf)).filter((x) => x.isNdf).map((x) => x.code));
     const overrides = new Map((json<{ pair: string; exposureCurrency: string }[]>(run.exposure_currency_overrides)).map((o) => [overrideKey(...(o.pair.split("-") as [string, string])), o.exposureCurrency]));
-    const groups = netByLevel(baseline, level, run.as_of, display, rateOf, { ndf, overrides });
+    const rules = { ndf, overrides };
+    const groups = netByLevel(baseline, level, run.as_of, display, rateOf, rules);
+    const net = netExposure(baseline, hedge.rows, level, run.as_of, display, rateOf, rules, groups);
     startSaving();
-    return save(tenant, run.program_id, runId, { baseline, groups, counts, warnings, blocked, needs, fetched });
+    return save(tenant, run.program_id, runId, { baseline, groups, hedgeRows: hedge.rows, hedgeCounts: hedge.counts, net, counts, warnings, blocked, needs, fetched });
   }
 
   async function save(
     tenant: TenantId, program: string, runId: string,
-    r: { baseline: Baseline[]; groups: GroupResult[]; counts: unknown; warnings: RateWarning[]; blocked: number; needs: ReturnType<typeof requiredRates>; fetched: Map<string, Awaited<ReturnType<Collaborators["rates"]["getRate"]>>> },
+    r: { baseline: Baseline[]; groups: GroupResult[]; hedgeRows: HedgeRow[]; hedgeCounts: HedgeCounts; net: NetGroupResult[]; counts: unknown; warnings: RateWarning[]; blocked: number; needs: ReturnType<typeof requiredRates>; fetched: Map<string, Awaited<ReturnType<Collaborators["rates"]["getRate"]>>> },
   ): Promise<RunOutcome> {
     return db.transaction().execute(async (tx) => {
-      const run = await q(tx).selectFrom("runs").select(["status", "cycle_id", "display_currency"]).where("tenant_id", "=", tenant).where("run_id", "=", runId).executeTakeFirst();
+      const run = await q(tx).selectFrom("runs").select(["status", "cycle_id", "display_currency", "as_of"]).where("tenant_id", "=", tenant).where("run_id", "=", runId).executeTakeFirst();
       await lock(tx, `${tenant}:${run?.cycle_id}`);
       const again = await q(tx).selectFrom("runs").select("status").where("tenant_id", "=", tenant).where("run_id", "=", runId).executeTakeFirst();
       if (again?.status !== "WAITING") return "IGNORED"; // superseded by a rerun, or finished by a concurrent attempt
@@ -118,13 +136,30 @@ export function runCommands(db: Db, c: Collaborators, now: () => Date) {
           await q(tx).insertInto("group_members").values(part.map((m) => ({ ...key, group_no: groupNo, row_no: m.rowNo, amount1: fixed4(m.amount1), amount2: fixed4(m.amount2) }))).execute();
         }
       }
+      for (const part of chunks(r.hedgeRows)) {
+        await q(tx).insertInto("hedge_rows").values(part.map((h) => ({
+          ...key, row_no: h.rowNo, executed_trade_id: h.executedTradeId, platform: h.platform, trade_id: h.tradeId, leg_no: h.legNo, entity_code: h.entityCode, region: h.region,
+          period: run!.as_of, deal_currency: h.dealCurrency, settlement_currency: h.settlementCurrency, currency_pair: h.pair, currency1: h.currency1, currency2: h.currency2,
+          amount1: fixed4(h.amount1), amount2: fixed4(h.amount2),
+        }))).execute();
+      }
+      for (const [i, n] of r.net.entries()) {
+        const g = n.group;
+        await q(tx).insertInto("net_groups").values({
+          ...key, group_no: i + 1, netting_level: g.nettingLevel, region: g.region, entity_code: g.entityCode, currency_pair: g.pair, currency1: g.currency1, currency2: g.currency2,
+          exposure_currency: g.exposureCurrency, period: g.period, display_currency: display, display_rate: g.displayRate,
+          gross_net1: fixed4(n.gross.net1), gross_net2: fixed4(n.gross.net2), gross_exposure: fixed4(n.gross.exposure), gross_display: fixed4(n.gross.display),
+          hedge_net1: fixed4(n.hedges.net1), hedge_net2: fixed4(n.hedges.net2), hedge_exposure: fixed4(n.hedges.exposure), hedge_display: fixed4(n.hedges.display),
+          net_net1: fixed4(n.net.net1), net_net2: fixed4(n.net.net2), net_exposure: fixed4(n.net.exposure), net_display: fixed4(n.net.display),
+        }).execute();
+      }
       const rateRows = r.needs.map((n) => {
         const f = r.fetched.get(`${n.base}|${n.quote}`)!;
         return { ...key, base: n.base, quote: n.quote, purpose: n.purpose, rate: f.rate, quality: f.quality, derivation: f.derivation, source: f.source, load_ids: JSON.stringify(f.loadIds) };
       });
       if (rateRows.length > 0) await q(tx).insertInto("rates_used").values(rateRows).execute();
       await q(tx).updateTable("runs").set({
-        status: "FINISHED", wait_reason: null, counts: JSON.stringify(r.counts), blocked_count: r.blocked, warnings: JSON.stringify(r.warnings), attempted_at: now(), finished_at: now(),
+        status: "FINISHED", wait_reason: null, counts: JSON.stringify(r.counts), hedge_counts: JSON.stringify(r.hedgeCounts), blocked_count: r.blocked, warnings: JSON.stringify(r.warnings), attempted_at: now(), finished_at: now(),
       }).where("tenant_id", "=", tenant).where("run_id", "=", runId).execute();
       const base = { tenantId: tenant, cycleId: toCycleId(run!.cycle_id), programId: toProgramId(program), runId };
       await announce(tx, { type: "exposure-analysis.run-started", ...base });

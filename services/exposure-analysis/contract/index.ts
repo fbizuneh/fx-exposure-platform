@@ -19,6 +19,29 @@ export interface FilterCounts {
   readonly noFunctionalCurrency: number;
 }
 
+/** What the run did with FX Trade's outstanding hedges (decision 0010). */
+export interface HedgeCounts {
+  /** Executed trades open on the as-of date, as FX Trade returned them. */
+  readonly trades: number;
+  /** Their legs with a value date after the as-of date, which are the ones that count. */
+  readonly openLegs: number;
+  /** Open legs used as hedge rows. */
+  readonly used: number;
+  /** Open legs left out because the trading entity is not on record in Master Data on the as-of date. */
+  readonly noEntity: number;
+  /** Every leg left out, so a user can fix the setup and recalculate. The run finishes without them; it does not wait. */
+  readonly excluded: readonly HedgeExclusion[];
+}
+
+export interface HedgeExclusion {
+  readonly executedTradeId: string;
+  readonly platform: string;
+  readonly tradeId: string;
+  readonly legNo: number;
+  readonly entityCode: string;
+  readonly reason: "TRADING_ENTITY_NOT_ON_RECORD";
+}
+
 export interface RateWarning {
   readonly base: string;
   readonly quote: string;
@@ -36,6 +59,7 @@ export interface RunSummary {
   readonly nettingLevel: NettingLevel;
   readonly displayCurrency: string;
   readonly counts: FilterCounts | null;
+  readonly hedgeCounts: HedgeCounts | null;
   /** Blocked balances across the tenant's current batches for the as-of date. */
   readonly blockedBalances: number | null;
   readonly warnings: readonly RateWarning[];
@@ -93,6 +117,50 @@ export interface BaselineRow {
   readonly contribution: { readonly amount1: string; readonly amount2: string };
 }
 
+/** The three amounts of a net exposure group. Positive is long; a hedge against a long exposure is negative. */
+export interface ExposureAmounts {
+  readonly net1: string;
+  readonly net2: string;
+  /** In the group's exposure currency. */
+  readonly exposureAmount: string;
+  readonly displayAmount: string;
+}
+
+/** Net exposure of one netting group: gross exposure plus outstanding hedges (decision 0010). Same keys as `ExposureGroup`. */
+export interface NetExposureGroup {
+  readonly groupNo: number;
+  readonly nettingLevel: NettingLevel;
+  readonly region: string | null;
+  readonly entityCode: string | null;
+  readonly currencyPair: string;
+  readonly currency1: string;
+  readonly currency2: string;
+  readonly exposureCurrency: string;
+  readonly period: AsOfDate;
+  readonly displayCurrency: string;
+  readonly displayRate: string;
+  readonly gross: ExposureAmounts;
+  readonly hedges: ExposureAmounts;
+  readonly net: ExposureAmounts;
+}
+
+/** One open hedge leg behind the net figures, traceable to the executed trade version used. */
+export interface HedgeRow {
+  readonly rowNo: number;
+  readonly executedTradeId: string;
+  readonly platform: string;
+  readonly tradeId: string;
+  readonly legNo: number;
+  readonly entityCode: string;
+  readonly region: string;
+  readonly period: AsOfDate;
+  readonly dealCurrency: string;
+  readonly settlementCurrency: string;
+  readonly currencyPair: string;
+  readonly amount1: string;
+  readonly amount2: string;
+}
+
 export interface RateUsed {
   readonly base: string;
   readonly quote: string;
@@ -112,6 +180,10 @@ export interface ExposureAnalysisQuestions {
   /** The baseline rows behind one group. */
   drilldown(tenantId: TenantId, runId: string, groupNo: number): Promise<readonly BaselineRow[]>;
   ratesUsed(tenantId: TenantId, runId: string): Promise<readonly RateUsed[]>;
+  /** Gross, hedges and net per netting group of a finished run, ordered like `exposures`. */
+  netExposures(tenantId: TenantId, runId: string): Promise<readonly NetExposureGroup[]>;
+  /** The open hedge legs a finished run used. */
+  hedgeRows(tenantId: TenantId, runId: string): Promise<readonly HedgeRow[]>;
 }
 
 interface Announcement {

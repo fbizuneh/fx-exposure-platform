@@ -7,6 +7,7 @@ import { asOfDate, accountId, cycleId, entityId, lineageRef, programId, tenantId
 import type { IncludedBalance, IngestionStatus } from "@services/data-source/contract";
 import type { Cycle } from "@services/exposure-management/contract";
 import type { Rate } from "@services/fx-rate/contract";
+import type { ExecutedTrade } from "@services/fx-trade/contract";
 import type { Account, Entity } from "@services/master-data/contract";
 import { migrate } from "../../../scripts/migrate.mjs";
 import { connect, createExposureAnalysis, type Db } from "./index.ts";
@@ -25,6 +26,8 @@ interface World {
   ndf: string[];
   /** When true the rate service throws, as if it were unreachable. */
   down?: boolean;
+  /** Executed trades FX Trade would return. */
+  trades?: ExecutedTrade[];
 }
 const worlds = new Map<string, World>();
 const world = (t: string): World => worlds.get(t)!;
@@ -56,6 +59,11 @@ const fakes = {
     async entityWalk(_t: TenantId, id: string) {
       const parent = [...ENTITIES.values()].find((e) => e.entityId === id)?.parentEntityId;
       return parent ? [...ENTITIES.values()].filter((e) => e.entityId === parent) : [];
+    },
+  },
+  trades: {
+    async executedTrades(tenant: TenantId): Promise<readonly ExecutedTrade[]> {
+      return world(tenant).trades ?? [];
     },
   },
   rates: {
@@ -237,4 +245,88 @@ dbTest("exposure currency: an NDF currency in the pair decides it, a program ove
   assert.deepEqual(await exposure(mk("GROUP_NATURAL", [])), ["EUR-USD:EUR", "USD-BRL:BRL"]);
   assert.deepEqual(await exposure(mk("GROUP_NATURAL", [{ pair: "BRL-USD", exposureCurrency: "USD" }])), ["EUR-USD:EUR", "USD-BRL:USD"]);
   assert.deepEqual(await exposure(mk("GROUP_PORTFOLIO", [{ pair: "EUR-USD", exposureCurrency: "USD" }])), ["EUR-USD:EUR", "USD-BRL:BRL"]);
+});
+
+const hedge = (entityCode: string, direction: "BUY" | "SELL", deal: string, dealAmount: string, settle: string, settleAmount: string, valueDate: string, id = "x1"): ExecutedTrade => ({
+  executedTradeId: id, platform: "P", tradeId: id, version: 1, cancelled: false, programId: programId("BS"), tradingEntityCode: entityCode, counterparty: null, tradeDate: asOfDate("2026-11-01"),
+  instrument: "FORWARD", portfolio: null, customFields: {}, matchStatus: "MATCHED", preTradeId: null, matchNote: null, candidates: [], batchId: null,
+  legs: [{ legNo: 1, role: "SINGLE", direction, dealCurrency: deal, dealAmount, settlementCurrency: settle, settlementAmount: settleAmount, valueDate, fixingDate: null }],
+} as ExecutedTrade);
+
+dbTest("net exposure is gross plus outstanding hedges; a matured leg and an unknown entity are left out, and a hedge-only group still appears (decision 0010)", async () => {
+  const { t, c, event } = setup({
+    balances: [bal("US01", "4000", "EUR", "1000"), bal("DE01", "4000", "USD", "550")],
+    trades: [
+      hedge("US01", "SELL", "EUR", "400", "USD", "440", "2027-01-15", "h1"),
+      hedge("US01", "SELL", "EUR", "50", "USD", "55", "2026-11-09", "matured"),
+      hedge("NOPE", "BUY", "EUR", "10", "USD", "11", "2027-01-15", "ghost"),
+      hedge("US01", "SELL", "GBP", "100", "USD", "125", "2027-01-15", "h2"),
+    ],
+  });
+  assert.equal(await ea.commands.onCycleInitiated(event()), "FINISHED");
+  const run = (await ea.questions.currentRun(t, c))!;
+  assert.deepEqual(run.hedgeCounts, { trades: 4, openLegs: 3, used: 2, noEntity: 1, excluded: [{ executedTradeId: "ghost", platform: "P", tradeId: "ghost", legNo: 1, entityCode: "NOPE", reason: "TRADING_ENTITY_NOT_ON_RECORD" }] });
+  const gross = await ea.questions.exposures(t, run.runId);
+  assert.deepEqual(gross.map((g) => g.currencyPair), ["EUR-USD"], "gross is unchanged by hedges");
+  const net = await ea.questions.netExposures(t, run.runId);
+  assert.deepEqual(net.map((n) => [n.currencyPair, n.gross.exposureAmount, n.hedges.exposureAmount, n.net.exposureAmount, n.exposureCurrency]), [
+    ["EUR-USD", "500.00", "-400.00", "100.00", "EUR"], ["GBP-USD", "0.00", "-100.00", "-100.00", "GBP"]]);
+  const eur = net[0]!;
+  assert.deepEqual([eur.hedges.net1, eur.hedges.net2, eur.net.net1, eur.net.net2, eur.net.displayAmount, eur.hedges.displayAmount], ["-400.00", "440.00", "100.00", "-110.00", "110.00", "-440.00"]);
+  const rows = await ea.questions.hedgeRows(t, run.runId);
+  assert.deepEqual(rows.map((r) => [r.tradeId, r.entityCode, r.region, r.currencyPair, r.amount1, r.amount2]), [["h1", "US01", "AMER", "EUR-USD", "-400.00", "440.00"], ["h2", "US01", "AMER", "GBP-USD", "-100.00", "125.00"]]);
+});
+
+dbTest("a program with no executed trades has net equal to gross", async () => {
+  const { t, c, event } = setup();
+  await ea.commands.onCycleInitiated(event());
+  const run = (await ea.questions.currentRun(t, c))!;
+  assert.deepEqual(run.hedgeCounts, { trades: 0, openLegs: 0, used: 0, noEntity: 0, excluded: [] });
+  const net = await ea.questions.netExposures(t, run.runId);
+  assert.ok(net.length > 0 && net.every((n) => n.net.exposureAmount === n.gross.exposureAmount && n.hedges.exposureAmount === "0.00"));
+});
+
+dbTest("entity level: hedges without the entity's functional currency in the pair are keyed by their deal currency, so EUR-deal and GBP-deal trades give two rows; cents are kept (decision 0010)", async () => {
+  const { t, c, event } = setup({
+    balances: [bal("US01", "4000", "EUR", "1000")],
+    trades: [
+      hedge("US01", "BUY", "EUR", "100.45", "GBP", "87.30", "2027-01-15", "d1"),
+      hedge("US01", "BUY", "EUR", "10.10", "GBP", "8.80", "2027-01-15", "d2"),
+      hedge("US01", "SELL", "GBP", "50.10", "EUR", "57.80", "2027-01-15", "d3"),
+    ],
+  }, "ENTITY");
+  assert.equal(await ea.commands.onCycleInitiated(event()), "FINISHED");
+  const run = (await ea.questions.currentRun(t, c))!;
+  assert.equal(run.status, "FINISHED");
+  const net = (await ea.questions.netExposures(t, run.runId)).filter((n) => n.currencyPair.includes("GBP") && n.currencyPair.includes("EUR"));
+  assert.equal(net.length, 2, "one row per exposure currency");
+  const byCcy = new Map(net.map((n) => [n.exposureCurrency, n]));
+  assert.deepEqual([...byCcy.keys()].sort(), ["EUR", "GBP"]);
+  // same full key nets together: d1 and d2 are EUR-deal; d3 is GBP-deal
+  assert.equal(byCcy.get("EUR")!.hedges.exposureAmount, "110.55");
+  assert.equal(byCcy.get("GBP")!.hedges.exposureAmount, "-50.10");
+  assert.ok(net.every((n) => n.gross.exposureAmount === "0.00" && n.net.exposureAmount === n.hedges.exposureAmount), "gross, hedge and net are aligned on the full key");
+});
+
+dbTest("a hedge whose trading entity is missing is excluded and recorded by trade and leg, and the run still finishes without waiting", async () => {
+  const { t, c, event } = setup({ balances: [bal("US01", "4000", "EUR", "1000")], trades: [hedge("LATER", "SELL", "EUR", "5.55", "USD", "6.10", "2027-01-15", "m1")] });
+  assert.equal(await ea.commands.onCycleInitiated(event()), "FINISHED");
+  const run = (await ea.questions.currentRun(t, c))!;
+  assert.deepEqual([run.hedgeCounts!.used, run.hedgeCounts!.noEntity, run.hedgeCounts!.excluded.map((x) => x.tradeId)], [0, 1, ["m1"]]);
+  assert.equal(run.waitReason, null);
+});
+
+dbTest("region by entity: the deal-currency rule applies too, and a program override for the pair replaces it; no default ranking (decision 0010)", async () => {
+  const trades = [hedge("US01", "BUY", "EUR", "100", "GBP", "87", "2027-01-15", "r1"), hedge("US01", "SELL", "GBP", "50", "EUR", "57", "2027-01-15", "r2")];
+  const a = setup({ balances: [bal("US01", "4000", "EUR", "1000")], trades }, "REGION_BY_ENTITY");
+  assert.equal(await ea.commands.onCycleInitiated(a.event()), "FINISHED");
+  const runA = (await ea.questions.currentRun(a.t, a.c))!;
+  const pairA = (await ea.questions.netExposures(a.t, runA.runId)).filter((n) => n.currencyPair.includes("GBP") && n.currencyPair.includes("EUR"));
+  assert.deepEqual(pairA.map((n) => n.exposureCurrency).sort(), ["EUR", "GBP"]);
+  const pair = pairA[0]!.currencyPair;
+  const b = setup({ balances: [bal("US01", "4000", "EUR", "1000")], trades }, "REGION_BY_ENTITY", [{ pair, exposureCurrency: "GBP" }]);
+  assert.equal(await ea.commands.onCycleInitiated(b.event()), "FINISHED");
+  const runB = (await ea.questions.currentRun(b.t, b.c))!;
+  const pairB = (await ea.questions.netExposures(b.t, runB.runId)).filter((n) => n.currencyPair === pair);
+  assert.deepEqual(pairB.map((n) => n.exposureCurrency), ["GBP"], "the override puts both trades in one row");
 });
