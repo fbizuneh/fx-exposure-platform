@@ -15,6 +15,10 @@ Inside each service's own schema, a foreign key between two tables that both car
 - **A check:** `tenant-program` fails when a foreign key between two program-scoped tables of a service leaves out `program_id`. It reads migrations in order, so a key dropped and added again is judged as added. Run on the old migrations it reports the eight gaps this fixes.
 - Tests: the database refuses a row under another program in each of the three services; the check has its own cases.
 
+## Amended trades and upgrades (review of this PR)
+- **An amended executed trade** keeps its pre-trade only when its program is the same. With no program, an unknown one, or another known one, it is stored as a new version, **unmatched**, with a note (decision 0009: never dropped), so the rest of the file still applies. The pre-trade it leaves has its fill and status recomputed, and a new event `fx-trade.pre-trade-fill-changed` makes Hedge Recommendation refresh that part's and its recommendation's follow-up. A user can match it again. (Owner's choice for the changed-program case: store unmatched, not block the row and not re-link automatically.)
+- **Upgrading a database** that already holds such trades (the old code allowed them): the new rules are added NOT VALID, so superseded versions stay exactly as received. A *current* trade that breaks the rule is unlinked and marked unmatched with a note by the migration, its pre-trade's status is recomputed in SQL and the same event is queued for it. (Owner's choice: keep history, repair current.) A populated upgrade test builds the old schema with this history, upgrades it, and checks history is unchanged and the new rules hold.
+
 ## Not done, and why (for you to decide)
 - **A user's program restriction to a program the tenant has not enabled** (`identity.user_programs` to `tenant_programs`). A key would make restricting a user to a not-yet-enabled program an error. That is a behavior change, so I left it.
 - **Recommendations to the policy.** A policy is replaced in place, and a recommendation outlives the policy version it was made from; a key would need the replace to be deferred. Left as is.

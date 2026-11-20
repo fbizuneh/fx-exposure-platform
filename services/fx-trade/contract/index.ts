@@ -115,10 +115,17 @@ export interface ExecutedTradeReceived extends Announcement {
   readonly preTradeId: string | null;
 }
 
+/** An executed trade left a pre-trade (an amendment named another program, or none), so its fill and status changed (decision 0018). */
+export interface PreTradeFillChanged extends Announcement {
+  readonly type: "fx-trade.pre-trade-fill-changed";
+  readonly preTradeId: string;
+  readonly programId: ProgramId;
+}
+
 /** A change record for Audit (decision 0012): who did what to which record. Identifiers and field names only. */
 export interface FxTradeChangeRecorded extends ChangeRecordFields {
   readonly type: "fx-trade.change-recorded";
   readonly eventId: string;
   readonly occurredAt: string;
 }
-export type FxTradeEvents = PreTradeReady | PreTradeCancelled | ExecutedTradeReceived | FxTradeChangeRecorded;
+export type FxTradeEvents = PreTradeReady | PreTradeCancelled | ExecutedTradeReceived | PreTradeFillChanged | FxTradeChangeRecorded;

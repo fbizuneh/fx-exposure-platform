@@ -7,6 +7,10 @@ import { asOfDate, cycleId, entityId, programId, tenantId, type CycleId, type Te
 import type { Cycle, ProgramSummary } from "@services/exposure-management/contract";
 import type { Actor } from "@services/identity/contract";
 import type { Entity } from "@services/master-data/contract";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { sql } from "kysely";
 import { migrate } from "../../../scripts/migrate.mjs";
 import { AccessDenied, connect, createFxTrade, parseExecutedFile, PreTradeInvalid, type Db, type ExecutedRow, type NewPreTradeBody } from "./index.ts";
 import { q } from "./db.ts";
@@ -357,4 +361,93 @@ dbTest("a matched executed trade has its pre-trade's program, and a trade with n
   await assert.rejects(q(db).updateTable("executed_trades").set({ program_id: "OTHER" }).where("tenant_id", "=", t).execute(), { code: "23503" }, "another program than the pre-trade's");
   await assert.rejects(q(db).updateTable("executed_trades").set({ program_id: null }).where("tenant_id", "=", t).execute(), { code: "23514" }, "matched, but no program");
   await assert.rejects(q(db).updateTable("pre_trades").set({ program_id: "OTHER" }).where("tenant_id", "=", t).execute(), { code: "23503" }, "the pre-trade cannot move from under its trade");
+});
+
+dbTest("an amended trade keeps its pre-trade in the same program; with no program, an unknown one or another one it is stored unmatched, the pre-trade it leaves is recomputed, and the rest of the file still applies (decisions 0009, 0018)", async () => {
+  const current = async (t: TenantId, tradeId: string) => q(db).selectFrom("executed_trades").select(["version", "program_id", "pre_trade_id", "match_status", "match_note"]).where("tenant_id", "=", t).where("trade_id", "=", tradeId).where("is_current", "=", true).executeTakeFirstOrThrow();
+  const matchedFile = async (t: TenantId) => {
+    const s = await sentPreTrade(t);
+    await ft.commands.importExecutedTrades({ tenantId: t, rows: csv(line("F1", { ref: s.reference })), by: "bank" });
+    assert.equal((await ft.questions.getPreTrade(t, s.preTradeId))!.status, "EXECUTED");
+    return s;
+  };
+
+  // Same program: the link stays, and an unrelated trade in the same file is stored too.
+  const t = tenant();
+  const s = await matchedFile(t);
+  const same = await ft.commands.importExecutedTrades({ tenantId: t, rows: csv(line("F1", { da: "400000", sa: "440000" }), line("OTHER", { entity: "DE01", da: "5", sa: "6" })), by: "bank" });
+  assert.deepEqual([same.status, same.stored, same.matched], ["APPLIED", 2, 1]);
+  assert.deepEqual([(await current(t, "F1")).pre_trade_id, (await ft.questions.getPreTrade(t, s.preTradeId))!.status], [s.preTradeId, "PARTLY_EXECUTED"]);
+
+  // No program, an unknown program, or another known (disabled) program: stored unmatched in the same transaction as the valid row beside it.
+  for (const prog of ["", "ZZ", "CF"]) {
+    const u = tenant();
+    const p = await matchedFile(u);
+    const r = await ft.commands.importExecutedTrades({ tenantId: u, rows: csv(line("F1", { prog, da: "999999", sa: "1099999" }), line("VALID", { entity: "DE01", da: "7", sa: "8" })), by: "bank" });
+    assert.deepEqual([r.status, r.stored, r.matched, r.unmatched], ["APPLIED", 2, 0, 2], `program "${prog}": nothing rolled back`);
+    const f1 = await current(u, "F1");
+    assert.deepEqual([f1.version, f1.pre_trade_id, f1.match_status, f1.program_id], [2, null, "UNMATCHED", prog === "CF" ? "CF" : null]);
+    assert.match(f1.match_note!, /left its pre-trade and is unmatched/);
+    assert.equal((await current(u, "VALID")).version, 1, "the unrelated valid row was stored");
+    assert.equal((await ft.questions.getPreTrade(u, p.preTradeId))!.status, "SENT", "the pre-trade lost that fill");
+    const left = (await events(u)).filter((e) => e.type === "fx-trade.pre-trade-fill-changed") as unknown as { preTradeId: string; programId: string }[];
+    assert.deepEqual(left.map((e) => [e.preTradeId, e.programId]), [[p.preTradeId, "BS"]], "announced once, for the pre-trade it left");
+    // The first version is history and is kept.
+    const v1 = await q(db).selectFrom("executed_trades").select(["pre_trade_id", "program_id"]).where("tenant_id", "=", u).where("trade_id", "=", "F1").where("version", "=", 1).executeTakeFirstOrThrow();
+    assert.deepEqual([v1.pre_trade_id, v1.program_id], [p.preTradeId, "BS"]);
+  }
+});
+
+dbTest("upgrading a database with trades that already break the program rule keeps history and repairs the current ones (decision 0018)", async () => {
+  // The schema as it was before 0003, with the history the old code allowed: a linked amendment with no program, or with another one.
+  const old = fs.mkdtempSync(path.join(os.tmpdir(), "fx-trade-old-"));
+  const dir = path.join(old, "services", "fx-trade", "migrations");
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of ["0001_init.sql", "0002_pre_trade_parts.sql"]) fs.copyFileSync(path.join(import.meta.dirname, "..", "migrations", f), path.join(dir, f));
+  await db.schema.dropSchema("fx_trade").ifExists().cascade().execute();
+  await migrate(url!, old);
+
+  const T = randomUUID();
+  const [P1, P2, P3] = [randomUUID(), randomUUID(), randomUUID()];
+  for (const [n, id] of [P1, P2, P3].entries()) {
+    await sql`INSERT INTO fx_trade.pre_trades (tenant_id, pre_trade_id, reference, program_id, origin, status, trading_entity_code, instrument, sent_at, created_by)
+              VALUES (${T}, ${id}, ${`PT-${n}`}, 'BS', 'MANUAL', 'EXECUTED', 'US01', 'FORWARD', now(), 'u')`.execute(db);
+    await sql`INSERT INTO fx_trade.pre_trade_legs (tenant_id, pre_trade_id, leg_no, leg_role, direction, deal_currency, deal_amount, settlement_currency, value_date)
+              VALUES (${T}, ${id}, 1, 'SINGLE', 'SELL', 'EUR', 1000, 'USD', '2026-12-15')`.execute(db);
+  }
+  const trade = async (tradeId: string, version: number, current: boolean, program: string | null, pre: string) => {
+    const id = randomUUID();
+    await sql`INSERT INTO fx_trade.executed_trades (tenant_id, executed_trade_id, platform, trade_id, version, is_current, content_hash, program_id, trading_entity_code, trade_date, instrument, pre_trade_id, match_status)
+              VALUES (${T}, ${id}, 'FXALL', ${tradeId}, ${version}, ${current}, ${`h-${tradeId}-${version}`}, ${program}, 'US01', '2026-11-10', 'FORWARD', ${pre}, 'MATCHED')`.execute(db);
+    await sql`INSERT INTO fx_trade.executed_trade_legs (tenant_id, executed_trade_id, leg_no, leg_role, direction, deal_currency, deal_amount, settlement_currency, settlement_amount, value_date)
+              VALUES (${T}, ${id}, 1, 'SINGLE', 'SELL', 'EUR', 1000, 'USD', 1100, '2026-12-15')`.execute(db);
+    return id;
+  };
+  const broken = await trade("BROKEN", 1, true, null, P1);          // current, linked, no program: repaired
+  const old2 = await trade("HISTORY", 1, false, "CF", P2);          // superseded, linked, another program: history, untouched
+  const new2 = await trade("HISTORY", 2, true, "BS", P2);           // its current version is fine
+  const clean = await trade("CLEAN", 1, true, "BS", P3);            // fine
+  const row = async (id: string) => (await sql<{ pre_trade_id: string | null; program_id: string | null; match_status: string; match_note: string | null }>`SELECT pre_trade_id, program_id, match_status, match_note FROM fx_trade.executed_trades WHERE tenant_id = ${T} AND executed_trade_id = ${id}`.execute(db)).rows[0]!;
+  const status = async (id: string) => (await sql<{ status: string }>`SELECT status FROM fx_trade.pre_trades WHERE tenant_id = ${T} AND pre_trade_id = ${id}`.execute(db)).rows[0]!.status;
+
+  assert.ok((await migrate(url!)).includes("fx-trade/0003_program_composite_keys.sql"), "the upgrade applies to a database with such rows");
+
+  const b = await row(broken);
+  assert.deepEqual([b.pre_trade_id, b.match_status, b.program_id], [null, "UNMATCHED", null]);
+  assert.match(b.match_note!, /left its pre-trade/);
+  assert.equal(await status(P1), "SENT", "its pre-trade lost that fill");
+  assert.deepEqual([await status(P2), await status(P3)], ["EXECUTED", "EXECUTED"], "the others are untouched");
+  const h = await row(old2);
+  assert.deepEqual([h.pre_trade_id, h.program_id, h.match_status, h.match_note], [P2, "CF", "MATCHED", null], "history is as it was received");
+  assert.equal((await row(new2)).pre_trade_id, P2);
+  assert.equal((await row(clean)).pre_trade_id, P3);
+  assert.equal(Number((await sql<{ n: string }>`SELECT count(*) AS n FROM fx_trade.executed_trades WHERE tenant_id = ${T}`.execute(db)).rows[0]!.n), 4, "no trade version was removed");
+  const told = (await sql<{ payload: { preTradeId: string; programId: string; type: string } }>`SELECT payload FROM fx_trade.outbox WHERE tenant_id = ${T}`.execute(db)).rows.map((r) => r.payload);
+  assert.deepEqual(told.map((e) => [e.type, e.preTradeId, e.programId]), [["fx-trade.pre-trade-fill-changed", P1, "BS"]], "the recommendation is told once, for the pre-trade that lost a fill");
+
+  // From now on the rule holds: a matched trade has its pre-trade's program, and the history can still be superseded.
+  await assert.rejects(sql`UPDATE fx_trade.executed_trades SET program_id = 'OTHER' WHERE tenant_id = ${T} AND executed_trade_id = ${clean}`.execute(db), { code: "23503" });
+  await assert.rejects(sql`UPDATE fx_trade.executed_trades SET program_id = NULL WHERE tenant_id = ${T} AND executed_trade_id = ${clean}`.execute(db), { code: "23514" });
+  await sql`UPDATE fx_trade.executed_trades SET is_current = false WHERE tenant_id = ${T} AND executed_trade_id = ${new2}`.execute(db);
+  fs.rmSync(old, { recursive: true, force: true });
 });

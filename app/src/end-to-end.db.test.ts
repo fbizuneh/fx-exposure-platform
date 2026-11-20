@@ -1104,6 +1104,34 @@ e2e("a part belongs to its recommendation's program, and a policy's overrides to
   assert.deepEqual((await app.hedgeRecommendation.questions.policy(x.t, programId("BS")))!.ratioOverrides, [{ pair: "EUR-USD", ratio: "0.4" }]);
 });
 
+e2e("an amendment that leaves a pre-trade puts the recommendation's follow-up back, and the valid rows in the same file still apply (decision 0018)", async () => {
+  const x = await finishedCycle(split({ splitMethod: "THRESHOLD_REMAINDER" }));
+  const rec = us01(x.recs);
+  await app.hedgeRecommendation.commands.decide({ tenantId: x.t, recommendationId: rec.recommendationId, actor: x.admin, action: "ACCEPT" });
+  await app.exposureManagement.commands.approveCycle({ tenantId: x.t, cycleId: x.cycle, actor: x.admin });
+  await drain(app);
+  const sent = await app.fxTrade.commands.exportPreTrades({ tenantId: x.t, actor: x.admin });
+  const [h, ...rows] = sent.file.trim().split("\n").map((l) => l.split(","));
+  const out = Object.fromEntries(h!.map((k, i) => [k, rows.find((r) => r[h!.indexOf("deal_amount")] === "100.0000")![i]!]));
+  const header = "trade_id,execution_platform_id,trading_entity,counterparty,trade_date,value_date,deal_currency,deal_amount,settlement_currency,settlement_amount,instrument,buy_sell,hedging_program_id,pre_trade_reference";
+  const row = (id: string, program: string, settlement: string, reference: string) =>
+    `${id},SIMFX,${out.trading_entity},Sim Bank,2026-11-12,${out.value_date},${out.deal_currency},${out.deal_amount},${out.settlement_currency},${settlement},${out.instrument},${out.buy_sell},${program},${reference}`;
+  const file = (...r: string[]) => parseExecutedFile([header, ...r].join("\n"));
+  const state = async () => { const r = (await app.hedgeRecommendation.questions.getRecommendation(x.t, rec.recommendationId))!; return [r.followUp, r.parts.map((p) => p.followUp)]; };
+
+  assert.equal((await app.fxTrade.commands.importExecutedTrades({ tenantId: x.t, rows: file(row("SIM-7", out.hedging_program_id!, "110.0000", out.pre_trade_reference!)), by: "simulator" })).matched, 1);
+  await drain(app);
+  assert.deepEqual(await state(), ["PARTLY_EXECUTED", ["OPEN", "OPEN", "OPEN", "EXECUTED"]]);
+
+  // The bank amends the trade and the program is blank. The row is stored unmatched, the other trade in the file is stored, nothing is rolled back.
+  const amended = await app.fxTrade.commands.importExecutedTrades({ tenantId: x.t, by: "simulator",
+    rows: file(row("SIM-7", "", "111.0000", out.pre_trade_reference!), row("SIM-8", out.hedging_program_id!, "5.0000", "")) });
+  assert.deepEqual([amended.status, amended.stored, amended.matched], ["APPLIED", 2, 0]);
+  await drain(app);
+  assert.deepEqual(await state(), ["OPEN", ["OPEN", "OPEN", "OPEN", "OPEN"]], "the part lost its fill, so the recommendation is open again");
+  assert.equal(await drain(app), 0, "and nothing is left to deliver");
+});
+
 e2e("deciders: accepting, overriding and a decision still waiting on FX Trade count; a refused claim and a dismissal do not", async () => {
   const label = async (t: TenantId) => (await trailOf(t)).find((r) => r.action === "program.defined")!.actor;
   const hedge = (recs: readonly { action: string; recommendationId: string }[]) => recs.find((r) => r.action === "HEDGE")!.recommendationId;
