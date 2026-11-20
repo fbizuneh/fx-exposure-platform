@@ -25,3 +25,12 @@ DROP INDEX master_data.change_sets_snapshot_key;
 CREATE UNIQUE INDEX change_sets_snapshot_key
   ON master_data.change_sets (tenant_id, source_system, kind, scope_key, as_of)
   WHERE mode = 'SNAPSHOT' AND status <> 'REJECTED';
+
+-- The latest date any applied mapping change took effect, per program. History guard: a change dated earlier is refused, even when the change
+-- that set this date left no version row behind (a same-day removal deletes the version it replaces).
+CREATE TABLE master_data.pair_exposure_currency_history ( -- program-scoped
+  tenant_id        uuid NOT NULL,
+  program_id       text NOT NULL,
+  latest_effective date NOT NULL,
+  PRIMARY KEY (tenant_id, program_id)
+);

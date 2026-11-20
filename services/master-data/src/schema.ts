@@ -46,6 +46,7 @@ export interface MasterDataDatabase {
     fx_relevant_flag: boolean;
   };
   pair_exposure_currencies: Versioned & { mapping_id: string; program_id: string; pair: string; exposure_currency: string };
+  pair_exposure_currency_history: { tenant_id: string; program_id: string; latest_effective: string };
   calendars: Versioned & { calendar_id: string; code: string; weekend_days: string[]; covered_through: string; holidays: Json };
   currencies: Versioned & { currency_id: string; code: string; is_ndf: boolean };
   change_sets: {

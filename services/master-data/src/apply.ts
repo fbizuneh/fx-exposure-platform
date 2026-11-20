@@ -330,11 +330,11 @@ const pairExposureOps: Ops<PairExposureCurrencyRow> = {
     for (const r of rows) {
       const key = r.pair;
       l.ids.set(key, r.mapping_id);
-      // A version's end date is history too: a change dated before an ending would replace it and revive the mapping after it.
-      l.maxValidFrom = later(l.maxValidFrom, r.valid_to ?? r.valid_from);
-      l.maxValidFrom = later(l.maxValidFrom, r.valid_from);
       if (isOpen(r, asOf)) l.open.set(key, { id: r.mapping_id, validFrom: r.valid_from, source: r.source_system, attrs: stable({ exposureCurrency: r.exposure_currency }) });
     }
+    // The guard reads the durable latest effective date, not the surviving versions: a same-day removal deletes its version and would leave nothing to see.
+    const last = await q(tx).selectFrom("pair_exposure_currency_history").select("latest_effective").where("tenant_id", "=", tenant).where("program_id", "=", scope ?? "").executeTakeFirst();
+    l.maxValidFrom = last?.latest_effective ?? null;
     return l;
   },
   validate: (rows) => validatePairExposureCurrencies(rows),
@@ -351,6 +351,11 @@ const pairExposureOps: Ops<PairExposureCurrencyRow> = {
         tenant_id: w.tenant, mapping_id: ids.get(k)!, valid_from: w.asOf, valid_to: null, source_system: w.source, batch_id: w.batchId,
         program_id: w.scope!, pair: normalPair(r.pair), exposure_currency: r.exposureCurrency,
       }).execute();
+    }
+    if (w.plan.creates.length + w.plan.changes.length + w.plan.ends.length > 0) {
+      const db = q(tx);
+      await db.insertInto("pair_exposure_currency_history").values({ tenant_id: w.tenant, program_id: w.scope!, latest_effective: w.asOf })
+        .onConflict((oc) => oc.columns(["tenant_id", "program_id"]).doUpdateSet({ latest_effective: sql<string>`GREATEST(pair_exposure_currency_history.latest_effective, excluded.latest_effective)` })).execute();
     }
   },
 };

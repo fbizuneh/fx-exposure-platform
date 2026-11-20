@@ -386,6 +386,21 @@ dbTest("pair exposure currencies: an ending is history too; a change dated befor
   assert.equal((await md.commands.applyPairExposureCurrencies(forProgram(part(t2, [pairRow("EUR-GBP", "GBP")], jun2, "erp"), "BS"))).status, "APPLIED", "the other program's later dates do not block");
 });
 
+dbTest("pair exposure currencies: a same-day removal leaves no version, and the history guard still refuses an earlier change", async () => {
+  const jun2 = asOfDate("2026-06-02"), jun3 = asOfDate("2026-06-03");
+  const t = newTenant();
+  await md.commands.applyPairExposureCurrencies(forProgram(part(t, [pairRow("EUR-GBP", "EUR")], jun3, "erp"), "BS"));
+  await md.commands.applyPairExposureCurrencies(forProgram(snap(t, [], jun3, "erp"), "BS")); // same day: the version is deleted, none is left
+  assert.deepEqual(await pairs(t, "BS", jun3), []);
+  const left = await q(db).selectFrom("pair_exposure_currencies").select("mapping_id").where("tenant_id", "=", t).execute();
+  assert.equal(left.length, 0, "no version row remains to show the date");
+
+  await assert.rejects(md.commands.applyPairExposureCurrencies(forProgram(part(t, [pairRow("EUR-GBP", "GBP")], jun2, "erp"), "BS")), /would rewrite history/);
+  assert.deepEqual(await pairs(t, "BS", jun3), [], "the mapping did not come back on 3 June");
+  assert.equal((await md.commands.applyPairExposureCurrencies(forProgram(part(t, [pairRow("EUR-GBP", "GBP")], jun2, "erp"), "CF"))).status, "APPLIED", "another program is not held back by it");
+  assert.equal((await md.commands.applyPairExposureCurrencies(forProgram(part(t, [pairRow("EUR-GBP", "GBP")], jun3, "erp"), "BS"))).status, "APPLIED", "the same day is still fine");
+});
+
 dbTest("pair exposure currencies: master-data.changed carries the program, for an applied change and for a released snapshot", async () => {
   const t = newTenant();
   const twelve = "ABCDEFGHIJKL".split("").map((c) => pairRow(`${c}${c}${c}-USD`, "USD"));
