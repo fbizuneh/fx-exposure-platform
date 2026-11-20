@@ -128,6 +128,21 @@ dbTest("one recommendation can have several pre-trades, one per part, made toget
   await assert.rejects(q(db).insertInto("pre_trades").values({ tenant_id: t, pre_trade_id: randomUUID(), reference: "PT-DUP", program_id: "BS", cycle_id: c, recommendation_id: rec, part_no: 2, origin: "RECOMMENDATION", status: "DRAFT", trading_entity_code: "US01", instrument: "FORWARD", released_at: null, sent_at: null, created_by: "x" }).execute(), /duplicate key|unique/);
 });
 
+dbTest("a cancelled pre-trade is announced once: by a user, and by a cycle closed before approval (decision 0016)", async () => {
+  const t = tenant();
+  const c = openCycle(t);
+  const rec = randomUUID();
+  const made = await ft.commands.createPreTrades({ tenantId: t, cycleId: c, items: [1, 2, 3].map((n) => ({ recommendationId: rec, partNo: n, ...fwd() })), by: "rec" });
+  assert.equal(await ft.commands.cancelPreTrade({ tenantId: t, preTradeId: made[0]!.preTradeId, actor: USER }), true);
+  assert.equal(await ft.commands.cancelPreTrade({ tenantId: t, preTradeId: made[0]!.preTradeId, actor: USER }), false);
+  const closedEvent = { type: "exposure-management.cycle-skipped", eventId: randomUUID(), occurredAt: new Date().toISOString(), tenantId: t, cycleId: c, programId: programId("BS") } as never;
+  assert.equal(await ft.commands.onCycleClosed(closedEvent), 2, "the two drafts still open are cancelled");
+  assert.equal(await ft.commands.onCycleClosed(closedEvent), 0);
+  const cancelled = (await events(t)).filter((x) => x.type === "fx-trade.pre-trade-cancelled") as unknown as { preTradeId: string; programId: string; cycleId: string }[];
+  assert.deepEqual(cancelled.map((x) => x.preTradeId).sort(), made.map((x) => x.preTradeId).sort(), "one event per pre-trade, none for the repeats");
+  assert.ok(cancelled.every((x) => x.programId === "BS" && x.cycleId === c));
+});
+
 dbTest("approval releases the cycle's drafts once, export sends them once, and a skipped cycle cancels them", async () => {
   const t = tenant();
   const c = openCycle(t);

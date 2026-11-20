@@ -134,12 +134,13 @@ export function preTradeCommands(db: Db, c: Collaborators, clock: () => Date) {
 
   async function cancelPreTrade(input: { tenantId: TenantId; preTradeId: string; actor: Actor }): Promise<boolean> {
     return db.transaction().execute(async (tx) => {
-      const p = await q(tx).selectFrom("pre_trades").select(["program_id", "status"]).where("tenant_id", "=", input.tenantId).where("pre_trade_id", "=", input.preTradeId).forUpdate().executeTakeFirst();
+      const p = await q(tx).selectFrom("pre_trades").select(["program_id", "status", "cycle_id"]).where("tenant_id", "=", input.tenantId).where("pre_trade_id", "=", input.preTradeId).forUpdate().executeTakeFirst();
       if (!p) throw new PreTradeInvalid([`pre-trade ${input.preTradeId} does not exist`]);
       await require_(c.access, input.tenantId, input.actor, "fx-trade:manage", toProgramId(p.program_id));
       if (p.status === "CANCELLED") return false;
       if (!["DRAFT", "READY", "SENT"].includes(p.status)) throw new PreTradeInvalid([`a ${p.status.toLowerCase().replace("_", " ")} pre-trade cannot be cancelled`]);
       await q(tx).updateTable("pre_trades").set({ status: "CANCELLED" }).where("tenant_id", "=", input.tenantId).where("pre_trade_id", "=", input.preTradeId).execute();
+      await announce(tx, { type: "fx-trade.pre-trade-cancelled", tenantId: input.tenantId, preTradeId: input.preTradeId, programId: toProgramId(p.program_id), cycleId: p.cycle_id as CycleId | null });
       await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(p.program_id), actor: who(input.actor), action: "pre-trade.cancelled", targetType: "pre-trade", targetId: input.preTradeId, fields: [] });
       return true;
     });
@@ -181,8 +182,9 @@ export function preTradeCommands(db: Db, c: Collaborators, clock: () => Date) {
   async function onCycleClosed(e: CycleSkipped | CycleDeleted): Promise<number> {
     return db.transaction().execute(async (tx) => {
       if (!(await firstTime(tx, e.tenantId, e.eventId))) return 0;
-      const r = await q(tx).updateTable("pre_trades").set({ status: "CANCELLED" }).where("tenant_id", "=", e.tenantId).where("cycle_id", "=", e.cycleId).where("status", "=", "DRAFT").executeTakeFirst();
-      return Number(r.numUpdatedRows ?? 0);
+      const cancelled = await q(tx).updateTable("pre_trades").set({ status: "CANCELLED" }).where("tenant_id", "=", e.tenantId).where("cycle_id", "=", e.cycleId).where("status", "=", "DRAFT").returning(["pre_trade_id", "program_id", "cycle_id"]).execute();
+      for (const d of cancelled) await announce(tx, { type: "fx-trade.pre-trade-cancelled", tenantId: e.tenantId, preTradeId: d.pre_trade_id, programId: toProgramId(d.program_id), cycleId: d.cycle_id as CycleId | null });
+      return cancelled.length;
     });
   }
 

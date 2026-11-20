@@ -48,8 +48,9 @@ async function deliver(app: App, e: Announced): Promise<void> {
       await app.hedgeRecommendation.commands.onRunFinished(e as never); // recommendations from the finished run
       return;
     case "fx-trade.pre-trade-ready":
+    case "fx-trade.pre-trade-cancelled":
     case "fx-trade.executed-trade-received":
-      // The follow-up status of a recommendation follows its pre-trade.
+      // The follow-up status of a recommendation follows its pre-trades (a cancellation too, decision 0016); refreshing from FX Trade's current status is safe to repeat.
       if (typeof e.preTradeId === "string") await app.hedgeRecommendation.commands.refreshFollowUp(e.tenantId, e.preTradeId);
       return;
     case "data-source.batch-stamped":

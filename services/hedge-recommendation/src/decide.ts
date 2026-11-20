@@ -43,11 +43,12 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
   const preTradesOf = async (tenant: TenantId, cycle: string, recommendationId: string): Promise<Map<number, string>> =>
     new Map((await c.preTrades.preTrades(tenant, { cycleId: cycle as CycleId })).filter((p) => p.recommendationId === recommendationId && p.partNo !== null).map((p) => [p.partNo!, p.preTradeId] as const));
 
-  /** (Re)write a recommendation's parts from an amount, split the way the recommendation was (decision 0016). Called inside the claim, and to put the original parts back. */
+  /** (Re)write a recommendation's parts, and the note that explains them, from an amount split the way the recommendation was (decision 0016). Called inside the claim, and to put the original parts and note back. */
   async function writeParts(tx: Tx, tenant: TenantId, rec: { recommendation_id: string; program_id: string; max_exposure_amount: string | null; split_method: string | null; min_exposure_amount: string | null; rounding: string }, total: string): Promise<void> {
     const split = splitAmount(new Dec(total), rec.max_exposure_amount === null ? null : new Dec(rec.max_exposure_amount), (rec.split_method ?? "EVEN") as SplitMethod, new Dec(rec.rounding), rec.min_exposure_amount === null ? null : new Dec(rec.min_exposure_amount));
     await q(tx).deleteFrom("recommendation_parts").where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).execute();
     await q(tx).insertInto("recommendation_parts").values(split.parts.map((part, i) => ({ tenant_id: tenant, recommendation_id: rec.recommendation_id, program_id: rec.program_id, part_no: i + 1, amount: fmt(part) }))).execute();
+    await q(tx).updateTable("recommendations").set({ split_note: split.note }).where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).execute();
   }
 
   /** Second step: every part's pre-trade exists, so record the decision as taken. Only the first to get here announces. */

@@ -159,3 +159,27 @@ test("follow-up of the whole: executed when every part is, partly once any is, c
   assert.equal(overallFollowUp(["OPEN", "CANCELLED"]), "OPEN");
   assert.equal(overallFollowUp(["NOT_STARTED"]), "NOT_STARTED");
 });
+
+test("split: a rounding step coarser than the pieces never makes a zero part, and the cap holds after the maximum is rounded down", () => {
+  const coarse = split("1000", "400", "EVEN", "1000"); // three parts would be 1000, 0, 0
+  assert.deepEqual(amounts(coarse), ["1000"]);
+  assert.match(coarse.note!, /only 1 whole step of 1000, so it was split into 1 part, larger than the maximum/);
+  const two = split("2000", "400", "EVEN", "1000"); // wants 5 parts, has 2 steps
+  assert.deepEqual(amounts(two), ["1000", "1000"]);
+  // 51,000 at a maximum of 1,999 passes a count check on the maximum (26 parts) but 1,000-unit parts of the rounded-down maximum would be 51.
+  const many = split("51000", "1999", "THRESHOLD_REMAINDER", "1000");
+  assert.equal(many.parts.length, MAX_PARTS);
+  assert.equal(many.parts.reduce((a, b) => a.plus(b), new D(0)).toString(), "51000");
+  assert.ok(many.parts.every((x) => x.gt(0) && x.mod(1000).isZero()));
+  assert.match(many.note!, /50 parts, the most allowed/);
+});
+test("split: whatever the inputs, parts are positive, add up exactly, are at most 50, and any part above the maximum has a note", () => {
+  const methods = ["EVEN", "THRESHOLD_REMAINDER"] as const;
+  for (const total of ["10", "250", "1000", "51000", "100.5", "0.0003"]) for (const max of ["0.0001", "3.5", "199", "333.33", "400", "1999"]) for (const step of ["1", "10", "1000"]) for (const min of [null, "50", "300"]) for (const m of methods) {
+    const s = split(total, max, m, step, min);
+    assert.ok(s.parts.length >= 1 && s.parts.length <= MAX_PARTS, `${total}/${max}/${step}/${min}/${m}: count`);
+    assert.ok(s.parts.every((x) => x.gt(0)), `${total}/${max}/${step}/${min}/${m}: positive`);
+    assert.equal(s.parts.reduce((a, b) => a.plus(b), new D(0)).toString(), new D(total).toString(), `${total}/${max}/${step}/${min}/${m}: sum`);
+    if (s.parts.some((x) => x.gt(max)) && new D(total).gt(max)) assert.ok(s.note !== null, `${total}/${max}/${step}/${min}/${m}: a part above the maximum needs a note`);
+  }
+});

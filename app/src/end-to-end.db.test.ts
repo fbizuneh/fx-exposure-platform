@@ -831,6 +831,9 @@ e2e("maximum hedge amount: a larger recommendation is split evenly, or as the ma
   assert.deepEqual([none.parts.map((p) => p.amount), none.maxExposureAmount, none.splitMethod], [["1000.00"], null, null]);
   const roomy = us01((await finishedCycle(split({ maxHedgeDisplay: "5000" }))).recs);
   assert.deepEqual([roomy.parts.map((p) => p.amount), roomy.maxExposureAmount], [["1000.00"], "4545.4545"]);
+  // A rounding step as coarse as the amount cannot be split finer: one part of 1,000, larger than the maximum, and it says so.
+  const coarse = us01((await finishedCycle(split({ roundingDefault: "1000", splitMethod: "EVEN" }))).recs);
+  assert.deepEqual([coarse.parts.map((p) => p.amount), coarse.splitNote?.includes("larger than the maximum")], [["1000.00"], true]);
   // Saved and read back; a bad policy is refused.
   const pol = await app.hedgeRecommendation.questions.policy((await finishedCycle(split({ maxHedgeOverrides: [{ nettingLevel: "ENTITY", maxHedgeDisplay: "660" }] }))).t, programId("BS"));
   assert.deepEqual([pol.maxHedgeDisplay, pol.maxHedgeOverrides, pol.splitMethod], ["330.00", [{ nettingLevel: "ENTITY", maxHedgeDisplay: "660.00" }], "EVEN"]);
@@ -884,7 +887,7 @@ e2e("a split recommendation: accepting makes one draft per part, approval releas
   assert.deepEqual([last.followUp, last.parts.map((p) => p.followUp)], ["EXECUTED", ["EXECUTED", "EXECUTED", "EXECUTED", "EXECUTED"]]);
 });
 
-e2e("overriding a split recommendation splits the new amount the same way; a refusal from FX Trade puts the recommended parts back", async () => {
+e2e("overriding a split recommendation splits the new amount the same way and explains it; a refusal from FX Trade puts the recommended parts and note back", async () => {
   const { t, admin, cycle, recs } = await finishedCycle(split({ splitMethod: "EVEN" }));
   const rec = us01(recs);
   const { hr, done } = withFxTrade(async () => { throw Object.assign(new Error("no"), { problems: ["entity is not a hedge execution entity"] }); });
@@ -896,6 +899,85 @@ e2e("overriding a split recommendation splits the new amount the same way; a ref
   const o = await app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "OVERRIDE", amount: "700" });
   assert.deepEqual([o.status, o.decidedAmount, o.amount, o.parts.map((p) => p.amount)], ["OVERRIDDEN", "700.00", "1000.00", ["240.00", "230.00", "230.00"]]);
   assert.deepEqual((await drafts(t, cycle, rec.recommendationId)).map((p) => [p.partNo, p.legs[0]!.dealAmount]), [[1, "240.0000"], [2, "230.0000"], [3, "230.0000"]]);
+});
+
+e2e("the split note follows the parts: an override that merges a remainder gets the note, one that does not loses it, and a refusal restores the original either way", async () => {
+  const refused = () => withFxTrade(async () => { throw Object.assign(new Error("no"), { problems: ["entity is not a hedge execution entity"] }); });
+  const view = async (hr: { questions: typeof app.hedgeRecommendation.questions }, t: TenantId, id: string) => { const r = (await hr.questions.getRecommendation(t, id))!; return [r.status, r.parts.map((p) => p.amount), r.splitNote]; };
+  // Maximum 200 EUR, minimum 100 EUR: the original 1,000 is five parts of 200 with no note. Overriding to 450 leaves 50, below the minimum.
+  const a = await finishedCycle(split({ splitMethod: "THRESHOLD_REMAINDER", maxHedgeDisplay: "220", minHedgeDisplay: "110" }));
+  const ra = us01(a.recs);
+  assert.deepEqual([ra.parts.map((p) => p.amount), ra.splitNote], [["200.00", "200.00", "200.00", "200.00", "200.00"], null]);
+  const x = refused();
+  try {
+    await assert.rejects(x.hr.commands.decide({ tenantId: a.t, recommendationId: ra.recommendationId, actor: a.admin, action: "OVERRIDE", amount: "450" }), /FX Trade refused/);
+    assert.deepEqual(await view(x.hr, a.t, ra.recommendationId), ["OPEN", ["200.00", "200.00", "200.00", "200.00", "200.00"], null], "a refusal puts the original, note-less split back");
+  } finally { await x.done(); }
+  const oa = await app.hedgeRecommendation.commands.decide({ tenantId: a.t, recommendationId: ra.recommendationId, actor: a.admin, action: "OVERRIDE", amount: "450" });
+  assert.deepEqual([oa.parts.map((p) => p.amount)], [["200.00", "250.00"]]);
+  assert.match(oa.splitNote!, /added to the part before it/);
+  // The other way round: the original has a note (1,000 at 300 with a 109 minimum merges its last 100), and the override has none (450 is 300 and 150).
+  const b = await finishedCycle(split({ splitMethod: "THRESHOLD_REMAINDER", minHedgeDisplay: "120" }));
+  const rb = us01(b.recs);
+  assert.deepEqual(rb.parts.map((p) => p.amount), ["300.00", "300.00", "400.00"]);
+  assert.match(rb.splitNote!, /added to the part before it/);
+  const y = refused();
+  try {
+    await assert.rejects(y.hr.commands.decide({ tenantId: b.t, recommendationId: rb.recommendationId, actor: b.admin, action: "OVERRIDE", amount: "450" }), /FX Trade refused/);
+    const [status, parts, note] = await view(y.hr, b.t, rb.recommendationId);
+    assert.deepEqual([status, parts], ["OPEN", ["300.00", "300.00", "400.00"]]);
+    assert.match(note as string, /added to the part before it/, "the original note is back");
+  } finally { await y.done(); }
+  const ob = await app.hedgeRecommendation.commands.decide({ tenantId: b.t, recommendationId: rb.recommendationId, actor: b.admin, action: "OVERRIDE", amount: "450" });
+  assert.deepEqual([ob.parts.map((p) => p.amount), ob.splitNote], [["300.00", "150.00"], null], "the note describes the parts that stand");
+});
+
+e2e("cancelled pre-trades reach the recommendation: one cancelled part leaves it open, cancelling every part cancels it, a part that was executed keeps it partly executed, and a cycle closed before approval cancels the drafts", async () => {
+  const accept = async () => {
+    const x = await finishedCycle(split({ splitMethod: "THRESHOLD_REMAINDER" }));
+    const rec = us01(x.recs);
+    await app.hedgeRecommendation.commands.decide({ tenantId: x.t, recommendationId: rec.recommendationId, actor: x.admin, action: "ACCEPT" });
+    return { ...x, rec, parts: await drafts(x.t, x.cycle, rec.recommendationId) };
+  };
+  const now = async (x: { t: TenantId; rec: { recommendationId: string } }) => { const r = (await app.hedgeRecommendation.questions.getRecommendation(x.t, x.rec.recommendationId))!; return [r.followUp, r.parts.map((p) => p.followUp)]; };
+  const cancel = async (x: { t: TenantId; admin: Actor }, id: string) => { const done = await app.fxTrade.commands.cancelPreTrade({ tenantId: x.t, preTradeId: id, actor: x.admin }); await drain(app); return done; };
+
+  // Drafts: one cancelled part does not cancel the whole; cancelling every part does. Cancelling twice changes nothing.
+  const a = await accept();
+  assert.equal(await cancel(a, a.parts[0]!.preTradeId), true);
+  assert.deepEqual(await now(a), ["OPEN", ["CANCELLED", "OPEN", "OPEN", "OPEN"]]);
+  assert.equal(await cancel(a, a.parts[0]!.preTradeId), false);
+  await cancel(a, a.parts[1]!.preTradeId); await cancel(a, a.parts[2]!.preTradeId);
+  assert.deepEqual(await now(a), ["OPEN", ["CANCELLED", "CANCELLED", "CANCELLED", "OPEN"]], "one part is still live");
+  await cancel(a, a.parts[3]!.preTradeId);
+  assert.deepEqual(await now(a), ["CANCELLED", ["CANCELLED", "CANCELLED", "CANCELLED", "CANCELLED"]]);
+  assert.equal(await drain(app), 0, "nothing is left to deliver");
+
+  // One part executed, the others cancelled: the hedge happened in part, so the whole is partly executed, not cancelled.
+  const b = await accept();
+  await app.exposureManagement.commands.approveCycle({ tenantId: b.t, cycleId: b.cycle, actor: b.admin });
+  await drain(app);
+  const sent = await app.fxTrade.commands.exportPreTrades({ tenantId: b.t, actor: b.admin });
+  const [h, ...rows] = sent.file.trim().split("\n").map((l) => l.split(","));
+  const out = Object.fromEntries(h!.map((k, i) => [k, rows.find((r) => r[h!.indexOf("deal_amount")] === "100.0000")![i]!]));
+  const reply = [
+    "trade_id,execution_platform_id,trading_entity,counterparty,trade_date,value_date,deal_currency,deal_amount,settlement_currency,settlement_amount,instrument,buy_sell,hedging_program_id,pre_trade_reference",
+    `SIM-7,SIMFX,${out.trading_entity},Sim Bank,2026-11-12,${out.value_date},${out.deal_currency},${out.deal_amount},${out.settlement_currency},110.0000,${out.instrument},${out.buy_sell},${out.hedging_program_id},${out.pre_trade_reference}`,
+  ].join("\n");
+  assert.equal((await app.fxTrade.commands.importExecutedTrades({ tenantId: b.t, rows: parseExecutedFile(reply), by: "simulator" })).matched, 1);
+  await drain(app);
+  for (const p of b.parts.filter((x) => x.legs[0]!.dealAmount !== "100.0000")) await cancel(b, p.preTradeId);
+  assert.deepEqual(await now(b), ["PARTLY_EXECUTED", ["CANCELLED", "CANCELLED", "CANCELLED", "EXECUTED"]]);
+
+  // A cycle closed before approval cancels its drafts, and so the recommendation's parts. The event is delivered to FX Trade as Exposure Management would
+  // send it (skipping a cycle once its exposure is approved is refused by a database constraint there today; that is outside this change).
+  const c = await accept();
+  const closed = { type: "exposure-management.cycle-skipped", eventId: randomUUID(), occurredAt: new Date().toISOString(), tenantId: c.t, cycleId: c.cycle, programId: programId("BS") } as never;
+  assert.equal(await app.fxTrade.commands.onCycleClosed(closed), 4);
+  assert.equal(await app.fxTrade.commands.onCycleClosed(closed), 0, "the same event again changes nothing");
+  await drain(app);
+  assert.ok((await drafts(c.t, c.cycle, c.rec.recommendationId)).every((p) => p.status === "CANCELLED"));
+  assert.deepEqual(await now(c), ["CANCELLED", ["CANCELLED", "CANCELLED", "CANCELLED", "CANCELLED"]]);
 });
 
 e2e("a split decision that never got its pre-trades: approval confirms it when FX Trade holds every part, and lapses it when it holds none", async () => {

@@ -25,5 +25,10 @@ Status: accepted. Extends decision 0011 (item 4's minimum has a maximum beside i
 - Hedge Recommendation: policy fields `maxHedgeDisplay`, `maxHedgeOverrides`, `splitMethod`; `recommendation_parts` (amount, pre-trade, follow-up per part); the recommendation records the maximum, method and any split note. `pre-trade-created` is one event per part (with `partNo`). `Recommendation.parts` is new; `preTradeId` is the first part's.
 - FX Trade: a pre-trade made for a recommendation has a **part number** (unique per recommendation); `createPreTrades` items take `partNo` (default 1), so callers that do not split are unchanged.
 
+## Review fixes (PR #8)
+- **Split invariants.** After rounding, every part is positive, there are at most 50, and the parts add up exactly to the amount. A step too coarse for the maximum (1,000 at maximum 400, step 1,000) gives fewer, larger parts instead of zero-amount parts; a split that would exceed 50 parts is re-split evenly into the most allowed. The split note says when parts exceed the maximum and why. A violation throws rather than persists.
+- **The note follows the parts.** An override re-splits the amount and saves the new note with the new parts; if FX Trade refuses, the original parts and the original note are both restored.
+- **Cancellation reaches the recommendation.** FX Trade announces `fx-trade.pre-trade-cancelled` once per pre-trade (user cancellation, or cycle closure before approval). Hedge Recommendation refreshes the follow-up from FX Trade's current state, so redelivery is harmless. One cancelled part leaves the whole OPEN; every part cancelled makes it CANCELLED; if any part executed, the whole stays PARTLY_EXECUTED (cancelled parts do not reduce it).
+
 ## Not built
 A maximum per entity or region; a maximum by currency pair; spreading parts over different value dates; capping an override at the maximum.
