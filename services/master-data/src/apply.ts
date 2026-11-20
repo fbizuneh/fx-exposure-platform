@@ -7,8 +7,9 @@ import { q, type Db, type Tx } from "./db.ts";
 import { DEFAULT_MAX_END_SHARE, plan, shouldHold, stable, type OpenRow, type Plan } from "./diff.ts";
 import { byPerson, recordChange } from "./change-record.ts";
 import { announce } from "./outbox.ts";
-import { chartKey, type AccountRow, type CurrencyRow, type EntityRow, type HierarchyNodeRow, type Kind, type Mode } from "./rows.ts";
-import { ChangeSetInvalid, validateAccounts, validateCurrencies, validateEntities, validateHierarchy } from "./validate.ts";
+import { chartKey, type AccountRow, type CalendarRow, type CurrencyRow, type EntityRow, type HierarchyNodeRow, type Kind, type Mode } from "./rows.ts";
+import { WEEKDAYS } from "../contract/index.ts";
+import { ChangeSetInvalid, validateAccounts, validateCalendars, validateCurrencies, validateEntities, validateHierarchy } from "./validate.ts";
 
 /** The change set cannot be applied as things stand: out of date, a repeat with other content, or not held. */
 export class ChangeSetRefused extends Error {}
@@ -82,7 +83,7 @@ async function ensureCharts(tx: Tx, tenant: TenantId, codes: Iterable<string>, h
   }
 }
 
-async function closeVersion(tx: Tx, table: "entities" | "gl_hierarchy_nodes" | "accounts" | "currencies", idCol: string, tenant: string, id: string, validFrom: string, asOf: string) {
+async function closeVersion(tx: Tx, table: "entities" | "gl_hierarchy_nodes" | "accounts" | "currencies" | "calendars", idCol: string, tenant: string, id: string, validFrom: string, asOf: string) {
   const db = q(tx) as unknown as Kysely<any>;
   if (validFrom === asOf) {
     // A version that starts the same day is replaced in place, so no empty range is ever stored.
@@ -272,7 +273,47 @@ const currencyOps: Ops<CurrencyRow> = {
   },
 };
 
-const OPS = { ENTITY: entityOps, HIERARCHY: hierarchyOps, ACCOUNT: accountOps, CURRENCY: currencyOps } as unknown as Record<Kind, Ops<unknown>>;
+/** Weekend days in the week's order and holidays by date, so the same calendar sent in another order is not a change. */
+const calendarAttrs = (weekend: readonly string[], coveredThrough: string, holidays: readonly { date: string; name: string | null }[]) => ({
+  weekendDays: [...weekend].sort((a, b) => WEEKDAYS.indexOf(a as never) - WEEKDAYS.indexOf(b as never)),
+  coveredThrough,
+  holidays: [...holidays].map((h) => ({ date: h.date, name: h.name })).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)),
+});
+
+const calendarOps: Ops<CalendarRow> = {
+  kind: "CALENDAR",
+  keyOf: (r) => r.currencyCode,
+  attrsOf: (r) => calendarAttrs(r.weekendDays, r.coveredThrough, r.holidays),
+  async load(tx, tenant, asOf) {
+    const l = emptyLoaded();
+    const rows = await q(tx).selectFrom("calendars").selectAll().where("tenant_id", "=", tenant).orderBy("valid_from").execute();
+    for (const r of rows) {
+      l.ids.set(r.code, r.calendar_id);
+      l.maxValidFrom = later(l.maxValidFrom, r.valid_from);
+      if (isOpen(r, asOf)) l.open.set(r.code, { id: r.calendar_id, validFrom: r.valid_from, source: r.source_system, attrs: stable(calendarAttrs(r.weekend_days, r.covered_through, r.holidays as never)) });
+    }
+    return l;
+  },
+  validate: (rows) => validateCalendars(rows),
+  async write(tx, w) {
+    const ids = new Map(w.loaded.ids);
+    for (const k of w.plan.creates) if (!ids.has(k)) ids.set(k, randomUUID());
+    for (const k of [...w.plan.changes, ...w.plan.ends]) {
+      const cur = w.loaded.open.get(k)!;
+      await closeVersion(tx, "calendars", "calendar_id", w.tenant, cur.id, cur.validFrom, w.asOf);
+    }
+    for (const k of [...w.plan.creates, ...w.plan.changes]) {
+      const r = w.rows.get(k)!;
+      const a = calendarAttrs(r.weekendDays, r.coveredThrough, r.holidays);
+      await q(tx).insertInto("calendars").values({
+        tenant_id: w.tenant, calendar_id: ids.get(k)!, valid_from: w.asOf, valid_to: null, source_system: w.source, batch_id: w.batchId,
+        code: r.currencyCode, weekend_days: a.weekendDays, covered_through: a.coveredThrough, holidays: JSON.stringify(a.holidays),
+      }).execute();
+    }
+  },
+};
+
+const OPS = { ENTITY: entityOps, HIERARCHY: hierarchyOps, ACCOUNT: accountOps, CURRENCY: currencyOps, CALENDAR: calendarOps } as unknown as Record<Kind, Ops<unknown>>;
 
 async function maxEndShare(tx: Tx, tenant: TenantId): Promise<number> {
   const row = await q(tx).selectFrom("tenant_settings").select("max_end_share").where("tenant_id", "=", tenant).executeTakeFirst();
@@ -365,6 +406,7 @@ export function applyCommands(db: Db) {
     applyHierarchy: (sub: Submission<HierarchyNodeRow>) => execute(db, { tenant: sub.tenantId, kind: "HIERARCHY", sub }),
     applyAccounts: (sub: Submission<AccountRow>) => execute(db, { tenant: sub.tenantId, kind: "ACCOUNT", sub }),
     applyCurrencies: (sub: Submission<CurrencyRow>) => execute(db, { tenant: sub.tenantId, kind: "CURRENCY", sub }),
+    applyCalendars: (sub: Submission<CalendarRow>) => execute(db, { tenant: sub.tenantId, kind: "CALENDAR", sub }),
 
     /** Applies a held snapshot now. It is checked again against what exists today. */
     releaseChangeSet: (tenant: TenantId, batchId: string, by: string) => execute(db, { tenant, release: { batchId, by } }),

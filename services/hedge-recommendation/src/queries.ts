@@ -1,6 +1,6 @@
 // Reads: the policy with defaults filled in, and the cycle's recommendations.
 import type { CycleId, ProgramId, TenantId } from "@shared/kernel";
-import type { FollowUp, HedgePolicy, HedgeRecommendationQuestions, NoActionReason, Recommendation, RecommendationStatus, Strategy } from "../contract/index.ts";
+import type { CalendarGap, FollowUp, HedgePolicy, HedgeRecommendationQuestions, NoActionReason, Recommendation, RecommendationStatus, Strategy } from "../contract/index.ts";
 import type { Selectable } from "kysely";
 import { q, type Db, type Queryable } from "./db.ts";
 import type { HedgeRecommendationDatabase } from "./schema.ts";
@@ -37,7 +37,7 @@ export const toRecommendation = (r: Row): Recommendation => ({
   otherCurrency: r.other_currency, tradingEntityCode: r.trading_entity_code, grossExposure: amount(r.gross_exposure), hedgedAmount: amount(r.hedged_amount), ratio: ratio(r.ratio), targetHedge: amount(r.target_hedge),
   neededAmount: amount(r.needed_amount), rounding: amount(r.rounding), minExposureAmount: opt(r.min_exposure_amount), action: r.action as Recommendation["action"],
   reason: r.reason as NoActionReason | null, direction: r.direction as Recommendation["direction"], amount: opt(r.amount), instrument: r.instrument as Recommendation["instrument"],
-  valueDate: r.value_date, fixingDate: r.fixing_date, status: r.status as RecommendationStatus, decidedAmount: opt(r.decided_amount), decidedBy: r.decided_by,
+  valueDate: r.value_date, fixingDate: r.fixing_date, calendarGaps: (typeof r.calendar_gaps === "string" ? JSON.parse(r.calendar_gaps) : r.calendar_gaps) as CalendarGap[], status: r.status as RecommendationStatus, decidedAmount: opt(r.decided_amount), decidedBy: r.decided_by,
   decidedAt: r.decided_at === null ? null : r.decided_at.toISOString(), decisionNote: r.decision_note, preTradeId: r.pre_trade_id, followUp: r.follow_up as FollowUp,
 });
 

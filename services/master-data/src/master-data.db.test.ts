@@ -270,3 +270,46 @@ dbTest("currencies: the NDF flag is versioned; a lookup reads the day asked abou
   assert.equal((await events(t)).filter((e) => e.kind === "CURRENCY").length, 2);
   await assert.rejects(md.commands.applyCurrencies(part(t, [{ code: "xx", isNdf: true }], D3)), ChangeSetInvalid);
 });
+
+const cal = (currencyCode: string, over: Partial<{ weekendDays: ("SAT" | "SUN" | "FRI")[]; coveredThrough: string; holidays: { date: string; name: string | null }[] }> = {}) =>
+  ({ currencyCode, weekendDays: ["SAT", "SUN"] as ("SAT" | "SUN" | "FRI")[], coveredThrough: "2026-12-31", holidays: [{ date: "2026-05-01", name: "Labour Day" }], ...over });
+
+dbTest("calendars: a currency's weekend and holidays are versioned; a lookup reads the day asked about; order does not matter; a change announces once", async () => {
+  const t = newTenant();
+  const a = await md.commands.applyCalendars(snap(t, [cal("EUR", { holidays: [{ date: "2026-12-25", name: "Christmas" }, { date: "2026-05-01", name: null }] }), cal("SAR", { weekendDays: ["FRI", "SAT"] })], D1));
+  assert.deepEqual([a.status, a.created], ["APPLIED", 2]);
+  const got = await md.questions.getCalendars(t, ["EUR", "SAR", "JPY"], D1);
+  assert.deepEqual(got.map((c) => c.currency), ["EUR", "SAR"], "a currency with no calendar is left out");
+  assert.deepEqual(got[0]!.holidays, [{ date: "2026-05-01", name: null }, { date: "2026-12-25", name: "Christmas" }], "holidays come back by date");
+  assert.deepEqual(got[1]!.weekendDays, ["FRI", "SAT"]);
+  assert.equal(got[0]!.coveredThrough, "2026-12-31");
+  assert.deepEqual(await md.questions.getCalendars(t, [], D1), []);
+
+  // The same calendar sent again with its holidays in another order is no change; a new holiday and a longer cover is one.
+  const same = await md.commands.applyCalendars(snap(t, [cal("EUR", { holidays: [{ date: "2026-05-01", name: null }, { date: "2026-12-25", name: "Christmas" }] }), cal("SAR", { weekendDays: ["SAT", "FRI"] })], D2));
+  assert.deepEqual([same.changed, same.unchanged], [0, 2]);
+  const next = await md.commands.applyCalendars(snap(t, [cal("EUR", { coveredThrough: "2027-12-31", holidays: [{ date: "2026-12-25", name: "Christmas" }, { date: "2027-01-01", name: "New Year" }] }), cal("SAR", { weekendDays: ["FRI", "SAT"] })], D3));
+  assert.deepEqual([next.changed, next.unchanged], [1, 1]);
+  assert.equal((await md.questions.getCalendars(t, ["EUR"], D2))[0]!.holidays.length, 2, "before the change the old list stood");
+  assert.deepEqual((await md.questions.getCalendars(t, ["EUR"], D3))[0]!.holidays.map((h) => h.date), ["2026-12-25", "2027-01-01"]);
+  assert.equal((await md.questions.getCalendars(newTenant(), ["EUR"], D1)).length, 0, "another tenant sees nothing");
+  assert.equal((await events(t)).filter((e) => e.kind === "CALENDAR").length, 2, "the repeat announced nothing");
+});
+
+dbTest("calendars: a bad calendar is refused with every problem named", async () => {
+  const t = newTenant();
+  const bad = async (row: unknown) => {
+    try { await md.commands.applyCalendars(part(t, [row as never], D1)); } catch (e) { assert.ok(e instanceof ChangeSetInvalid); return (e as ChangeSetInvalid).problems.join(" | "); }
+    return "accepted";
+  };
+  assert.match(await bad({ ...cal("eur") }), /three capital letters/);
+  assert.match(await bad({ ...cal("EUR"), weekendDays: ["SAT", "FUN"] }), /weekend days must be from/);
+  assert.match(await bad({ ...cal("EUR"), weekendDays: ["SAT", "SAT"] }), /listed twice/);
+  assert.match(await bad({ ...cal("EUR"), weekendDays: ["MON", "TUE", "WED", "THU"] }), /at most three/);
+  assert.match(await bad({ ...cal("EUR"), coveredThrough: "2026-02-30" }), /covered-through must be a real date/);
+  assert.match(await bad(cal("EUR", { holidays: [{ date: "2027-01-01", name: null }] })), /after the covered-through date/);
+  assert.match(await bad(cal("EUR", { holidays: [{ date: "2026-05-01", name: null }, { date: "2026-05-01", name: null }] })), /listed twice/);
+  assert.match(await bad(cal("EUR", { holidays: [{ date: "2026-13-01", name: null }] })), /real date/);
+  assert.match(await bad(cal("EUR", { holidays: [{ date: "2026-05-01", name: " " }] })), /blank name/);
+  assert.equal((await md.questions.getCalendars(t, ["EUR"], D1)).length, 0, "nothing was written");
+});

@@ -1,6 +1,6 @@
 // The questions Master Data answers. Each reads the version valid on the date asked about.
 import { accountId, entityId, type AsOfDate, type EntityId, type TenantId } from "@shared/kernel";
-import type { Account, Entity, EntityType, MasterDataQuestions, NormalBalance, StatementType } from "../contract/index.ts";
+import type { Account, Entity, EntityType, MasterDataQuestions, NormalBalance, StatementType, Weekday } from "../contract/index.ts";
 import { q, type Db } from "./db.ts";
 import { ancestors, descendants } from "./tree.ts";
 
@@ -103,6 +103,16 @@ export function masterDataQuestions(db: Db): MasterDataQuestions {
       const rows = await q(db).selectFrom("currencies").select(["code", "is_ndf"]).where("tenant_id", "=", tenant).where("valid_from", "<=", asOf)
         .where((eb) => eb.or([eb("valid_to", "is", null), eb("valid_to", ">", asOf)])).orderBy("code").execute();
       return rows.map((r) => ({ code: r.code, isNdf: r.is_ndf }));
+    },
+
+    async getCalendars(tenant, currencies, asOf) {
+      if (currencies.length === 0) return [];
+      const rows = await q(db).selectFrom("calendars").selectAll().where("tenant_id", "=", tenant).where("code", "in", [...currencies]).where("valid_from", "<=", asOf)
+        .where((eb) => eb.or([eb("valid_to", "is", null), eb("valid_to", ">", asOf)])).orderBy("code").execute();
+      return rows.map((r) => ({
+        currency: r.code, weekendDays: r.weekend_days as readonly Weekday[], coveredThrough: r.covered_through,
+        holidays: (typeof r.holidays === "string" ? JSON.parse(r.holidays) : r.holidays) as { date: string; name: string | null }[],
+      }));
     },
 
     async hierarchyPaths(tenant, chartCode, nodeCodes, asOf) {

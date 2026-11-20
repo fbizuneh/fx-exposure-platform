@@ -34,6 +34,17 @@ export const NO_ACTION_MESSAGES: Readonly<Record<NoActionReason, string>> = {
   NO_TRADING_ENTITY: "This netting group has no entity. Configure a default trading entity in the hedge policy to get a recommendation for it.",
 };
 
+/** Why a currency's business-day calendar could not be fully relied on for a recommendation's dates (decision 0014). The dates then treat only Saturdays and Sundays as non-business days for that currency. */
+export type CalendarGapReason = "NO_CALENDAR" | "CALENDAR_ENDED";
+export interface CalendarGap {
+  readonly currency: string;
+  readonly reason: CalendarGapReason;
+}
+export const CALENDAR_GAP_MESSAGES: Readonly<Record<CalendarGapReason, string>> = {
+  NO_CALENDAR: "No business-day calendar is loaded for this currency, so only Saturdays and Sundays were treated as non-business days.",
+  CALENDAR_ENDED: "The holidays loaded for this currency end before the value date, so later holidays are not taken into account.",
+};
+
 export interface Recommendation {
   readonly recommendationId: string;
   readonly programId: ProgramId;
@@ -65,6 +76,8 @@ export interface Recommendation {
   readonly instrument: "FORWARD" | "NDF" | null;
   readonly valueDate: string | null;
   readonly fixingDate: string | null;
+  /** Currencies whose calendar was missing or too short for the value date. Empty when there is no value date or every calendar covered it. */
+  readonly calendarGaps: readonly CalendarGap[];
   readonly status: RecommendationStatus;
   readonly decidedAmount: string | null;
   readonly decidedBy: string | null;

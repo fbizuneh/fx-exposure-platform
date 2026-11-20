@@ -1,7 +1,7 @@
 // Turn a finished run's net exposure into recommendations (decision 0011 items 2 to 8, 12, 17).
 import { randomUUID } from "node:crypto";
-import type { CycleId, ProgramId, TenantId } from "@shared/kernel";
-import { D, fmt, pairKey, recommend, valueDateFor, weekdaysBefore } from "./calc.ts";
+import { asOfDate, type CycleId, type ProgramId, type TenantId } from "@shared/kernel";
+import { D, addTenor, businessDaysBefore, calendarGaps, fmt, noCalendar, pairKey, recommend, rollWithSpan, toBusinessCalendar, type BusinessCalendar } from "./calc.ts";
 import { firstTime } from "./events.ts";
 import { q, type Db } from "./db.ts";
 import { announce } from "./outbox.ts";
@@ -46,7 +46,11 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
     }
     const ratioFor = new Map(policy.ratioOverrides.map((o) => [pairKey(o.pair), o.ratio]));
     const roundingFor = new Map(policy.roundingOverrides.map((o) => [o.currency, o.rounding]));
-    const valueDate = valueDateFor(run!.asOf, policy.tenor);
+    // Calendars are read as they stand today, not as of the cycle's as-of date: holidays are loaded ahead of time and a calendar loaded today is the best
+    // knowledge there is for the dates being worked out (decision 0014). A currency without a calendar counts Saturdays and Sundays only, and the gap is recorded.
+    const today = asOfDate(clock().toISOString().slice(0, 10));
+    const loaded = new Map((await c.masterData.getCalendars(tenant, [...new Set(groups.flatMap((g) => [g.currency1, g.currency2]))], today)).map((x) => [x.currency, toBusinessCalendar(x)]));
+    const calendarOf = (ccy: string): BusinessCalendar => loaded.get(ccy) ?? noCalendar(ccy);
 
     return db.transaction().execute(async (tx) => {
       if (!(await firstTime(tx, tenant, event.eventId))) return "IGNORED";
@@ -65,13 +69,17 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
         const noEntity = out.action === "HEDGE" && tradingEntity === null;
         const action = noEntity ? "NONE" : out.action;
         const instrument = action === "HEDGE" ? (ndf.has(g.exposureCurrency) ? "NDF" : "FORWARD") : null;
+        const cals = [calendarOf(g.currency1), calendarOf(g.currency2)];
+        const rolled = action === "HEDGE" ? rollWithSpan(addTenor(run!.asOf, policy.tenor), cals) : null;
+        const valueDate = rolled?.date ?? null;
         rows.push({
           tenant_id: tenant, recommendation_id: randomUUID(), program_id: event.programId, cycle_id: event.cycleId, run_id: event.runId, strategy: "hedge-ratio-adjustment",
           group_no: g.groupNo, netting_level: g.nettingLevel, region: g.region, entity_code: g.entityCode, currency_pair: g.currencyPair, exposure_currency: g.exposureCurrency, other_currency: other,
           gross_exposure: g.gross.exposureAmount, hedged_amount: hedged, ratio, target_hedge: fmt(out.target), needed_amount: fmt(out.needed), rounding, min_exposure_amount: minExposure,
           trading_entity_code: tradingEntity, action, reason: noEntity ? "NO_TRADING_ENTITY" : out.reason, direction: noEntity ? null : out.direction,
           amount: out.amount === null || noEntity ? null : fmt(out.amount), instrument,
-          value_date: action === "HEDGE" ? valueDate : null, fixing_date: instrument === "NDF" ? weekdaysBefore(valueDate, 2) : null,
+          value_date: valueDate, fixing_date: instrument === "NDF" ? businessDaysBefore(valueDate!, 2, cals) : null,
+          calendar_gaps: JSON.stringify(rolled === null ? [] : calendarGaps(cals, rolled.through)),
           status: action === "HEDGE" ? "OPEN" : "NONE", created_at: clock(),
         });
       }

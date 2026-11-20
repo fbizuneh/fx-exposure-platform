@@ -45,6 +45,7 @@ export interface MasterDataDatabase {
     monetary_flag: boolean;
     fx_relevant_flag: boolean;
   };
+  calendars: Versioned & { calendar_id: string; code: string; weekend_days: string[]; covered_through: string; holidays: Json };
   currencies: Versioned & { currency_id: string; code: string; is_ndf: boolean };
   change_sets: {
     tenant_id: string;

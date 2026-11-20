@@ -1,6 +1,6 @@
 // Checks a change set before anything is written. Pure: the caller passes in what already exists.
-import { ENTITY_TYPES, HIERARCHY_CLASSIFICATIONS, NORMAL_BALANCES, STATEMENT_TYPES } from "../contract/index.ts";
-import { chartKey, type AccountRow, type CurrencyRow, type EntityRow, type HierarchyNodeRow, type Mode } from "./rows.ts";
+import { ENTITY_TYPES, HIERARCHY_CLASSIFICATIONS, NORMAL_BALANCES, STATEMENT_TYPES, WEEKDAYS } from "../contract/index.ts";
+import { chartKey, type AccountRow, type CalendarRow, type CurrencyRow, type EntityRow, type HierarchyNodeRow, type Mode } from "./rows.ts";
 import { findCycle } from "./tree.ts";
 
 const CURRENCY = /^[A-Z]{3}$/;
@@ -89,6 +89,37 @@ export function validateCurrencies(rows: readonly CurrencyRow[]): string[] {
   for (const r of rows) {
     if (typeof r.code !== "string" || !CURRENCY.test(r.code)) out.push(`currency ${String(r.code)}: code must be three capital letters`);
     if (typeof r.isNdf !== "boolean") out.push(`currency ${String(r.code)}: NDF must be true or false`);
+  }
+  return out;
+}
+
+const REAL_DATE = (v: unknown): boolean => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(typeof v === "string" ? v : "");
+  if (!m) return false;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return d.getUTCFullYear() === Number(m[1]) && d.getUTCMonth() === Number(m[2]) - 1 && d.getUTCDate() === Number(m[3]);
+};
+
+export function validateCalendars(rows: readonly CalendarRow[]): string[] {
+  const out = duplicates(rows.map((r) => r.currencyCode), "calendar");
+  for (const r of rows) {
+    const at = `calendar ${String(r.currencyCode)}`;
+    if (typeof r.currencyCode !== "string" || !CURRENCY.test(r.currencyCode)) out.push(`${at}: currency must be three capital letters`);
+    if (!Array.isArray(r.weekendDays) || r.weekendDays.some((d) => !has(WEEKDAYS, d))) out.push(`${at}: weekend days must be from ${WEEKDAYS.join(", ")}`);
+    else {
+      if (new Set(r.weekendDays).size !== r.weekendDays.length) out.push(`${at}: a weekend day is listed twice`);
+      if (r.weekendDays.length > 3) out.push(`${at}: at most three weekend days`);
+    }
+    if (!REAL_DATE(r.coveredThrough)) out.push(`${at}: covered-through must be a real date written YYYY-MM-DD`);
+    if (!Array.isArray(r.holidays)) { out.push(`${at}: holidays must be a list`); continue; }
+    const seen = new Set<string>();
+    for (const h of r.holidays) {
+      if (!h || !REAL_DATE(h.date)) { out.push(`${at}: a holiday date must be a real date written YYYY-MM-DD`); continue; }
+      if (seen.has(h.date)) out.push(`${at}: holiday ${h.date} is listed twice`);
+      seen.add(h.date);
+      if (REAL_DATE(r.coveredThrough) && h.date > r.coveredThrough) out.push(`${at}: holiday ${h.date} is after the covered-through date ${r.coveredThrough}`);
+      if (h.name !== null && (typeof h.name !== "string" || h.name.trim() === "")) out.push(`${at}: holiday ${h.date} has a blank name`);
+    }
   }
   return out;
 }

@@ -10,7 +10,7 @@ Tier: core.
 
 ## Answers
 - The policy of a program, with defaults filled in
-- A cycle's recommendations, including groups where no action was needed and why
+- A cycle's recommendations, including groups where no action was needed and why, and any currency whose business-day calendar was missing or too short for the dates
 - One recommendation
 - Who accepted or overrode a hedge on a cycle (dismissals excluded)
 - Who has an Approve Cycle in flight on a cycle
@@ -25,7 +25,7 @@ Events carry identifiers only.
 - Net exposure of the finished run (Exposure Analysis)
 - Pre-trade status, and creating pre-trades (FX Trade)
 - Cycle and its approval state (Exposure Management)
-- NDF currencies (Master Data) and spot rates (FX Rate)
+- NDF currencies and business-day calendars (Master Data), and spot rates (FX Rate)
 - Permissions (Identity)
 
 ## Strategy
