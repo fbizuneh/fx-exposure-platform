@@ -98,7 +98,7 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
           // A close-out and the roll carry their own direction and dates; an adjustment (or the combined trade) takes the recommendation's.
           const own = part.value_date !== null;
           return {
-            recommendationId: id, partNo: part.part_no, tradingEntityCode: rec.trading_entity_code!, instrument: rec.instrument as "FORWARD" | "NDF",
+            recommendationId: id, partNo: part.part_no, tradingEntityCode: (part.trading_entity_code ?? rec.trading_entity_code)!, instrument: rec.instrument as "FORWARD" | "NDF",
             legs: [{ role: "SINGLE" as const, direction: (part.direction ?? rec.direction) as "BUY" | "SELL", dealCurrency: rec.exposure_currency, dealAmount: part.amount, settlementCurrency: rec.other_currency, settlementAmount: null, valueDate: part.value_date ?? rec.value_date!, fixingDate: own ? part.fixing_date : rec.fixing_date }],
           };
         }),
@@ -167,12 +167,18 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
       if (input.amount === undefined || !/^\d+(\.\d{1,4})?$/.test(input.amount) || Number(input.amount) <= 0) throw new RecommendationError("an override needs a positive amount with up to 4 decimals");
       amount = input.amount;
     }
-    if (rec.trading_entity_code === null) throw new RecommendationError("this recommendation has no trading entity");
+    if ((await partsOf(tenant, rec.recommendation_id)).some((part) => (part.trading_entity_code ?? rec.trading_entity_code) === null)) throw new RecommendationError("this recommendation has no trading entity");
     // Claiming is not yet a decision: FX Trade may still refuse, which reopens the recommendation. Audit hears of it when it is confirmed.
     // The claim takes the cycle's decision lock and looks for a reservation by this same person (an Approve Cycle in flight, decision 0013), so
     // a person cannot win a decision and an approval of the same cycle at once.
     const claim = await db.transaction().execute(async (tx) => {
       await lockCycleDecisions(tx, tenant, rec.cycle_id);
+      // A roll was made from the dates as they were (decision 0021). The dates change under this same lock, and the approval of the exposure refuses while they differ, so this
+      // only stops a recommendation whose dates have moved on since; it is decided after a rerun or not at all.
+      if (rec.roll_type !== null) {
+        const now = await q(tx).selectFrom("roll_parameters").select("revision").where("tenant_id", "=", tenant).where("cycle_id", "=", rec.cycle_id).executeTakeFirst();
+        if ((now?.revision ?? null) !== rec.roll_revision) throw new RecommendationError("the roll dates changed after this recommendation was made; rerun the cycle");
+      }
       const reserved = await q(tx).selectFrom("approval_holds").select("hold_id").where("tenant_id", "=", tenant).where("cycle_id", "=", rec.cycle_id).where("approver", "=", by).limit(1).executeTakeFirst();
       if (reserved) return "RESERVED" as const;
       const r = await q(tx).updateTable("recommendations").set({ status: "DECIDING", decision_kind: input.action, decided_amount: amount, decided_by: by, decided_at: clock(), decision_note: note })

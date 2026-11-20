@@ -195,6 +195,14 @@ export const isBusinessDay = (date: string, cals: readonly BusinessCalendar[]): 
   return cals.every((c) => openOn(c, date, day));
 };
 
+/** The currencies whose calendars are closed on the date. */
+export function closedCurrencies(date: string, cals: readonly BusinessCalendar[]): string[] {
+  const day = utc(date).getUTCDay();
+  return cals.filter((c) => !openOn(c, date, day)).map((c) => c.currency);
+}
+/** The date itself when every calendar is open on it, otherwise the next day on which they all are. */
+export const nextJointBusinessDay = (date: string, cals: readonly BusinessCalendar[]): string => step(date, 1, cals);
+
 function step(date: string, by: 1 | -1, cals: readonly BusinessCalendar[]): string {
   const d = utc(date);
   for (let i = 0; i < LIMIT; i++) {
@@ -274,13 +282,15 @@ export function addDays(date: string, days: number): string {
 
 export interface MaturingLeg {
   readonly valueDate: string;
+  /** The entity that holds the hedge. */
+  readonly entityCode: string;
   /** Signed, in the group's exposure currency: a hedge against a long exposure is negative. */
   readonly exposureAmount: string;
 }
 export interface RollTrade { readonly direction: "BUY" | "SELL"; readonly amount: Num }
 export interface RollPlan {
-  /** One close-out per value date in the window, oldest first: the maturing hedges of that date netted and closed the other way. A date whose hedges net to nothing has none. */
-  readonly closeOuts: readonly (RollTrade & { readonly valueDate: string })[];
+  /** One close-out per value date and holding entity in the window, oldest first: that entity's maturing hedges of that date netted and closed the other way. Each entity closes its own near leg; they are never netted against each other. One that nets to nothing has none. */
+  readonly closeOuts: readonly (RollTrade & { readonly valueDate: string; readonly entityCode: string })[];
   /** The hedge that replaces everything maturing, at the far date; null when it nets to nothing. */
   readonly roll: RollTrade | null;
   /** Signed total of the maturing hedges. */
@@ -292,14 +302,16 @@ export interface RollPlan {
  */
 export function planRoll(legs: readonly MaturingLeg[], near: string, offsetDays: number): RollPlan {
   const end = addDays(near, offsetDays);
-  const byDate = new Map<string, Num>();
+  const byKey = new Map<string, { valueDate: string; entityCode: string; sum: Num }>();
   for (const l of legs) {
     if (l.valueDate < near || l.valueDate > end) continue;
-    byDate.set(l.valueDate, (byDate.get(l.valueDate) ?? new D(0)).plus(l.exposureAmount));
+    const key = `${l.valueDate}\u0000${l.entityCode}`;
+    const have = byKey.get(key);
+    byKey.set(key, { valueDate: l.valueDate, entityCode: l.entityCode, sum: (have?.sum ?? new D(0)).plus(l.exposureAmount) });
   }
-  const closeOuts = [...byDate].sort(([a], [b]) => (a < b ? -1 : 1)).filter(([, s]) => !s.isZero())
-    .map(([valueDate, s]) => ({ valueDate, direction: s.isNegative() ? "BUY" as const : "SELL" as const, amount: s.abs() }));
-  const maturing = [...byDate.values()].reduce((a, b) => a.plus(b), new D(0));
+  const all = [...byKey.values()].sort((a, b) => (a.valueDate < b.valueDate ? -1 : a.valueDate > b.valueDate ? 1 : a.entityCode < b.entityCode ? -1 : a.entityCode > b.entityCode ? 1 : 0));
+  const closeOuts = all.filter((x) => !x.sum.isZero()).map((x) => ({ valueDate: x.valueDate, entityCode: x.entityCode, direction: x.sum.isNegative() ? "BUY" as const : "SELL" as const, amount: x.sum.abs() }));
+  const maturing = all.reduce((a, x) => a.plus(x.sum), new D(0));
   return { closeOuts, roll: maturing.isZero() ? null : { direction: maturing.isNegative() ? "SELL" : "BUY", amount: maturing.abs() }, maturing };
 }
 

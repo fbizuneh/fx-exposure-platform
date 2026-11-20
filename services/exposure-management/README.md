@@ -29,6 +29,7 @@ Events carry identifiers only.
 - Program enabled and disabled (Identity)
 - Access decisions (Identity's questions), before every command
 - Reserve and release of an approval (Hedge Recommendation, handed in by app/), around Approve Cycle when segregation of duties is on
+- A check before Approve Exposure that a program's roll dates still match the run, and a lock on them for that run (Hedge Recommendation, decision 0021)
 
 ## Schema
 `exposure_management`. Its tables are defined by this service's migrations.

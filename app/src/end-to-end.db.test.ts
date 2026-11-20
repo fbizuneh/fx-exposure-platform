@@ -1237,6 +1237,8 @@ e2e("an interrupted approval strands its holder's hedge decisions; recovery lets
     decisions: {
       reserveApproval: async (tenant, c, approver, id) => { await hr.commands.reserveApproval(tenant, c, approver, id); throw new Error("process died"); },
       releaseApproval: async () => { throw new Error("unreachable"); },
+      checkExposureApproval: (tenant, c, runId) => hr.commands.checkExposureApproval(tenant, c, runId),
+      releaseExposureCheck: (tenant, c, runId) => hr.commands.releaseExposureCheck(tenant, c, runId),
     },
     now: () => clock.now,
   });
@@ -1508,16 +1510,18 @@ const rollFile = [
   "R4,SIMFX,US01,Sim Bank,2026-11-10,2027-01-20,EUR,200.0000,USD,220.0000,FORWARD,SELL,BS,",
 ].join("\n");
 const rollPolicy = (over: object = {}) => ({ ...defaults, roundingDefault: "10", rollType: "ADJUST_SWAP", rollOffsetDays: 5, ...over });
-async function rolledCycle(over: object = {}, dates: { nearDate: string; farDate?: string | null; offsetDays?: number | null } | null = { nearDate: "2026-12-15", farDate: FAR }) {
-  const run = await finishedCycle(rollPolicy(over), "ENTITY", false, false, async (t) => {
-    await app.fxTrade.commands.importExecutedTrades({ tenantId: t, rows: parseExecutedFile(rollFile), by: "simulator" });
+async function rolledCycle(over: object = {}, dates: { nearDate: string; farDate?: string | null; offsetDays?: number | null } | null = { nearDate: "2026-12-15", farDate: FAR },
+  opts: { level?: string; file?: string; before?: (t: TenantId) => Promise<unknown>; approve?: boolean; segregation?: boolean } = {}) {
+  const run = await finishedCycle(rollPolicy(over), opts.level ?? "ENTITY", false, opts.segregation ?? false, async (t) => {
+    await opts.before?.(t);
+    await app.fxTrade.commands.importExecutedTrades({ tenantId: t, rows: parseExecutedFile(opts.file ?? rollFile), by: "simulator" });
   });
   if (dates === null) return { ...run, recs: run.recs };
   await app.hedgeRecommendation.commands.setRollDates({ tenantId: run.t, cycleId: run.cycle, actor: run.admin, dates });
   await app.exposureManagement.commands.rerunCycle({ tenantId: run.t, cycleId: run.cycle, actor: run.admin } as never);
   await drain(app);
   const recs = await app.hedgeRecommendation.questions.recommendations(run.t, run.cycle);
-  await approveExposure(run.t, run.cycle as string);
+  if (opts.approve !== false) await approveExposure(run.t, run.cycle as string);
   return { ...run, recs };
 }
 const partsShown = (r: { parts: readonly { partNo: number; role: string; direction: string | null; amount: string; valueDate: string | null }[] }) => r.parts.map((p) => [p.partNo, p.role, p.direction, p.amount, p.valueDate]);
@@ -1622,6 +1626,141 @@ e2e("roll dates are refused when the program does not roll, are too early, or co
   await set({ nearDate: "2026-12-15", farDate: FAR });
   await set({ nearDate: "2026-12-16", farDate: FAR, offsetDays: 2 });
   assert.deepEqual([(await app.hedgeRecommendation.questions.rollParameters(run.t, run.cycle))!.nearDate, (await app.hedgeRecommendation.questions.rollParameters(run.t, run.cycle))!.offsetDays], ["2026-12-16", 2], "entering them again replaces them");
+  await app.exposureManagement.commands.rerunCycle({ tenantId: run.t, cycleId: run.cycle, actor: run.admin } as never);
+  await drain(app);
   await approveExposure(run.t, run.cycle as string);
   await assert.rejects(set({ nearDate: "2026-12-15", farDate: FAR }), /can no longer change/);
+});
+
+// Review of PR 14, point 1: the dates are locked to the run that is approved.
+const setDates = (r: { t: TenantId; cycle: never; admin: Parameters<typeof app.hedgeRecommendation.commands.setRollDates>[0]["actor"] }, dates: { nearDate: string; farDate?: string | null; offsetDays?: number | null }) =>
+  app.hedgeRecommendation.commands.setRollDates({ tenantId: r.t, cycleId: r.cycle, actor: r.admin, dates });
+const rerun = async (r: { t: TenantId; cycle: never; admin: unknown }) => {
+  await app.exposureManagement.commands.rerunCycle({ tenantId: r.t, cycleId: r.cycle, actor: r.admin } as never);
+  await drain(app);
+};
+
+e2e("roll dates edited after the run are not approved until the cycle is rerun, and then the new dates are the ones decided", async () => {
+  const run = await rolledCycle({}, { nearDate: "2026-12-15", farDate: FAR }, { approve: false });
+  assert.equal(groupOf(run.recs, "US01").roll!.farDate, FAR);
+  await setDates(run, { nearDate: "2026-12-15", farDate: "2027-01-18" });
+  await assert.rejects(approveExposure(run.t, run.cycle as string), /roll dates changed after this run's recommendations were made; rerun the cycle/);
+  assert.equal((await app.exposureManagement.questions.getCycle(run.t, run.cycle))!.exposureApprovedAt, null, "nothing was approved on the stale run");
+  await rerun(run);
+  const fresh = groupOf(await app.hedgeRecommendation.questions.recommendations(run.t, run.cycle), "US01");
+  assert.deepEqual([fresh.roll!.farDate, fresh.valueDate, fresh.parts.find((p) => p.role === "ROLL")!.valueDate], ["2027-01-18", "2027-01-18", "2027-01-18"]);
+  await approveExposure(run.t, run.cycle as string);
+  const done = await app.hedgeRecommendation.commands.decide({ tenantId: run.t, recommendationId: fresh.recommendationId, actor: run.admin, action: "ACCEPT" });
+  assert.equal(done.status, "ACCEPTED");
+  await assert.rejects(setDates(run, { nearDate: "2026-12-15", farDate: FAR }), /approved or the cycle is closed/);
+});
+
+e2e("roll dates and the exposure approval are one after the other: a date edit is refused once the approval has looked, and the approval is refused once the dates moved", async () => {
+  const run = await rolledCycle({}, { nearDate: "2026-12-15", farDate: FAR }, { approve: false });
+  const hr = app.hedgeRecommendation.commands;
+  const runId = (await app.exposureAnalysis.questions.currentRun(run.t, run.cycle))!.runId;
+  // The approval looked first: the dates are locked for that run until it lets go.
+  assert.deepEqual(await hr.checkExposureApproval(run.t, run.cycle, runId), { allowed: true });
+  await assert.rejects(setDates(run, { nearDate: "2026-12-16", farDate: FAR }), /locked; rerun the cycle first/);
+  await hr.releaseExposureCheck(run.t, run.cycle, runId);
+  // The edit came first: the approval refuses, and a refused approval leaves nothing locked.
+  await setDates(run, { nearDate: "2026-12-16", farDate: FAR });
+  const stale = await hr.checkExposureApproval(run.t, run.cycle, runId);
+  assert.equal(stale.allowed, false);
+  await setDates(run, { nearDate: "2026-12-16", farDate: "2027-01-18" });
+  // Both at once, repeatedly: whichever wins, an approved run never carries dates other than its recommendations were made from.
+  for (let i = 0; i < 3; i++) {
+    const r = await rolledCycle({}, { nearDate: "2026-12-15", farDate: FAR }, { approve: false });
+    const settled = await Promise.allSettled([approveExposure(r.t, r.cycle as string), setDates(r, { nearDate: "2026-12-15", farDate: "2027-01-18" })]);
+    assert.equal(settled.filter((s) => s.status === "fulfilled").length, 1, `exactly one of the approval and the edit wins: ${JSON.stringify(settled.map((s) => s.status))}`);
+    const cyc = (await app.exposureManagement.questions.getCycle(r.t, r.cycle))!;
+    const used = groupOf(await app.hedgeRecommendation.questions.recommendations(r.t, r.cycle), "US01").roll!;
+    const entered = (await app.hedgeRecommendation.questions.rollParameters(r.t, r.cycle))!;
+    if (cyc.exposureApprovedAt !== null) assert.equal(used.farDate, entered.farDate ?? used.farDate, "approved: the dates are the ones the recommendations were made from");
+    else assert.equal(entered.farDate, "2027-01-18", "not approved: the edit won and the cycle needs a rerun");
+  }
+});
+
+e2e("a refused Approve Exposure does not leave the roll dates locked", async () => {
+  const run = await rolledCycle({}, { nearDate: "2026-12-15", farDate: FAR }, { approve: false, segregation: true });
+  await assert.rejects(approveExposure(run.t, run.cycle as string), /segregation of duties|cannot approve/i, "the person who started the cycle may not approve its exposure");
+  await setDates(run, { nearDate: "2026-12-15", farDate: "2027-01-18" });
+});
+
+// Review of PR 14, point 2: each entity closes its own near leg; the far trades are booked by the group's trading entity.
+const entityFile = [
+  "trade_id,execution_platform_id,trading_entity,counterparty,trade_date,value_date,deal_currency,deal_amount,settlement_currency,settlement_amount,instrument,buy_sell,hedging_program_id,pre_trade_reference",
+  "E1,SIMFX,US01,Sim Bank,2026-11-10,2026-12-15,EUR,300.0000,USD,330.0000,FORWARD,SELL,BS,",
+  "E2,SIMFX,DE01,Sim Bank,2026-11-10,2026-12-15,EUR,100.0000,USD,110.0000,FORWARD,BUY,BS,",
+  "E3,SIMFX,US01,Sim Bank,2026-11-10,2026-12-18,EUR,200.0000,USD,220.0000,FORWARD,SELL,BS,",
+].join("\n");
+// DE01 does not execute hedges in the shared test tenant; these tests make it one.
+const deExecutes = (t: TenantId) => app.masterData.commands.applyEntities({
+  tenantId: t, sourceSystem: "erp", asOf: asOfDate("2026-02-01"), mode: "SNAPSHOT", by: "test",
+  rows: [entity("G"), entity("AMER", { type: "REGION", parentCode: "G" }), entity("EMEA", { type: "REGION", parentCode: "G" }), legal("US01", "USD", "AMER"), { ...legal("DE01", "EUR", "EMEA"), isHedgeExecutionEntity: true }] as never,
+});
+const naturalGroup = (recs: readonly { currencyPair: string }[]) => recs.find((r) => r.currencyPair === "EUR-USD") as Awaited<ReturnType<typeof finishedCycle>>["recs"][number];
+const entities = (r: { parts: readonly { partNo: number; role: string; tradingEntityCode: string | null; direction: string | null; amount: string; valueDate: string | null }[] }) =>
+  r.parts.filter((p) => p.role !== "ADJUSTMENT").map((p) => [p.role, p.tradingEntityCode, p.direction, p.amount, p.valueDate]);
+
+e2e("roll: with several entities in a netting group each closes its own near leg, and the group's trading entity books the far trades", async () => {
+  // At the group level the exposure currency is EUR. US01 has sold 300 (15 Dec) and 200 (18 Dec), DE01 has bought 100 (15 Dec); DE01 is the group's trading entity.
+  const run = await rolledCycle({ tradingEntityCode: "DE01" }, { nearDate: "2026-12-15", farDate: FAR }, { level: "GROUP_NATURAL", file: entityFile, before: deExecutes });
+  const g = naturalGroup(run.recs);
+  assert.deepEqual(entities(g), [
+    ["CLOSE_OUT", "DE01", "SELL", "100.00", "2026-12-15"], ["CLOSE_OUT", "US01", "BUY", "300.00", "2026-12-15"], ["CLOSE_OUT", "US01", "BUY", "200.00", "2026-12-18"],
+    ["ROLL", "DE01", "SELL", "400.00", FAR]], "DE01's own 100 is not netted against US01's 300 on the same date");
+  const done = await app.hedgeRecommendation.commands.decide({ tenantId: run.t, recommendationId: g.recommendationId, actor: run.admin, action: "ACCEPT" });
+  const pre = (await app.fxTrade.questions.preTrades(run.t, { cycleId: run.cycle })).filter((p) => p.recommendationId === done.recommendationId);
+  assert.deepEqual(pre.filter((p) => p.partNo! <= 4).map((p) => [p.partNo, p.tradingEntityCode]), [[1, "DE01"], [2, "US01"], [3, "US01"], [4, "DE01"]], "the pre-trades are booked by those entities");
+
+  // Booked as one far trade, the close-outs are the same and still each their own entity's.
+  const combined = naturalGroup((await rolledCycle({ tradingEntityCode: "DE01", rollAdjustment: "COMBINED" }, { nearDate: "2026-12-15", farDate: FAR }, { level: "GROUP_NATURAL", file: entityFile, before: deExecutes })).recs);
+  assert.deepEqual(entities(combined).slice(0, 3), entities(g).slice(0, 3));
+  const far = combined.parts[3]!;
+  assert.deepEqual([far.role, far.tradingEntityCode, far.valueDate ?? combined.valueDate], ["COMBINED", "DE01", FAR]);
+  assert.deepEqual(combined.parts.map((p) => p.partNo), [1, 2, 3, 4]);
+});
+
+e2e("roll: at entity level the entity that holds the hedge books both the close-out and the far trades", async () => {
+  const run = await rolledCycle();
+  assert.deepEqual(groupOf(run.recs, "US01").parts.map((p) => p.tradingEntityCode), ["US01", "US01", "US01", "US01"]);
+});
+
+e2e("roll: with no entity to book the far trades, nothing is recommended, but a package of close-outs alone is still booked by the holders", async () => {
+  const none = naturalGroup((await rolledCycle({ tradingEntityCode: null }, { nearDate: "2026-12-15", farDate: FAR }, { level: "GROUP_NATURAL", file: entityFile, before: deExecutes })).recs);
+  assert.deepEqual([none.action, none.reason, none.parts.length], ["NONE", "NO_TRADING_ENTITY", 0]);
+});
+
+// Review of PR 14, point 3: an entered far date that is closed is shown, with the next joint business day, and moved only when the user enters another.
+const holidayOn = (currencies: Record<string, string | null>) => (t: TenantId) => loadCalendars(t, Object.entries(currencies).map(([currencyCode, holiday]) => ({
+  currencyCode, weekendDays: ["SAT", "SUN"] as ("SAT" | "SUN")[], coveredThrough: "2027-12-31", holidays: holiday === null ? [] : [{ date: holiday, name: "Holiday" }],
+})));
+
+e2e("roll: a far date that is a holiday in one currency is not used; the group says which date and currency, offers the next joint business day, and uses a new date only once the user enters it", async () => {
+  for (const [closed, expected] of [["EUR", ["EUR"]], ["USD", ["USD"]]] as const) {
+    const run = await rolledCycle({}, { nearDate: "2026-12-15", farDate: FAR }, { before: holidayOn({ EUR: closed === "EUR" ? FAR : null, USD: closed === "USD" ? FAR : null }) });
+    const us = groupOf(run.recs, "US01");
+    assert.deepEqual([us.action, us.reason, us.parts.length, us.valueDate, us.direction, us.amount], ["NONE", "FAR_DATE_CLOSED", 0, null, null, null], "no trade on the closed date");
+    assert.deepEqual(us.rollIssue, { date: FAR, closedCurrencies: expected, suggestedDate: "2027-01-18" }, `${closed} closed`);
+    assert.equal((await app.hedgeRecommendation.questions.rollParameters(run.t, run.cycle))!.farDate, FAR, "the entered date is not changed for the user");
+    await assert.rejects(app.hedgeRecommendation.commands.decide({ tenantId: run.t, recommendationId: us.recommendationId, actor: run.admin, action: "ACCEPT" }), /cannot be decided/);
+  }
+  // The user chooses the suggested date: only then is there a package, on that date.
+  const first = await rolledCycle({}, { nearDate: "2026-12-15", farDate: FAR }, { approve: false, before: holidayOn({ EUR: FAR, USD: null }) });
+  await setDates(first, { nearDate: "2026-12-15", farDate: "2027-01-18" });
+  await rerun(first);
+  const moved = groupOf(await app.hedgeRecommendation.questions.recommendations(first.t, first.cycle), "US01");
+  assert.deepEqual([moved.action, moved.rollIssue, moved.valueDate, moved.roll!.farDate, moved.parts.find((p) => p.role === "ROLL")!.valueDate], ["HEDGE", null, "2027-01-18", "2027-01-18", "2027-01-18"]);
+});
+
+e2e("roll: a recommendation made from roll dates that have since changed cannot be decided", async () => {
+  const run = await rolledCycle();
+  const us = groupOf(run.recs, "US01");
+  // The approval and the edit exclude each other, so this cannot happen through the commands; it is the last guard if it ever does.
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  try { await client.query("UPDATE hedge_recommendation.roll_parameters SET revision = revision + 1 WHERE tenant_id = $1", [run.t]); } finally { await client.end(); }
+  await assert.rejects(app.hedgeRecommendation.commands.decide({ tenantId: run.t, recommendationId: us.recommendationId, actor: run.admin, action: "ACCEPT" }), /roll dates changed after this recommendation was made/);
+  assert.equal((await app.hedgeRecommendation.questions.getRecommendation(run.t, us.recommendationId))!.status, "OPEN", "the claim was rolled back");
 });

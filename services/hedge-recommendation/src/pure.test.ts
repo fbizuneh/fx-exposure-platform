@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { D, addTenor, amountThresholdNeed, finishRecommendation, pairKey, recommend, roundDownToStep, valueDateFor, businessDaysBefore, calendarGaps, noCalendar, rollModifiedFollowing, rollWithSpan, toBusinessCalendar, addDays, combineRoll, planRoll } from "./calc.ts";
+import { D, addTenor, amountThresholdNeed, finishRecommendation, pairKey, recommend, roundDownToStep, valueDateFor, businessDaysBefore, calendarGaps, noCalendar, rollModifiedFollowing, rollWithSpan, toBusinessCalendar, addDays, combineRoll, planRoll, closedCurrencies, nextJointBusinessDay } from "./calc.ts";
 import { policyProblems } from "./policy.ts";
 import { rollDatesProblems } from "./roll.ts";
 
@@ -249,7 +249,7 @@ test("a policy with the amount-threshold strategy needs a threshold, and the thr
 });
 
 // The roll (decision 0021).
-const leg = (valueDate: string, exposureAmount: string) => ({ valueDate, exposureAmount });
+const leg = (valueDate: string, exposureAmount: string, entityCode = "US01") => ({ valueDate, exposureAmount, entityCode });
 const shown = (p: ReturnType<typeof planRoll>) => ({ closeOuts: p.closeOuts.map((c) => [c.valueDate, c.direction, c.amount.toString()]), roll: p.roll && [p.roll.direction, p.roll.amount.toString()], maturing: p.maturing.toString() });
 
 test("a roll closes each value date in the window on its own and puts the total back at the far date", () => {
@@ -300,4 +300,24 @@ test("a policy's roll settings are checked", () => {
   assert.deepEqual(policyProblems({ ...ok, rollType: "ADJUST_SWAP", rollAdjustment: "COMBINED", rollOffsetDays: 3 }), []);
   assert.equal(policyProblems({ ...ok, rollType: "SWAP" as never, rollAdjustment: "SPLIT" as never, rollOffsetDays: 1.5 }).length, 3);
   assert.equal(policyProblems({ ...ok, rollOffsetDays: -1 }).length, 1);
+});
+
+test("each entity closes its own near leg: the same date held by two entities gives two close-outs, never one netted", () => {
+  const legs = [leg("2026-12-15", "-300", "US01"), leg("2026-12-15", "110", "DE01"), leg("2026-12-15", "-50", "US01"), leg("2026-12-18", "-200", "US01")];
+  const p = planRoll(legs, "2026-12-15", 5);
+  assert.deepEqual(p.closeOuts.map((c) => [c.valueDate, c.entityCode, c.direction, c.amount.toString()]), [["2026-12-15", "DE01", "SELL", "110"], ["2026-12-15", "US01", "BUY", "350"], ["2026-12-18", "US01", "BUY", "200"]]);
+  assert.equal(p.maturing.toString(), "-440", "the roll is the total of everything maturing, whoever holds it");
+  assert.deepEqual(planRoll([leg("2026-12-15", "-100", "US01"), leg("2026-12-15", "100", "DE01")], "2026-12-15", 0).closeOuts.length, 2, "two entities that offset each other still each close theirs");
+});
+
+test("a far date is closed when any currency's calendar is closed on it, and the next joint business day is the first open in all", () => {
+  const cal = (currency: string, holidays: string[]) => toBusinessCalendar({ currency, weekendDays: ["SAT", "SUN"], coveredThrough: "2027-12-31", holidays: holidays.map((date) => ({ date })) });
+  const eur = cal("EUR", ["2027-01-15"]), usd = cal("USD", ["2027-01-18"]);
+  assert.deepEqual(closedCurrencies("2027-01-15", [eur, usd]), ["EUR"]);
+  assert.deepEqual(closedCurrencies("2027-01-18", [eur, usd]), ["USD"]);
+  assert.deepEqual(closedCurrencies("2027-01-16", [eur, usd]), ["EUR", "USD"], "a Saturday is closed in both");
+  assert.deepEqual(closedCurrencies("2027-01-14", [eur, usd]), []);
+  assert.equal(nextJointBusinessDay("2027-01-15", [eur, usd]), "2027-01-19", "the 16th and 17th are the weekend and the 18th is a USD holiday");
+  assert.equal(nextJointBusinessDay("2027-01-14", [eur, usd]), "2027-01-14", "an open day is its own next day");
+  assert.deepEqual(closedCurrencies("2027-01-16", [noCalendar("EUR")]), ["EUR"], "without a calendar only weekends are closed");
 });

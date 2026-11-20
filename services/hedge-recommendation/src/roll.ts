@@ -2,6 +2,7 @@
 import type { CycleId, TenantId } from "@shared/kernel";
 import type { Actor } from "@services/identity/contract";
 import { require_, who } from "./access.ts";
+import { lockCycleDecisions } from "./approval.ts";
 import { addDays } from "./calc.ts";
 import { recordChange } from "./change-record.ts";
 import { q, type Db } from "./db.ts";
@@ -53,13 +54,48 @@ export function rollCommands(db: Db, c: Collaborators, clock: () => Date) {
     const problems = rollDatesProblems(input.dates, cycle.asOf, policy.rollOffsetDays);
     if (problems.length > 0) throw new RollDatesInvalid(problems);
     const d = input.dates;
+    const run = await c.analysis.currentRun(tenant, input.cycleId);
     await db.transaction().execute(async (tx) => {
+      // The approval of the exposure takes this lock to check the dates and lock them for the run it approves, so an edit is wholly before it (and the approval then
+      // refuses until the cycle is rerun) or wholly after it (and is refused here).
+      await lockCycleDecisions(tx, tenant, input.cycleId);
+      const locked = await q(tx).selectFrom("roll_locks").select("run_id").where("tenant_id", "=", tenant).where("cycle_id", "=", input.cycleId).executeTakeFirst();
+      if (locked && run && locked.run_id === run.runId) throw new RollDatesInvalid(["the exposure is being approved on the current run, so its roll dates are locked; rerun the cycle first"]);
+      const before = await q(tx).selectFrom("roll_parameters").select("revision").where("tenant_id", "=", tenant).where("cycle_id", "=", input.cycleId).executeTakeFirst();
       await q(tx).deleteFrom("roll_parameters").where("tenant_id", "=", tenant).where("cycle_id", "=", input.cycleId).execute();
       await q(tx).insertInto("roll_parameters").values({
         tenant_id: tenant, program_id: cycle.programId, cycle_id: input.cycleId, near_date: d.nearDate, far_date: d.farDate ?? null, offset_days: d.offsetDays ?? null, set_by: who(input.actor), set_at: clock(),
+        revision: (before?.revision ?? 0) + 1,
       }).execute();
       await recordChange(tx, { tenantId: tenant, programId: cycle.programId, actor: who(input.actor), action: "roll-dates.set", targetType: "cycle", targetId: input.cycleId, fields: ["nearDate", "farDate", "offsetDays"] });
     });
   }
-  return { setRollDates };
+
+  /**
+   * Asked by Exposure Management before it approves the exposure of a run (decision 0021). A program that rolls may be approved only when the run's recommendations were
+   * made from the roll dates as they stand now; it then locks the dates for that run. A run with no groups has no recommendations and passes.
+   */
+  async function checkExposureApproval(tenant: TenantId, cycleId: CycleId, runId: string): Promise<{ allowed: true } | { allowed: false; reason: string }> {
+    const cycle = await c.management.getCycle(tenant, cycleId);
+    if (!cycle) return { allowed: true };
+    const policy = await readPolicy(db, tenant, cycle.programId);
+    if (policy.rollType !== "ADJUST_SWAP") return { allowed: true };
+    const groups = await c.analysis.netExposures(tenant, runId);
+    return db.transaction().execute(async (tx) => {
+      await lockCycleDecisions(tx, tenant, cycleId);
+      const recs = await q(tx).selectFrom("recommendations").select("roll_revision").where("tenant_id", "=", tenant).where("cycle_id", "=", cycleId).where("run_id", "=", runId).where("status", "<>", "SUPERSEDED").execute();
+      if (recs.length === 0 && groups.length > 0) return { allowed: false as const, reason: "the recommendations for this run are not made yet; try again shortly" };
+      const now = await q(tx).selectFrom("roll_parameters").select("revision").where("tenant_id", "=", tenant).where("cycle_id", "=", cycleId).executeTakeFirst();
+      if (recs.some((r) => r.roll_revision !== (now?.revision ?? null))) return { allowed: false as const, reason: "the roll dates changed after this run's recommendations were made; rerun the cycle before approving the exposure" };
+      await q(tx).deleteFrom("roll_locks").where("tenant_id", "=", tenant).where("cycle_id", "=", cycleId).execute();
+      await q(tx).insertInto("roll_locks").values({ tenant_id: tenant, program_id: cycle.programId, cycle_id: cycleId, run_id: runId, locked_at: clock() }).execute();
+      return { allowed: true as const };
+    });
+  }
+
+  /** The approval did not happen: unlock the dates again. One already gone is not an error. */
+  async function releaseExposureCheck(tenant: TenantId, cycleId: CycleId, runId: string): Promise<void> {
+    await q(db).deleteFrom("roll_locks").where("tenant_id", "=", tenant).where("cycle_id", "=", cycleId).where("run_id", "=", runId).execute();
+  }
+  return { setRollDates, checkExposureApproval, releaseExposureCheck };
 }
