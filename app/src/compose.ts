@@ -1,6 +1,7 @@
 // Builds every service over one database server, each in its own schema, and hands each the others' questions it needs.
 // This is the only place services meet; none of them imports another's code, only its contract.
 import type { Actor } from "@services/identity/contract";
+import { connect as connectAudit, createAudit } from "../../services/audit/src/index.ts";
 import { connect as connectDataSource, createDataSource } from "../../services/data-source/src/index.ts";
 import { connect as connectExposureAnalysis, createExposureAnalysis } from "../../services/exposure-analysis/src/index.ts";
 import { connect as connectExposureManagement, createExposureManagement } from "../../services/exposure-management/src/index.ts";
@@ -15,6 +16,7 @@ export const SCHEDULER: Actor = { kind: "platform", platformUserId: "scheduler" 
 
 export function composeApp(connectionString: string, now: () => Date = () => new Date()) {
   const dbs = {
+    audit: connectAudit(connectionString),
     identity: connectIdentity(connectionString),
     masterData: connectMasterData(connectionString),
     fxRate: connectFxRate(connectionString),
@@ -25,6 +27,7 @@ export function composeApp(connectionString: string, now: () => Date = () => new
     hedgeRecommendation: connectHedgeRecommendation(connectionString),
   };
   const identity = createIdentity(dbs.identity);
+  const audit = createAudit(dbs.audit, { access: identity.questions }, { now });
   const masterData = createMasterData(dbs.masterData);
   const fxRate = createFxRate(dbs.fxRate, { now });
   const dataSource = createDataSource(dbs.dataSource, { masterData: masterData.questions, now });
@@ -48,7 +51,7 @@ export function composeApp(connectionString: string, now: () => Date = () => new
     createPreTrades: fxTrade.commands.createPreTrades,
   }, { now });
   return {
-    identity, masterData, fxRate, dataSource, exposureManagement, exposureAnalysis, fxTrade, hedgeRecommendation,
+    audit, identity, masterData, fxRate, dataSource, exposureManagement, exposureAnalysis, fxTrade, hedgeRecommendation,
     async close(): Promise<void> {
       await Promise.all(Object.values(dbs).map((d) => d.destroy()));
     },

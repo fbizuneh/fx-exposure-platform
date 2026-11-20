@@ -1,4 +1,5 @@
 // Published questions and events of Exposure Management. Other services import this file, never src/.
+import type { ChangeRecordFields } from "@services/audit/contract";
 import type { AsOfDate, CycleId, ProgramId, TenantId } from "@shared/kernel";
 
 export const PROGRAM_TYPES = ["BALANCE_SHEET", "CASH_FLOW", "BUDGET_TO_CASH", "IN_HOUSE_BANK"] as const;
@@ -158,4 +159,11 @@ export interface ProgramChanged extends Announcement {
   readonly type: "exposure-management.program-changed";
   readonly programId: ProgramId;
 }
-export type ExposureManagementEvents = CycleInitiated | CycleCompleted | ExposureApproved | CycleApproved | CycleSkipped | CycleDeleted | ProgramChanged;
+
+/** A change record for Audit (decision 0012): who did what to which record. Identifiers and field names only. */
+export interface ExposureManagementChangeRecorded extends ChangeRecordFields {
+  readonly type: "exposure-management.change-recorded";
+  readonly eventId: string;
+  readonly occurredAt: string;
+}
+export type ExposureManagementEvents = CycleInitiated | CycleCompleted | ExposureApproved | CycleApproved | CycleSkipped | CycleDeleted | ProgramChanged | ExposureManagementChangeRecorded;

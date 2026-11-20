@@ -4,8 +4,10 @@ import { randomUUID } from "node:crypto";
 import type { MasterDataEvents } from "../contract/index.ts";
 import { q, type Db, type Queryable } from "./db.ts";
 
-export async function announce(tx: Queryable, event: Omit<MasterDataEvents, "eventId" | "occurredAt">): Promise<MasterDataEvents> {
-  const full: MasterDataEvents = { ...event, eventId: randomUUID(), occurredAt: new Date().toISOString() };
+type NewEvent = MasterDataEvents extends infer E ? (E extends MasterDataEvents ? Omit<E, "eventId" | "occurredAt"> : never) : never;
+
+export async function announce(tx: Queryable, event: NewEvent): Promise<MasterDataEvents> {
+  const full = { ...event, eventId: randomUUID(), occurredAt: new Date().toISOString() } as MasterDataEvents;
   await q(tx)
     .insertInto("outbox")
     .values({ event_id: full.eventId, tenant_id: full.tenantId, type: full.type, payload: JSON.stringify(full) })

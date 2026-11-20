@@ -5,6 +5,7 @@ import { PROGRAM_TYPES, type ProgramType } from "../contract/index.ts";
 import type { Actor, ProgramDisabled, ProgramEnabled } from "@services/identity/contract";
 import { require_, who, type IdentityPort } from "./access.ts";
 import { q, type Db } from "./db.ts";
+import { recordChange } from "./change-record.ts";
 import { announce } from "./outbox.ts";
 import { combinationProblem, displayCurrencyOf, nettingLevelOf, overridesOf, realDate, validateSettings, type SettingsInput } from "./rules.ts";
 import { programId as toProgramId } from "@shared/kernel";
@@ -79,6 +80,7 @@ export function programCommands(db: Db, access: IdentityPort) {
         }).execute();
         await q(tx).insertInto("program_settings").values(settingsRow(input.tenantId, input.programId, input.settings, input.effectiveFrom, who(input.actor))).execute();
         await announce(tx, { type: "exposure-management.program-changed", tenantId: input.tenantId, programId: toProgramId(input.programId) });
+        await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(input.programId), actor: who(input.actor), action: "program.defined", targetType: "program", targetId: input.programId, fields: ["name", "type", "settings"] });
       });
     },
 
@@ -95,6 +97,7 @@ export function programCommands(db: Db, access: IdentityPort) {
         await q(tx).updateTable("program_settings").set({ valid_to: input.effectiveFrom }).where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).where("valid_to", "is", null).execute();
         await q(tx).insertInto("program_settings").values(settingsRow(input.tenantId, input.programId, input.settings, input.effectiveFrom, who(input.actor))).execute();
         await announce(tx, { type: "exposure-management.program-changed", tenantId: input.tenantId, programId: toProgramId(input.programId) });
+        await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(input.programId), actor: who(input.actor), action: "program.settings-changed", targetType: "program", targetId: input.programId, fields: ["settings"] });
       });
     },
 

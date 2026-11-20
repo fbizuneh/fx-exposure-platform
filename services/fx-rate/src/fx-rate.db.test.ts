@@ -1,5 +1,6 @@
 // Database tests. They need a PostgreSQL database whose name ends in _test, because they reset the
 // fx_rate schema. Set TEST_DATABASE_URL (docker compose up -d starts one). Without it they are skipped.
+import type { FxRateEvents } from "../contract/index.ts";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -40,7 +41,11 @@ const fwd = (base: string, quote: string, tenor: string, spotRate: string, point
 const send = (t: TenantId, rows: RateRow[], date = D1, source = "bank") => fx.commands.loadRates({ tenantId: t, source, businessDate: date, rows, by: "test" });
 const ask = (t: TenantId, base: string, quote: string, over: { asOf?: typeof D1; tenor?: string; source?: string } = {}) =>
   fx.questions.getRate({ tenantId: t, base, quote, asOf: over.asOf ?? D1, ...(over.tenor ? { tenor: over.tenor } : {}), ...(over.source ? { source: over.source } : {}) });
-const events = async (t: TenantId) => (await fx.outbox.pending(1000)).filter((e) => e.tenantId === t);
+const events = async (t: TenantId) => {
+  const loaded: Extract<FxRateEvents, { type: "fx-rate.loaded" }>[] = []; // the announcement other services use; change records are checked in the Audit tests
+  for (const e of await fx.outbox.pending(1000)) if (e.tenantId === t && e.type === "fx-rate.loaded") loaded.push(e);
+  return loaded;
+};
 
 dbTest("direct, inverse and identity", async () => {
   const t = newTenant();
@@ -94,6 +99,14 @@ dbTest("a repeated load changes nothing; a corrected load for the same date is t
   assert.equal((await events(t)).length, 2);
   const rows = await q(db).selectFrom("rates").select("rate_id").where("tenant_id", "=", t).execute();
   assert.equal(rows.length, 2, "the first load is kept");
+});
+
+dbTest("a load by a person is told to Audit; a feed's routine load is not", async () => {
+  const t = newTenant();
+  await send(t, [spot("EUR", "USD", "1.08")]); // by "test": a feed
+  await fx.commands.loadRates({ tenantId: t, source: "manual", businessDate: D1, rows: [spot("GBP", "USD", "1.27")], by: "user:alice" });
+  const told = (await fx.outbox.pending(1000)).flatMap((e) => (e.tenantId === t && e.type === "fx-rate.change-recorded" ? [[e.action, e.actor, e.programId, e.fields]] : []));
+  assert.deepEqual(told, [["fx-rates.loaded", "user:alice", null, []]]);
 });
 
 dbTest("an invalid load writes nothing", async () => {

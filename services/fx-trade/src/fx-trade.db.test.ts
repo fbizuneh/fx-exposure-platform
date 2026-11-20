@@ -59,7 +59,9 @@ function openCycle(t: TenantId, over: Partial<Cycle> = {}): CycleId {
   return c;
 }
 const approved = (t: TenantId, c: CycleId) => ({ eventId: randomUUID(), tenantId: t, cycleId: c, programId: programId("BS"), type: "exposure-management.cycle-approved" as const, occurredAt: "x" });
-const events = async (t: TenantId) => (await ft.outbox.pending(1000)).filter((e) => e.tenantId === t);
+const everything = async (t: TenantId) => (await ft.outbox.pending(1000)).filter((e) => e.tenantId === t);
+const events = async (t: TenantId) => (await everything(t)).filter((e) => e.type !== "fx-trade.change-recorded"); // what other services react to
+const changes = async (t: TenantId) => (await everything(t)).flatMap((e) => (e.type === "fx-trade.change-recorded" ? [`${e.action} ${e.targetType} by ${e.actor}`] : [])); // what Audit is told
 
 /** A released, sent pre-trade for a forward SELL EUR 1,000,000. */
 async function sentPreTrade(t: TenantId, body: NewPreTradeBody = fwd()) {
@@ -146,6 +148,8 @@ dbTest("manual pre-trades: permission, enabled program, release by a user; recom
 
   assert.equal(await ft.commands.cancelPreTrade({ tenantId: t, preTradeId: m.preTradeId, actor: USER }), true);
   assert.equal(await ft.commands.cancelPreTrade({ tenantId: t, preTradeId: m.preTradeId, actor: USER }), false);
+  const who = `user:${(USER as { userId: string }).userId}`;
+  assert.deepEqual(await changes(t), [`pre-trade.created pre-trade by ${who}`, `pre-trade.released pre-trade by ${who}`, `pre-trade.cancelled pre-trade by ${who}`], "each change once; a repeat or a refusal records nothing");
   const s = await sentPreTrade(t);
   await ft.commands.importExecutedTrades({ tenantId: t, rows: csv(line("F1", { ref: s.reference })), by: "bank" });
   await assert.rejects(ft.commands.cancelPreTrade({ tenantId: t, preTradeId: s.preTradeId, actor: USER }), /cannot be cancelled/);

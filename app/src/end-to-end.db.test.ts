@@ -25,7 +25,7 @@ before(async () => {
   if (!enabled) return;
   const client = new pg.Client({ connectionString: url });
   await client.connect();
-  for (const s of ["identity", "master_data", "fx_rate", "data_source", "exposure_management", "exposure_analysis", "fx_trade"]) await client.query(`DROP SCHEMA IF EXISTS ${s} CASCADE`);
+  for (const s of ["audit", "identity", "master_data", "fx_rate", "data_source", "exposure_management", "exposure_analysis", "fx_trade"]) await client.query(`DROP SCHEMA IF EXISTS ${s} CASCADE`);
   await client.end();
   await migrate(url!);
   app = composeApp(url!, () => clock.now);
@@ -576,4 +576,107 @@ e2e("approval settles a decision that never got its pre-trade: it lapses, and no
   const after = (await app.hedgeRecommendation.questions.getRecommendation(t, rec.recommendationId))!;
   assert.deepEqual([after.status, after.decidedBy, after.preTradeId], ["LAPSED", null, null]);
   assert.deepEqual(await drafts(t, cycle, rec.recommendationId), []);
+});
+
+/** The tenant's whole trail, oldest first, read as its admin. */
+const trailOf = async (t: TenantId, over: object = {}) => (await app.audit.questions.trail({ tenantId: t, actor: admins.get(t)!, limit: 500, ...over })).records;
+
+e2e("every governed change reaches the audit trail with who did it, in order; people's changes are in it and routine loads are not; the chain verifies", async () => {
+  const { t, admin, cycle, recs } = await finishedCycle(defaults); // defines the program, sets the policy, starts the cycle, approves the exposure
+  const rec = recs.find((r) => r.action === "HEDGE")!;
+  const adminLabel = (await trailOf(t)).find((r) => r.action === "program.defined")!.actor;
+  assert.ok(adminLabel.startsWith("user:"));
+
+  // A person changes master data; a feed does the same (finishedCycle loaded its entities as "test").
+  const person = adminLabel;
+  await app.masterData.commands.applyCurrencies({ tenantId: t, sourceSystem: "manual", asOf: D0, mode: "PARTIAL", rows: [{ code: "BRL", isNdf: true }] as never, by: person });
+  await app.masterData.commands.applyCurrencies({ tenantId: t, sourceSystem: "erp", asOf: D0, mode: "PARTIAL", rows: [{ code: "INR", isNdf: true }] as never, by: "erp-sync" });
+
+  await drain(app); // positions follow arrival at Audit, so each step is delivered before the next to keep this list in the order things happened
+  await app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "ACCEPT" });
+  await drain(app);
+  await app.exposureManagement.commands.approveCycle({ tenantId: t, cycleId: cycle as string, actor: admin });
+  await drain(app);
+  const exported = await app.fxTrade.commands.exportPreTrades({ tenantId: t, actor: admin });
+  assert.equal(exported.preTradeIds.length, 1);
+  await drain(app);
+
+  const trail = await trailOf(t);
+  const line = (r: (typeof trail)[number]) => `${r.action} ${r.targetType}${r.programId ? ` [${r.programId}]` : ""}`;
+  assert.deepEqual(trail.map(line), [
+    "program.enabled program [BS]", "user.added user", "program.defined program [BS]", "hedge-policy.set hedge-policy [BS]",
+    "cycle.started cycle [BS]", "exposure.approved cycle [BS]", "master-data.currency-changed change-set",
+    "recommendation.accepted recommendation [BS]", "cycle.approved cycle [BS]", "pre-trade.sent pre-trade [BS]",
+  ], "in order; the feed's currency load is not there, the person's is");
+  assert.deepEqual(trail.filter((r) => ["cycle.started", "exposure.approved", "cycle.approved", "recommendation.accepted"].includes(r.action)).map((r) => [r.actor === adminLabel, r.targetId === (r.targetType === "cycle" ? cycle : rec.recommendationId)]), Array(4).fill([true, true]));
+  assert.deepEqual(trail.find((r) => r.action === "hedge-policy.set")!.fields, ["policy"], "the first policy for a program has no earlier one to compare with");
+  assert.ok(trail.every((r, i) => r.seq === i + 1 && r.tenantId === t));
+  assert.deepEqual(await app.audit.questions.verify(t, admin), { ok: true, checked: trail.length, brokenAtSeq: null });
+
+  // A later change to the policy names only the fields that changed.
+  await app.hedgeRecommendation.commands.setPolicy({ tenantId: t, programId: programId("BS"), actor: admin, policy: { ...defaults, defaultRatio: "0.5", tenor: "3M" } as never });
+  await drain(app);
+  assert.deepEqual((await trailOf(t, { action: "hedge-policy.set" })).map((r) => r.fields), [["policy"], ["defaultRatio", "tenor"]]);
+
+  // Delivering any record again, as a repeated event would, adds nothing.
+  const before = (await trailOf(t)).length;
+  for (const r of await trailOf(t)) assert.equal(await app.audit.commands.record({ type: "exposure-management.change-recorded", eventId: r.recordId, occurredAt: r.occurredAt, tenantId: t, programId: r.programId, actor: r.actor, action: r.action, targetType: r.targetType, targetId: r.targetId, fields: r.fields }), "DUPLICATE");
+  assert.equal((await trailOf(t)).length, before);
+});
+
+e2e("a decision that loses a race, or a retry of the one that won, leaves exactly one record; refused commands leave none", async () => {
+  const { t, admin, cycle, recs } = await finishedCycle(defaults);
+  const rec = recs.find((r) => r.action === "HEDGE")!;
+  const results = await Promise.allSettled([
+    app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "ACCEPT" }),
+    app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "DISMISS" }),
+  ]);
+  assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+  await drain(app);
+  const decided = (await trailOf(t)).filter((r) => r.targetType === "recommendation");
+  assert.equal(decided.length, 1, "only the decision that won is recorded");
+  assert.ok(["recommendation.accepted", "recommendation.dismissed"].includes(decided[0]!.action));
+
+  const fresh = await finishedCycle(defaults);
+  const r2 = fresh.recs.find((r) => r.action === "HEDGE")!;
+  const down = withFxTrade(async () => { throw new Error("FX Trade unreachable"); });
+  try { await assert.rejects(down.hr.commands.decide({ tenantId: fresh.t, recommendationId: r2.recommendationId, actor: fresh.admin, action: "ACCEPT" }), /unreachable/); } finally { await down.done(); }
+  await app.hedgeRecommendation.commands.decide({ tenantId: fresh.t, recommendationId: r2.recommendationId, actor: fresh.admin, action: "ACCEPT" }); // the retry finishes the claimed decision
+  await assert.rejects(app.hedgeRecommendation.commands.decide({ tenantId: fresh.t, recommendationId: r2.recommendationId, actor: fresh.admin, action: "ACCEPT" }), /cannot be decided/);
+  await assert.rejects(app.exposureManagement.commands.rerunCycle({ tenantId: fresh.t, cycleId: fresh.cycle as string, actor: fresh.admin } as never), /cannot be recalculated/);
+  await drain(app);
+  assert.equal((await trailOf(fresh.t)).filter((r) => r.targetType === "recommendation").length, 1, "one accept, however many tries");
+  assert.equal((await trailOf(fresh.t)).filter((r) => r.action === "cycle.rerun").length, 0, "a refused command records nothing");
+  assert.equal(cycle === fresh.cycle, false);
+});
+
+e2e("who may read the trail: approvers and admins, not viewers or reviewers; every use of the platform role is recorded, and users and roles are recorded as they change", async () => {
+  const { t, admin } = await finishedCycle(defaults);
+  const ops = (await app.identity.commands.createPlatformUser({ issuer: "platform", externalSubject: randomUUID() })) as string;
+  const person = async (role: "VIEWER" | "TREASURY_REVIEWER" | "TREASURY_APPROVER"): Promise<{ actor: Actor; id: string }> => {
+    const id = (await app.identity.commands.addUser(t, { issuer: "idp", externalSubject: randomUUID(), roles: [role] }, ops)) as string;
+    return { actor: { kind: "user", userId: id as never }, id };
+  };
+  const viewer = await person("VIEWER"), reviewer = await person("TREASURY_REVIEWER"), approver = await person("TREASURY_APPROVER");
+  for (const who of [viewer, reviewer]) await assert.rejects(app.audit.questions.trail({ tenantId: t, actor: who.actor }), /not allowed \(audit:read\)/);
+  await assert.rejects(app.audit.questions.verify(t, viewer.actor), /not allowed \(audit:read\)/);
+  assert.ok((await app.audit.questions.trail({ tenantId: t, actor: approver.actor })).records.length > 0);
+  assert.equal((await app.audit.questions.verify(t, approver.actor)).ok, true);
+
+  // The platform role reads the trail; that use is itself in the trail (the read sees the trail as it stood before it).
+  await app.audit.questions.trail({ tenantId: t, actor: { kind: "platform", platformUserId: ops as never } });
+  await app.identity.commands.grantRole(t, approver.id as never, "TREASURY_ADMIN", ops);
+  await app.identity.commands.revokeRole(t, viewer.id as never, "VIEWER", ops);
+  await app.identity.commands.setProgramRestriction(t, reviewer.id as never, [programId("BS")], ops);
+  await app.identity.commands.disableUser(t, reviewer.id as never, ops);
+  await app.identity.commands.disableUser(t, reviewer.id as never, ops); // already disabled: not a change
+  await drain(app);
+  const trail = await trailOf(t);
+  const rows = (action: string) => trail.filter((r) => r.action === action);
+  assert.equal(rows("user.added").length, 4, "the admin and the three people");
+  assert.deepEqual(rows("platform-role.used").map((r) => [r.actor, r.targetType, r.targetId]), [[`platform:${ops}`, "permission", "audit:read"]]);
+  assert.deepEqual([rows("role.granted").at(-1)!.targetId, rows("role.revoked")[0]!.targetId], [`${approver.id}/TREASURY_ADMIN`, `${viewer.id}/VIEWER`]);
+  assert.deepEqual(rows("user.program-restriction-set").map((r) => r.fields), [["programs"]]);
+  assert.equal(rows("user.disabled").length, 1);
+  assert.deepEqual(await app.audit.questions.verify(t, admin), { ok: true, checked: trail.length, brokenAtSeq: null });
 });

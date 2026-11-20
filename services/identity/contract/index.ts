@@ -1,4 +1,5 @@
 // Published questions and events of Identity. Other services import this file, never src/.
+import type { ChangeRecordFields } from "@services/audit/contract";
 import type { ProgramId, TenantId } from "@shared/kernel";
 
 declare const brand: unique symbol;
@@ -102,4 +103,11 @@ export interface ProgramDisabled extends IdentityEvent {
   readonly type: "identity.program-disabled";
   readonly programId: ProgramId;
 }
-export type IdentityEvents = ProgramEnabled | ProgramDisabled;
+
+/** A change record for Audit (decision 0012): who did what to which record. Identifiers and field names only. */
+export interface IdentityChangeRecorded extends ChangeRecordFields {
+  readonly type: "identity.change-recorded";
+  readonly eventId: string;
+  readonly occurredAt: string;
+}
+export type IdentityEvents = ProgramEnabled | ProgramDisabled | IdentityChangeRecorded;

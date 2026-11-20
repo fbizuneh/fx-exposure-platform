@@ -9,6 +9,7 @@ import { AccessDenied, require_, who } from "./access.ts";
 import { q, type Db, type Queryable, type Tx } from "./db.ts";
 import { toPreTradeFile, type OutRow } from "./file.ts";
 import { fixed4, legProblems, type LegInput } from "./model.ts";
+import { recordChange } from "./change-record.ts";
 import { announce } from "./outbox.ts";
 import type { Collaborators } from "./ports.ts";
 import { readPreTrades, recomputeStatus } from "./store.ts";
@@ -99,7 +100,11 @@ export function preTradeCommands(db: Db, c: Collaborators, clock: () => Date) {
     if (!program || !program.enabled) throw new PreTradeInvalid([`program ${input.programId} is not enabled`]);
     const problems = await problemsOf(input.tenantId, input.body, clock().toISOString().slice(0, 10));
     if (problems.length > 0) throw new PreTradeInvalid(problems);
-    return db.transaction().execute((tx) => insert(tx, input.tenantId, input.programId, null, null, "MANUAL", input.body, who(input.actor)));
+    return db.transaction().execute(async (tx) => {
+      const made = await insert(tx, input.tenantId, input.programId, null, null, "MANUAL", input.body, who(input.actor));
+      await recordChange(tx, { tenantId: input.tenantId, programId: input.programId, actor: who(input.actor), action: "pre-trade.created", targetType: "pre-trade", targetId: made.preTradeId, fields: [] });
+      return made;
+    });
   }
 
   async function release(tx: Tx, tenant: TenantId, preTradeId: string, program: string, cycle: string | null): Promise<void> {
@@ -116,6 +121,7 @@ export function preTradeCommands(db: Db, c: Collaborators, clock: () => Date) {
       if (p.origin !== "MANUAL") throw new PreTradeInvalid(["a pre-trade from a recommendation is released when its cycle is approved"]);
       if (p.status !== "DRAFT") return false;
       await release(tx, input.tenantId, p.pre_trade_id, p.program_id, p.cycle_id);
+      await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(p.program_id), actor: who(input.actor), action: "pre-trade.released", targetType: "pre-trade", targetId: p.pre_trade_id, fields: [] });
       return true;
     });
   }
@@ -128,6 +134,7 @@ export function preTradeCommands(db: Db, c: Collaborators, clock: () => Date) {
       if (p.status === "CANCELLED") return false;
       if (!["DRAFT", "READY", "SENT"].includes(p.status)) throw new PreTradeInvalid([`a ${p.status.toLowerCase().replace("_", " ")} pre-trade cannot be cancelled`]);
       await q(tx).updateTable("pre_trades").set({ status: "CANCELLED" }).where("tenant_id", "=", input.tenantId).where("pre_trade_id", "=", input.preTradeId).execute();
+      await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(p.program_id), actor: who(input.actor), action: "pre-trade.cancelled", targetType: "pre-trade", targetId: input.preTradeId, fields: [] });
       return true;
     });
   }
@@ -143,6 +150,7 @@ export function preTradeCommands(db: Db, c: Collaborators, clock: () => Date) {
       })));
       if (ready.length > 0) {
         await q(tx).updateTable("pre_trades").set({ status: "SENT", sent_at: clock() }).where("tenant_id", "=", input.tenantId).where("pre_trade_id", "in", ready.map((p) => p.preTradeId)).where("status", "=", "READY").execute();
+        for (const p of ready) await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(p.programId), actor: who(input.actor), action: "pre-trade.sent", targetType: "pre-trade", targetId: p.preTradeId, fields: [] });
       }
       return { file: toPreTradeFile(rows), preTradeIds: ready.map((p) => p.preTradeId) };
     });

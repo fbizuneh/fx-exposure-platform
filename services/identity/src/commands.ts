@@ -3,6 +3,7 @@
 import { programId, tenantId, type ProgramId, type TenantId } from "@shared/kernel";
 import { TENANT_ROLES, type PlatformUserId, type TenantRole, type UserId } from "../contract/index.ts";
 import { q, type Db } from "./db.ts";
+import { recordChange } from "./change-record.ts";
 import { announce } from "./outbox.ts";
 
 function role(r: string): TenantRole {
@@ -56,6 +57,7 @@ export function identityCommands(db: Db) {
             .values(roles.map((r) => ({ tenant_id: tenant, user_id: row.user_id, role: r, granted_by: by })))
             .execute();
         }
+        await recordChange(tx, { tenantId: tenant, programId: null, actor: by, action: "user.added", targetType: "user", targetId: row.user_id, fields: roles.length > 0 ? ["roles"] : [] });
         return row.user_id as UserId;
       });
     },
@@ -73,22 +75,26 @@ export function identityCommands(db: Db) {
           .executeTakeFirst();
         if (held) return; // already held: nothing changes
         await q(tx).insertInto("user_roles").values({ tenant_id: tenant, user_id: user, role: r, granted_by: by }).execute();
+        await recordChange(tx, { tenantId: tenant, programId: null, actor: by, action: "role.granted", targetType: "user-role", targetId: `${user}/${r}`, fields: [] });
       });
     },
 
     async revokeRole(tenant: TenantId, user: UserId, r: TenantRole, by: string): Promise<void> {
-      await q(db)
-        .updateTable("user_roles")
-        .set({ revoked_at: new Date(), revoked_by: by })
-        .where("tenant_id", "=", tenant)
-        .where("user_id", "=", user)
-        .where("role", "=", r)
-        .where("revoked_at", "is", null)
-        .execute();
+      await db.transaction().execute(async (tx) => {
+        const done = await q(tx)
+          .updateTable("user_roles")
+          .set({ revoked_at: new Date(), revoked_by: by })
+          .where("tenant_id", "=", tenant)
+          .where("user_id", "=", user)
+          .where("role", "=", r)
+          .where("revoked_at", "is", null)
+          .executeTakeFirst();
+        if (Number(done.numUpdatedRows) > 0) await recordChange(tx, { tenantId: tenant, programId: null, actor: by, action: "role.revoked", targetType: "user-role", targetId: `${user}/${r}`, fields: [] });
+      });
     },
 
     /** null removes the restriction (every enabled program); a list limits the user to those programs. */
-    async setProgramRestriction(tenant: TenantId, user: UserId, programs: readonly ProgramId[] | null): Promise<void> {
+    async setProgramRestriction(tenant: TenantId, user: UserId, programs: readonly ProgramId[] | null, by: string): Promise<void> {
       await db.transaction().execute(async (tx) => {
         await q(tx).deleteFrom("user_programs").where("tenant_id", "=", tenant).where("user_id", "=", user).execute();
         if (programs && programs.length > 0) {
@@ -97,17 +103,21 @@ export function identityCommands(db: Db) {
             .values([...new Set(programs)].map((p) => ({ tenant_id: tenant, user_id: user, program_id: programId(p) })))
             .execute();
         }
+        await recordChange(tx, { tenantId: tenant, programId: null, actor: by, action: "user.program-restriction-set", targetType: "user", targetId: user, fields: ["programs"] });
       });
     },
 
     async disableUser(tenant: TenantId, user: UserId, by: string): Promise<void> {
-      await q(db)
-        .updateTable("users")
-        .set({ status: "DISABLED", disabled_at: new Date(), disabled_by: by })
-        .where("tenant_id", "=", tenant)
-        .where("user_id", "=", user)
-        .where("status", "=", "ACTIVE")
-        .execute();
+      await db.transaction().execute(async (tx) => {
+        const done = await q(tx)
+          .updateTable("users")
+          .set({ status: "DISABLED", disabled_at: new Date(), disabled_by: by })
+          .where("tenant_id", "=", tenant)
+          .where("user_id", "=", user)
+          .where("status", "=", "ACTIVE")
+          .executeTakeFirst();
+        if (Number(done.numUpdatedRows) > 0) await recordChange(tx, { tenantId: tenant, programId: null, actor: by, action: "user.disabled", targetType: "user", targetId: user, fields: ["status"] });
+      });
     },
 
     /** Idempotent: enabling an enabled program changes nothing and announces nothing. */
@@ -132,6 +142,7 @@ export function identityCommands(db: Db) {
           await q(tx).insertInto("tenant_programs").values({ tenant_id: tenant, program_id: program, enabled_by: by }).execute();
         }
         await announce(tx, { type: "identity.program-enabled", tenantId: tenant, programId: program });
+        await recordChange(tx, { tenantId: tenant, programId: program, actor: by, action: "program.enabled", targetType: "program", targetId: program, fields: [] });
         return true;
       });
     },
@@ -154,6 +165,7 @@ export function identityCommands(db: Db) {
           .where("program_id", "=", program)
           .execute();
         await announce(tx, { type: "identity.program-disabled", tenantId: tenant, programId: program });
+        await recordChange(tx, { tenantId: tenant, programId: program, actor: by, action: "program.disabled", targetType: "program", targetId: program, fields: [] });
         return true;
       });
     },

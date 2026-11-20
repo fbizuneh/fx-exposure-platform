@@ -1,4 +1,5 @@
 // Published questions and events of Hedge Recommendation. Other services import this file, never src/.
+import type { ChangeRecordFields } from "@services/audit/contract";
 import type { CycleId, ProgramId, TenantId } from "@shared/kernel";
 
 export const STRATEGIES = ["hedge-ratio-adjustment"] as const;
@@ -101,4 +102,11 @@ export interface PreTradeCreated extends Announcement {
   readonly cycleId: CycleId;
   readonly programId: ProgramId;
 }
-export type HedgeRecommendationEvents = RecommendationsIssued | PreTradeCreated;
+
+/** A change record for Audit (decision 0012): who did what to which record. Identifiers and field names only. */
+export interface HedgeRecommendationChangeRecorded extends ChangeRecordFields {
+  readonly type: "hedge-recommendation.change-recorded";
+  readonly eventId: string;
+  readonly occurredAt: string;
+}
+export type HedgeRecommendationEvents = RecommendationsIssued | PreTradeCreated | HedgeRecommendationChangeRecorded;

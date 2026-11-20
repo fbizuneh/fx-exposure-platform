@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import type { AsOfDate, TenantId } from "@shared/kernel";
 import { q, type Db } from "./db.ts";
+import { byPerson, recordChange } from "./change-record.ts";
 import { announce } from "./outbox.ts";
 import type { RateRow } from "./rows.ts";
 import { DEFAULT_OUTLIER_SHARE, qualityOf, RatesInvalid, rowKey, validateRates } from "./validate.ts";
@@ -80,6 +81,7 @@ export function loadCommands(db: Db, clock: () => Date) {
       }).execute();
       await q(tx).insertInto("rates").values(values).execute();
       await announce(tx, { type: "fx-rate.loaded", tenantId: tenant, loadId, source: load.source, businessDate: load.businessDate });
+      if (byPerson(load.by)) await recordChange(tx, { tenantId: tenant, programId: null, actor: load.by, action: "fx-rates.loaded", targetType: "rate-load", targetId: loadId, fields: [] });
       return { status: "APPLIED", loadId, accepted: values.length, flagged } as const;
     });
   }

@@ -2,6 +2,8 @@
 import type { ProgramId, TenantId } from "@shared/kernel";
 import type { Actor } from "@services/identity/contract";
 import { require_, who } from "./access.ts";
+import { recordChange } from "./change-record.ts";
+import { readPolicy } from "./queries.ts";
 import { TENOR, pairKey } from "./calc.ts";
 import { q, type Db } from "./db.ts";
 import type { Collaborators } from "./ports.ts";
@@ -60,6 +62,7 @@ export function policyCommands(db: Db, c: Collaborators, clock: () => Date) {
     const p = input.policy;
     const key = { tenant_id: input.tenantId, program_id: input.programId };
     await db.transaction().execute(async (tx) => {
+      const before = await readPolicy(tx, input.tenantId, input.programId);
       await q(tx).deleteFrom("policies").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();
       await q(tx).deleteFrom("ratio_overrides").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();
       await q(tx).deleteFrom("rounding_overrides").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();
@@ -69,6 +72,10 @@ export function policyCommands(db: Db, c: Collaborators, clock: () => Date) {
       }).execute();
       if (p.ratioOverrides.length > 0) await q(tx).insertInto("ratio_overrides").values(p.ratioOverrides.map((o) => ({ ...key, currency_pair: o.pair, ratio: o.ratio }))).execute();
       if (p.roundingOverrides.length > 0) await q(tx).insertInto("rounding_overrides").values(p.roundingOverrides.map((o) => ({ ...key, currency: o.currency, rounding: o.rounding }))).execute();
+      const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+      const after = await readPolicy(tx, input.tenantId, input.programId);
+      const fields = (["defaultRatio", "ratioOverrides", "minHedgeDisplay", "roundingDefault", "roundingOverrides", "tenor", "tradingEntityCode"] as const).filter((f) => !same(before[f], after[f]));
+      await recordChange(tx, { tenantId: input.tenantId, programId: input.programId, actor: who(input.actor), action: "hedge-policy.set", targetType: "hedge-policy", targetId: input.programId, fields: before.saved ? fields : ["policy"] });
     });
   }
   return { setPolicy };
