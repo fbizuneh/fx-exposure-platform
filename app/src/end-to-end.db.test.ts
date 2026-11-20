@@ -13,7 +13,7 @@ import { sql } from "kysely";
 import { connect as connectHr, createHedgeRecommendation } from "../../services/hedge-recommendation/src/index.ts";
 import { connect as connectEm, createExposureManagement } from "../../services/exposure-management/src/index.ts";
 import { parseExecutedFile } from "../../services/fx-trade/src/index.ts";
-import { deliveryProblems, drain, retryStuckEvent, startDueCycles } from "./dispatch.ts";
+import { RETRY_POLICY, deliveryProblems, drain, retryStuckEvent, startDueCycles } from "./dispatch.ts";
 
 const url = process.env.TEST_DATABASE_URL;
 const enabled = url !== undefined && /\/[^/?]*_test(\?|$)/.test(url);
@@ -1342,6 +1342,38 @@ e2e("a failed delivery is retried 1, 2, 4, 8 minutes later, then stuck; it holds
     void other;
   } finally {
     cmds.retryWaiting = real;
+    await client.end();
+  }
+});
+
+e2e("a failure is persisted whole: an interrupted recording cannot leave an event eligible, a fifth failure never leads to a sixth delivery, and earlier failures keep their wait", async () => {
+  const tenant = await app.identity.commands.createTenant("Acme");
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  try {
+    const id = randomUUID();
+    await client.query("INSERT INTO fx_rate.outbox (event_id, tenant_id, type, payload) VALUES ($1, $2, 'fx-rate.loaded', $3)", [id, tenant, JSON.stringify({ type: "fx-rate.loaded", tenantId: tenant, eventId: id, occurredAt: new Date().toISOString() })]);
+    // The old two-step write, stopped after its first step, would leave a counted failure with no wait and not stuck. The database refuses that state.
+    await assert.rejects(client.query("UPDATE fx_rate.outbox SET attempts = attempts + 1 WHERE event_id = $1", [id]), /outbox_failure_state/);
+    const state = async () => (await client.query("SELECT attempts, retry_at, stuck_at FROM fx_rate.outbox WHERE event_id = $1", [id])).rows[0] as { attempts: number; retry_at: Date | null; stuck_at: Date | null };
+    const t0 = new Date("2031-01-01T00:00:00Z");
+    for (let n = 1; n <= 5; n++) {
+      const outcome = await app.fxRate.outbox.recordFailure(id, "boom", t0, RETRY_POLICY);
+      const s = await state(); // read straight from the table: nothing else has run since the one statement
+      assert.equal(s.attempts, n);
+      if (n < 5) {
+        assert.equal(outcome, "RETRYING");
+        assert.equal(s.retry_at!.getTime(), t0.getTime() + 60_000 * 2 ** (n - 1), `failure ${n} keeps its wait`);
+        assert.equal(s.stuck_at, null);
+        assert.equal((await app.fxRate.outbox.pending(200, t0)).some((e) => (e as unknown as { eventId: string }).eventId === id), false, "not eligible at once");
+      } else {
+        assert.equal(outcome, "STUCK");
+        assert.deepEqual([s.retry_at, s.stuck_at?.getTime()], [null, t0.getTime()]);
+      }
+    }
+    const later = new Date(t0.getTime() + 365 * 24 * 3_600_000);
+    assert.equal((await app.fxRate.outbox.pending(200, later)).some((e) => (e as unknown as { eventId: string }).eventId === id), false, "a persisted fifth failure is never delivered a sixth time");
+  } finally {
     await client.end();
   }
 });

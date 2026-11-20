@@ -2,6 +2,7 @@
 // reads pending events and delivers them; moving to a queue later changes only the dispatcher.
 import { randomUUID } from "node:crypto";
 import type { IdentityEvents } from "../contract/index.ts";
+import { sql } from "kysely";
 import { q, type Db, type Queryable } from "./db.ts";
 
 type NewEvent = IdentityEvents extends infer E ? (E extends IdentityEvents ? Omit<E, "eventId" | "occurredAt"> : never) : never;
@@ -56,16 +57,20 @@ export async function markPublished(db: Db, eventIds: readonly string[]): Promis
   await q(db).updateTable("outbox").set({ published_at: new Date() }).where("event_id", "in", [...eventIds]).where("published_at", "is", null).execute();
 }
 
-/** Notes a failed delivery: tries again after a wait that doubles, and after the last allowed try marks the event stuck. */
+/**
+ * Notes a failed delivery: tries again after a wait that doubles, and after the last allowed try marks the event stuck.
+ * One statement sets the count and the retry time or stuck state together, so a stop can never leave a counted failure that is still eligible at once.
+ */
 export async function recordFailure(db: Db, eventId: string, error: string, now: Date, policy: RetryPolicy): Promise<"RETRYING" | "STUCK"> {
-  const row = await q(db).updateTable("outbox").set((eb) => ({ attempts: eb("attempts", "+", 1), last_error: error.slice(0, 2000) }))
-    .where("event_id", "=", eventId).where("published_at", "is", null).returning("attempts").executeTakeFirst();
-  if (!row) return "RETRYING"; // delivered meanwhile
-  const stuck = row.attempts >= policy.maxAttempts;
-  await q(db).updateTable("outbox")
-    .set(stuck ? { retry_at: null, stuck_at: now } : { retry_at: new Date(now.getTime() + policy.firstDelayMs * 2 ** (row.attempts - 1)) })
-    .where("event_id", "=", eventId).where("published_at", "is", null).execute();
-  return stuck ? "STUCK" : "RETRYING";
+  const row = await q(db).updateTable("outbox")
+    .set({
+      attempts: sql`attempts + 1`,
+      last_error: error.slice(0, 2000),
+      retry_at: sql`CASE WHEN attempts + 1 >= ${policy.maxAttempts} THEN NULL ELSE ${now}::timestamptz + (${policy.firstDelayMs}::double precision * power(2, attempts) * interval '1 millisecond') END`,
+      stuck_at: sql`CASE WHEN attempts + 1 >= ${policy.maxAttempts} THEN ${now}::timestamptz ELSE NULL END`,
+    })
+    .where("event_id", "=", eventId).where("published_at", "is", null).returning("stuck_at").executeTakeFirst();
+  return row?.stuck_at ? "STUCK" : "RETRYING"; // no row: delivered meanwhile
 }
 
 /** Events that have failed and are not yet delivered: retrying, or stuck. */
