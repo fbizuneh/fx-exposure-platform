@@ -13,7 +13,7 @@ import { sql } from "kysely";
 import { connect as connectHr, createHedgeRecommendation } from "../../services/hedge-recommendation/src/index.ts";
 import { connect as connectEm, createExposureManagement } from "../../services/exposure-management/src/index.ts";
 import { parseExecutedFile } from "../../services/fx-trade/src/index.ts";
-import { drain, startDueCycles } from "./dispatch.ts";
+import { deliveryProblems, drain, retryStuckEvent, startDueCycles } from "./dispatch.ts";
 
 const url = process.env.TEST_DATABASE_URL;
 const enabled = url !== undefined && /\/[^/?]*_test(\?|$)/.test(url);
@@ -1044,14 +1044,15 @@ e2e("a failed status read after confirmation does not undo the decision: the pre
   const stale = await get();
   assert.deepEqual([stale.status, stale.followUp, stale.parts.map((p) => p.followUp)], ["ACCEPTED", "OPEN", ["OPEN", "OPEN", "OPEN", "OPEN"]], "the decision stands; the part has not yet caught up");
 
-  // The first delivery of the event fails its read: it stays pending.
+  // The first delivery of the event fails its read: it is recorded and tried again a minute later.
   const qs = app.fxTrade.questions as unknown as { getPreTrade: (...a: never[]) => Promise<unknown> };
   const real_ = qs.getPreTrade;
   qs.getPreTrade = async () => { throw new Error("FX Trade status unavailable"); };
-  try { await assert.rejects(drain(app), /status unavailable/); } finally { qs.getPreTrade = real_; }
+  const t0 = new Date();
+  try { await drain(app, { now: t0 }); } finally { qs.getPreTrade = real_; }
   assert.deepEqual((await get()).parts.map((p) => p.followUp), ["OPEN", "OPEN", "OPEN", "OPEN"]);
 
-  await drain(app);
+  await drain(app, { now: new Date(t0.getTime() + 61_000) });
   const fixed = await get();
   assert.deepEqual([fixed.status, fixed.followUp, fixed.parts.map((p) => p.followUp)], ["ACCEPTED", "OPEN", ["CANCELLED", "OPEN", "OPEN", "OPEN"]]);
   assert.equal((await drafts(x.t, x.cycle, rec.recommendationId)).length, 4, "no second set of pre-trades");
@@ -1285,4 +1286,62 @@ e2e("value dates follow the pair's business-day calendars; a currency without a 
   ]));
   const gulfRec = gulf.recs.find((r) => r.action === "HEDGE")!;
   assert.deepEqual([gulfRec.valueDate, gulfRec.calendarGaps], ["2026-12-11", [{ currency: "USD", reason: "CALENDAR_ENDED" }]]);
+});
+
+e2e("a failed delivery is retried 1, 2, 4, 8 minutes later, then stuck; it holds only its own tenant's later events, and an operator can retry it", async () => {
+  const a = await tenantWithProgram();
+  const b = await tenantWithProgram();
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  const raw = async (tenant: TenantId) => {
+    const id = randomUUID();
+    await client.query("INSERT INTO fx_rate.outbox (event_id, tenant_id, type, payload) VALUES ($1, $2, 'fx-rate.loaded', $3)", [id, tenant, JSON.stringify({ type: "fx-rate.loaded", tenantId: tenant, eventId: id, occurredAt: new Date().toISOString() })]);
+    return id;
+  };
+  const cmds = app.exposureAnalysis.commands as unknown as { retryWaiting: (t: TenantId) => Promise<unknown> };
+  const real = cmds.retryWaiting;
+  const calls: string[] = [];
+  let broken = true;
+  cmds.retryWaiting = async (tenant) => { calls.push(tenant); if (tenant === a && broken) throw new Error("analysis unavailable"); };
+  const at = (ms: number) => new Date(t0.getTime() + ms);
+  const min = 60_000;
+  const t0 = new Date("2030-01-01T00:00:00Z");
+  try {
+    const first = await raw(a);
+    const behind = await raw(a); // announced after the failing one, same tenant
+    const other = await raw(b);
+    assert.equal(await drain(app, { now: t0 }), 1, "the other tenant's event is delivered; nothing throws");
+    assert.deepEqual(calls.filter((c) => c === a), [a], "only the first event was tried; the one behind it waited");
+    const after1 = (await deliveryProblems(app)).filter((p) => p.tenantId === a);
+    assert.deepEqual(after1.map((p) => [p.eventId, p.attempts, p.lastError, p.stuckAt]), [[first, 1, "analysis unavailable", null]]);
+    assert.equal(after1[0]!.retryAt!.getTime(), at(1 * min).getTime());
+
+    await drain(app, { now: at(30_000) });
+    assert.equal(calls.filter((c) => c === a).length, 1, "not tried before its time");
+    await drain(app, { now: at(1 * min) }); // 2nd failure: wait 2 minutes
+    assert.equal((await deliveryProblems(app)).find((p) => p.eventId === first)!.retryAt!.getTime(), at(3 * min).getTime());
+    await drain(app, { now: at(3 * min - 1) });
+    assert.equal(calls.filter((c) => c === a).length, 2);
+    await drain(app, { now: at(3 * min) }); // 3rd: wait 4
+    assert.equal((await deliveryProblems(app)).find((p) => p.eventId === first)!.retryAt!.getTime(), at(7 * min).getTime());
+    await drain(app, { now: at(7 * min) }); // 4th: wait 8
+    assert.equal((await deliveryProblems(app)).find((p) => p.eventId === first)!.retryAt!.getTime(), at(15 * min).getTime());
+    await drain(app, { now: at(15 * min) }); // 5th: stuck
+    const stuck = (await deliveryProblems(app)).filter((p) => p.tenantId === a);
+    assert.deepEqual(stuck.map((p) => [p.eventId, p.attempts, p.lastError, p.retryAt, p.stuckAt?.getTime()]), [[first, 5, "analysis unavailable", null, at(15 * min).getTime()]]);
+    const tries = calls.filter((c) => c === a).length;
+    assert.equal(tries, 5);
+    await drain(app, { now: at(600 * min) });
+    assert.equal(calls.filter((c) => c === a).length, tries, "a stuck event is not tried again by itself");
+
+    assert.equal(await retryStuckEvent(app, "fx-rate", behind), false, "only a stuck event can be retried");
+    broken = false;
+    assert.equal(await retryStuckEvent(app, "fx-rate", first), true);
+    assert.equal(await drain(app, { now: at(601 * min) }), 2, "the retried event and the one that waited behind it, in order");
+    assert.deepEqual((await deliveryProblems(app)).filter((p) => p.tenantId === a), []);
+    void other;
+  } finally {
+    cmds.retryWaiting = real;
+    await client.end();
+  }
 });

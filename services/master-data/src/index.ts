@@ -2,13 +2,19 @@
 import { applyCommands } from "./apply.ts";
 import { connect, type Db } from "./db.ts";
 import { masterDataQuestions } from "./lookups.ts";
-import { markPublished, pendingEvents } from "./outbox.ts";
+import { deliveryProblems, markPublished, pendingEvents, recordFailure, retryStuck, type RetryPolicy } from "./outbox.ts";
 
 export function createMasterData(db: Db) {
   return {
     questions: masterDataQuestions(db),
     commands: applyCommands(db),
-    outbox: { pending: (limit?: number) => pendingEvents(db, limit), markPublished: (ids: readonly string[]) => markPublished(db, ids) },
+    outbox: {
+      pending: (limit?: number, now?: Date) => pendingEvents(db, limit, now),
+      markPublished: (ids: readonly string[]) => markPublished(db, ids),
+      recordFailure: (eventId: string, error: string, now: Date, policy: RetryPolicy) => recordFailure(db, eventId, error, now, policy),
+      problems: () => deliveryProblems(db),
+      retryStuck: (eventId: string) => retryStuck(db, eventId),
+    },
   };
 }
 

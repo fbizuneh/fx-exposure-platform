@@ -5,7 +5,7 @@ import { recordChange } from "./change-record.ts";
 import { identityCommands } from "./commands.ts";
 import { connect, type Db } from "./db.ts";
 import { loadAccessFacts, loadEnabledPrograms } from "./facts.ts";
-import { markPublished, pendingEvents } from "./outbox.ts";
+import { deliveryProblems, markPublished, pendingEvents, recordFailure, retryStuck, type RetryPolicy } from "./outbox.ts";
 
 export function identityQuestions(db: Db): IdentityQuestions {
   return {
@@ -35,7 +35,13 @@ export function createIdentity(db: Db) {
   return {
     questions: identityQuestions(db),
     commands: identityCommands(db),
-    outbox: { pending: (limit?: number) => pendingEvents(db, limit), markPublished: (ids: readonly string[]) => markPublished(db, ids) },
+    outbox: {
+      pending: (limit?: number, now?: Date) => pendingEvents(db, limit, now),
+      markPublished: (ids: readonly string[]) => markPublished(db, ids),
+      recordFailure: (eventId: string, error: string, now: Date, policy: RetryPolicy) => recordFailure(db, eventId, error, now, policy),
+      problems: () => deliveryProblems(db),
+      retryStuck: (eventId: string) => retryStuck(db, eventId),
+    },
   };
 }
 

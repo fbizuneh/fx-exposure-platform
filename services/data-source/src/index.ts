@@ -1,7 +1,7 @@
 // Data Source's entry point for app/ to wire. Other services never import this; they import contract/.
 import { connect, type Db } from "./db.ts";
 import { intakeCommands } from "./intake.ts";
-import { markPublished, pendingEvents } from "./outbox.ts";
+import { deliveryProblems, markPublished, pendingEvents, recordFailure, retryStuck, type RetryPolicy } from "./outbox.ts";
 import type { MasterDataQuestionsLike } from "./ports.ts";
 import { dataSourceQuestions } from "./queries.ts";
 import { ruleCommands } from "./rules.ts";
@@ -11,7 +11,13 @@ export function createDataSource(db: Db, deps: { masterData: MasterDataQuestions
   return {
     questions: dataSourceQuestions(db),
     commands: { ...intakeCommands(db, deps.masterData, now), ...ruleCommands(db, deps.masterData) },
-    outbox: { pending: (limit?: number) => pendingEvents(db, limit), markPublished: (ids: readonly string[]) => markPublished(db, ids) },
+    outbox: {
+      pending: (limit?: number, now?: Date) => pendingEvents(db, limit, now),
+      markPublished: (ids: readonly string[]) => markPublished(db, ids),
+      recordFailure: (eventId: string, error: string, now: Date, policy: RetryPolicy) => recordFailure(db, eventId, error, now, policy),
+      problems: () => deliveryProblems(db),
+      retryStuck: (eventId: string) => retryStuck(db, eventId),
+    },
   };
 }
 

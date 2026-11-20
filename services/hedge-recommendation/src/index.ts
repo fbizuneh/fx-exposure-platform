@@ -3,7 +3,7 @@ import { approvalCommands } from "./approval.ts";
 import { connect, type Db } from "./db.ts";
 import { decideCommands } from "./decide.ts";
 import { generateCommands } from "./generate.ts";
-import { markPublished, pendingEvents } from "./outbox.ts";
+import { deliveryProblems, markPublished, pendingEvents, recordFailure, retryStuck, type RetryPolicy } from "./outbox.ts";
 import { policyCommands } from "./policy.ts";
 import type { Collaborators } from "./ports.ts";
 import { hedgeRecommendationQuestions } from "./queries.ts";
@@ -13,7 +13,13 @@ export function createHedgeRecommendation(db: Db, collaborators: Collaborators, 
   return {
     questions: hedgeRecommendationQuestions(db),
     commands: { ...generateCommands(db, collaborators, now), ...decideCommands(db, collaborators, now), ...approvalCommands(db, now), ...policyCommands(db, collaborators, now) },
-    outbox: { pending: (limit?: number) => pendingEvents(db, limit), markPublished: (ids: readonly string[]) => markPublished(db, ids) },
+    outbox: {
+      pending: (limit?: number, now?: Date) => pendingEvents(db, limit, now),
+      markPublished: (ids: readonly string[]) => markPublished(db, ids),
+      recordFailure: (eventId: string, error: string, now: Date, policy: RetryPolicy) => recordFailure(db, eventId, error, now, policy),
+      problems: () => deliveryProblems(db),
+      retryStuck: (eventId: string) => retryStuck(db, eventId),
+    },
   };
 }
 
