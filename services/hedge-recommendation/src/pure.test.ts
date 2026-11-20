@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { D, addTenor, pairKey, recommend, roundDownToStep, valueDateFor, businessDaysBefore, calendarGaps, noCalendar, rollModifiedFollowing, rollWithSpan, toBusinessCalendar } from "./calc.ts";
+import { D, addTenor, amountThresholdNeed, finishRecommendation, pairKey, recommend, roundDownToStep, valueDateFor, businessDaysBefore, calendarGaps, noCalendar, rollModifiedFollowing, rollWithSpan, toBusinessCalendar } from "./calc.ts";
 import { policyProblems } from "./policy.ts";
 
 const base = { grossExposure: "1000000", hedgedAmount: "0", ratio: "1", rounding: "1000", minExposure: null, rateMissing: false } as const;
@@ -193,4 +193,48 @@ test("split: whatever the inputs, parts are positive, add up exactly, are at mos
     assert.equal(s.parts.reduce((a, b) => a.plus(b), new D(0)).toString(), new D(total).toString(), `${total}/${max}/${step}/${min}/${m}: sum`);
     if (s.parts.some((x) => x.gt(max)) && new D(total).gt(max)) assert.ok(s.note !== null, `${total}/${max}/${step}/${min}/${m}: a part above the maximum needs a note`);
   }
+});
+
+interface Thr { netExposure: string; hedgedAmount: string; thresholdExposure: string | null }
+interface Fin { rounding: string; minExposure: string | null; rateMissing: boolean }
+const thr: Thr = { netExposure: "1000000", hedgedAmount: "0", thresholdExposure: "250000" };
+const finishing: Fin = { rounding: "1000", minExposure: null, rateMissing: false };
+const amountThreshold = (n: Partial<Thr>, f: Partial<Fin> = {}) => finishRecommendation(amountThresholdNeed({ ...thr, ...n }), { ...finishing, ...f });
+
+test("amount threshold: a net exposure larger than the threshold is hedged in full, either way, to bring the net to zero", () => {
+  const long = amountThreshold({});
+  assert.deepEqual([long.action, long.direction, long.amount!.toString(), long.needed.toString(), long.target.toString()], ["HEDGE", "SELL", "1000000", "-1000000", "-1000000"]);
+  const short = amountThreshold({ netExposure: "-300000.5" }); // not the gross: the net after hedges decides
+  assert.deepEqual([short.direction, short.amount!.toString()], ["BUY", "300000"], "rounded down to the step");
+  const part = amountThreshold({ netExposure: "400000", hedgedAmount: "-600000" });
+  assert.deepEqual([part.amount!.toString(), part.target.toString()], ["400000", "-1000000"], "the target is what is already hedged plus the whole net");
+});
+
+test("amount threshold: at the threshold or below it nothing is recommended, and the threshold cannot be compared without its rate", () => {
+  assert.equal(amountThreshold({ netExposure: "250000" }).reason, "WITHIN_THRESHOLD", "equal is within");
+  assert.equal(amountThreshold({ netExposure: "-250000" }).reason, "WITHIN_THRESHOLD");
+  assert.equal(amountThreshold({ netExposure: "250000.01" }).action, "HEDGE");
+  const within = amountThreshold({ netExposure: "100000", hedgedAmount: "-50" });
+  assert.deepEqual([within.action, within.needed.toString(), within.target.toString()], ["NONE", "0", "-50"]);
+  assert.equal(amountThreshold({ thresholdExposure: null }).reason, "NO_RATE");
+});
+
+test("rounding and the minimum are the same rules for every strategy", () => {
+  // The same needed amount, wanted by either strategy, gets the same rounding and minimum result.
+  const viaRatio = finishRecommendation({ target: new D("-234430.55"), needed: new D("-234430.55"), reason: null }, { ...finishing, minExposure: "250000" });
+  const viaThreshold = amountThreshold({ netExposure: "234430.55", thresholdExposure: "1" }, { minExposure: "250000" });
+  assert.deepEqual([viaRatio.reason, viaThreshold.reason], ["BELOW_MINIMUM", "BELOW_MINIMUM"]);
+  assert.equal(amountThreshold({ netExposure: "234430.55", thresholdExposure: "1" }).amount!.toString(), "234000");
+  assert.equal(amountThreshold({ netExposure: "999", thresholdExposure: "1" }).reason, "ROUNDS_TO_ZERO");
+  assert.equal(amountThreshold({}, { rateMissing: true }).reason, "NO_RATE");
+});
+
+test("a policy with the amount-threshold strategy needs a threshold, and the thresholds are checked", () => {
+  const ok = { defaultRatio: "1", ratioOverrides: [], minHedgeDisplay: "0", roundingDefault: "1000", roundingOverrides: [], tenor: "1M", tradingEntityCode: "US01" };
+  assert.deepEqual(policyProblems({ ...ok, strategy: "amount-threshold", amountThresholdDisplay: "250000", amountThresholdOverrides: [{ nettingLevel: "ENTITY", amountThresholdDisplay: "100000" }] }), []);
+  assert.match(policyProblems({ ...ok, strategy: "amount-threshold" })[0]!, /needs an amount threshold/);
+  assert.deepEqual(policyProblems({ ...ok, strategy: "hedge-ratio-adjustment", amountThresholdDisplay: "250000" }), [], "kept while the ratio strategy is in use");
+  const bad = policyProblems({ ...ok, strategy: "var" as never, amountThresholdDisplay: "0", amountThresholdOverrides: [{ nettingLevel: "ENTITY", amountThresholdDisplay: "-1" }, { nettingLevel: "ENTITY", amountThresholdDisplay: "5" }, { nettingLevel: "DESK", amountThresholdDisplay: "5" }] });
+  assert.equal(bad.length, 5, bad.join(" | "));
+  assert.deepEqual(policyProblems({ ...ok, strategy: "amount-threshold", amountThresholdDisplay: "100", minHedgeDisplay: "500" }), [], "a threshold below the minimum is allowed; the minimum then decides");
 });

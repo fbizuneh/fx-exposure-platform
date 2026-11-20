@@ -2,7 +2,7 @@
 import type { ChangeRecordFields } from "@services/audit/contract";
 import type { CycleId, ProgramId, TenantId } from "@shared/kernel";
 
-export const STRATEGIES = ["hedge-ratio-adjustment"] as const;
+export const STRATEGIES = ["hedge-ratio-adjustment", "amount-threshold"] as const;
 export type Strategy = (typeof STRATEGIES)[number];
 
 export const SPLIT_METHODS = ["EVEN", "THRESHOLD_REMAINDER"] as const;
@@ -26,6 +26,12 @@ export interface HedgePolicy {
   readonly maxHedgeOverrides: readonly { readonly nettingLevel: string; readonly maxHedgeDisplay: string }[];
   /** EVEN: equal parts. THRESHOLD_REMAINDER: parts of the maximum and one part for what is left. */
   readonly splitMethod: SplitMethod;
+  /** The strategy the program uses (decision 0020). The ratio settings apply to hedge-ratio-adjustment only, the threshold settings to amount-threshold only. */
+  readonly strategy: Strategy;
+  /** The amount threshold in the display currency: the net exposure must be larger than it for a hedge to be recommended. Required for the amount-threshold strategy. */
+  readonly amountThresholdDisplay: string | null;
+  /** A different threshold for the groups of a netting level; it replaces the program's threshold for them. */
+  readonly amountThresholdOverrides: readonly { readonly nettingLevel: string; readonly amountThresholdDisplay: string }[];
   /** False when nothing has been saved and the defaults apply. */
   readonly saved: boolean;
 }
@@ -34,13 +40,14 @@ export interface HedgePolicy {
 export type RecommendationStatus = "OPEN" | "DECIDING" | "ACCEPTED" | "OVERRIDDEN" | "DISMISSED" | "LAPSED" | "SUPERSEDED" | "NONE";
 /** EXECUTED_REST_CANCELLED: every part is finished, some executed and some cancelled (decision 0017). Only a whole recommendation has it, never a part. */
 export type FollowUp = "NOT_STARTED" | "OPEN" | "PARTLY_EXECUTED" | "EXECUTED" | "EXECUTED_REST_CANCELLED" | "CANCELLED";
-export type NoActionReason = "WITHIN_TARGET" | "ROUNDS_TO_ZERO" | "BELOW_MINIMUM" | "NO_RATE" | "NO_TRADING_ENTITY";
+export type NoActionReason = "WITHIN_TARGET" | "WITHIN_THRESHOLD" | "ROUNDS_TO_ZERO" | "BELOW_MINIMUM" | "NO_RATE" | "NO_TRADING_ENTITY";
 /** What to tell the user for each reason a group has no actionable recommendation. */
 export const NO_ACTION_MESSAGES: Readonly<Record<NoActionReason, string>> = {
   WITHIN_TARGET: "Already hedged to the target ratio.",
+  WITHIN_THRESHOLD: "The net exposure is not larger than the amount threshold.",
   ROUNDS_TO_ZERO: "The amount needed is smaller than the rounding step.",
   BELOW_MINIMUM: "The rounded amount is below the minimum hedge amount.",
-  NO_RATE: "The spot rate needed to convert the minimum or maximum hedge amount is missing.",
+  NO_RATE: "The spot rate needed to convert the minimum or maximum hedge amount, or the amount threshold, is missing.",
   NO_TRADING_ENTITY: "This netting group has no entity. Configure a default trading entity in the hedge policy to get a recommendation for it.",
 };
 
@@ -73,7 +80,10 @@ export interface Recommendation {
   /** In the exposure currency, signed: positive is long. */
   readonly grossExposure: string;
   readonly hedgedAmount: string;
-  readonly ratio: string;
+  /** The target ratio; null for the amount-threshold strategy, which has none. */
+  readonly ratio: string | null;
+  /** The amount threshold the net exposure was compared with, in the exposure currency; null for the hedge-ratio-adjustment strategy. */
+  readonly thresholdExposureAmount: string | null;
   readonly targetHedge: string;
   readonly neededAmount: string;
   readonly rounding: string;

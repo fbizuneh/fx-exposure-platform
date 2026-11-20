@@ -245,6 +245,13 @@ e2e("a finished run produces recommendations; accepting one makes a draft pre-tr
   await drain(app);
   const us = (await app.hedgeRecommendation.questions.recommendations(t, next as never)).find((r) => r.entityCode === "US01" && r.currencyPair === "EUR-USD")!;
   assert.deepEqual([us.hedgedAmount, us.action, us.reason], ["-1000.00", "NONE", "WITHIN_TARGET"]);
+
+  // The amount-threshold strategy decides on the net exposure after that hedge (zero), not the gross 1,000 EUR, which is above a 100 USD threshold.
+  await app.hedgeRecommendation.commands.setPolicy({ tenantId: t, programId: programId("BS"), actor: admin, policy: { ...defaults, strategy: "amount-threshold", amountThresholdDisplay: "100" } as never });
+  await app.exposureManagement.commands.rerunCycle({ tenantId: t, cycleId: next, actor: admin } as never);
+  await drain(app);
+  const byAmount = (await app.hedgeRecommendation.questions.recommendations(t, next as never)).find((r) => r.entityCode === "US01" && r.currencyPair === "EUR-USD")!;
+  assert.deepEqual([byAmount.strategy, byAmount.grossExposure, byAmount.hedgedAmount, byAmount.action, byAmount.reason], ["amount-threshold", "1000.00", "-1000.00", "NONE", "WITHIN_THRESHOLD"]);
 });
 
 e2e("the policy shapes the recommendation: ratio override, rounding override, and a minimum set in the display currency and tested in the exposure currency", async () => {
@@ -1400,6 +1407,58 @@ e2e("the wait after a failure starts when the delivery failed, not when the drai
     await client.query("UPDATE fx_rate.outbox SET published_at = now() WHERE event_id = $1", [id]); // leave nothing pending for later tests
   } finally {
     cmds.retryWaiting = real;
+    await client.end();
+  }
+});
+
+const amt = (over: object) => ({ ...defaults, roundingDefault: "10", strategy: "amount-threshold", amountThresholdDisplay: "1000", ...over });
+const groupOf = (recs: readonly { entityCode: string | null }[], code: string) => recs.find((r) => r.entityCode === code) as Awaited<ReturnType<typeof finishedCycle>>["recs"][number];
+
+e2e("amount threshold: a net exposure larger than the threshold is hedged in full, a level's own threshold replaces the program's, and rounding, the minimum and the split are the shared rules", async () => {
+  // US01 holds 1,000 EUR, which is 1,100 USD at 1.1: above a 1,000 USD threshold (909.0909 EUR). DE01 holds 550 USD, within it.
+  const run = await finishedCycle(amt({}));
+  const us = groupOf(run.recs, "US01");
+  assert.deepEqual([us.strategy, us.action, us.direction, us.amount, us.ratio, us.thresholdExposureAmount, us.neededAmount, us.targetHedge, us.parts.map((p) => p.amount)],
+    ["amount-threshold", "HEDGE", "SELL", "1000.00", null, "909.0909", "-1000.00", "-1000.00", ["1000.00"]]);
+  const de = groupOf(run.recs, "DE01");
+  assert.deepEqual([de.action, de.reason, de.thresholdExposureAmount, de.ratio], ["NONE", "WITHIN_THRESHOLD", "1000.00", null]);
+  // The recommendation can be decided like any other: accepting it makes a pre-trade for the full amount.
+  const accepted = await app.hedgeRecommendation.commands.decide({ tenantId: run.t, recommendationId: us.recommendationId, actor: run.admin, action: "ACCEPT" });
+  assert.equal((await app.fxTrade.questions.getPreTrade(run.t, accepted.preTradeId!))!.legs[0]!.dealAmount, "1000.0000");
+
+  // A net exactly at the threshold is within it (1,100 USD is exactly 1,000 EUR); a cent above is not.
+  assert.equal(groupOf((await finishedCycle(amt({ amountThresholdDisplay: "1100" }))).recs, "US01").reason, "WITHIN_THRESHOLD");
+  assert.equal(groupOf((await finishedCycle(amt({ amountThresholdDisplay: "1099.99" }))).recs, "US01").action, "HEDGE");
+
+  // Levels: the cycle runs at ENTITY, so that level's override (1,100 USD) replaces the program's 100 USD, which would hedge both groups; another level's does not matter.
+  const low = await finishedCycle(amt({ amountThresholdDisplay: "100" }));
+  assert.deepEqual([groupOf(low.recs, "US01").action, groupOf(low.recs, "DE01").action, groupOf(low.recs, "DE01").amount], ["HEDGE", "HEDGE", "550.00"]);
+  const lvl = (await finishedCycle(amt({ amountThresholdDisplay: "100", amountThresholdOverrides: [{ nettingLevel: "ENTITY", amountThresholdDisplay: "1100" }, { nettingLevel: "REGION", amountThresholdDisplay: "1" }] }))).recs;
+  assert.deepEqual([groupOf(lvl, "US01").reason, groupOf(lvl, "DE01").reason, groupOf(lvl, "DE01").thresholdExposureAmount], ["WITHIN_THRESHOLD", "WITHIN_THRESHOLD", "1100.00"]);
+
+  // Shared rules: rounding to the step (900 of 1,000), then the minimum (1,200 USD is 1,090.9091 EUR), then the split of an amount above the maximum.
+  assert.equal(groupOf((await finishedCycle(amt({ roundingDefault: "300" }))).recs, "US01").amount, "900.00");
+  const min = groupOf((await finishedCycle(amt({ minHedgeDisplay: "1200" }))).recs, "US01");
+  assert.deepEqual([min.action, min.reason, min.minExposureAmount], ["NONE", "BELOW_MINIMUM", "1090.9091"]);
+  const even = groupOf((await finishedCycle(amt({ maxHedgeDisplay: "330", splitMethod: "EVEN" }))).recs, "US01");
+  assert.deepEqual([even.amount, even.maxExposureAmount, even.parts.map((p) => p.amount)], ["1000.00", "300.00", ["250.00", "250.00", "250.00", "250.00"]]);
+  const rem = groupOf((await finishedCycle(amt({ maxHedgeDisplay: "330", splitMethod: "THRESHOLD_REMAINDER" }))).recs, "US01");
+  assert.deepEqual(rem.parts.map((p) => p.amount), ["300.00", "300.00", "300.00", "100.00"]);
+
+  // The ratio strategy is unchanged and records no threshold.
+  const ratio = groupOf((await finishedCycle(defaults)).recs, "US01");
+  assert.deepEqual([ratio.strategy, ratio.ratio, ratio.thresholdExposureAmount], ["hedge-ratio-adjustment", "1", null]);
+
+  // Saved and read back; the strategy needs its threshold, and the database refuses a row without one.
+  const saved = await finishedCycle(amt({ amountThresholdOverrides: [{ nettingLevel: "ENTITY", amountThresholdDisplay: "1100" }] }));
+  const pol = await app.hedgeRecommendation.questions.policy(saved.t, programId("BS"));
+  assert.deepEqual([pol.strategy, pol.amountThresholdDisplay, pol.amountThresholdOverrides], ["amount-threshold", "1000.00", [{ nettingLevel: "ENTITY", amountThresholdDisplay: "1100.00" }]]);
+  await assert.rejects(app.hedgeRecommendation.commands.setPolicy({ tenantId: saved.t, programId: programId("BS"), actor: saved.admin, policy: { ...defaults, strategy: "amount-threshold" } as never }), /needs an amount threshold/);
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  try {
+    await assert.rejects(client.query("UPDATE hedge_recommendation.policies SET amount_threshold_display = NULL WHERE tenant_id = $1", [saved.t]), /policies_threshold_for_strategy/);
+  } finally {
     await client.end();
   }
 });

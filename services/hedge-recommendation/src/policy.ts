@@ -5,7 +5,7 @@ import { require_, who } from "./access.ts";
 import { recordChange } from "./change-record.ts";
 import { readPolicy } from "./queries.ts";
 import type { NettingLevel } from "@services/exposure-management/contract";
-import { SPLIT_METHODS, type SplitMethod } from "../contract/index.ts";
+import { SPLIT_METHODS, STRATEGIES, type SplitMethod, type Strategy } from "../contract/index.ts";
 import { TENOR, pairKey } from "./calc.ts";
 import { q, type Db } from "./db.ts";
 import type { Collaborators } from "./ports.ts";
@@ -22,6 +22,10 @@ export interface PolicyInput {
   readonly maxHedgeDisplay?: string | null;
   readonly maxHedgeOverrides?: readonly { readonly nettingLevel: string; readonly maxHedgeDisplay: string }[];
   readonly splitMethod?: SplitMethod;
+  /** Decision 0020. Left out, the program uses hedge-ratio-adjustment and has no threshold. */
+  readonly strategy?: Strategy;
+  readonly amountThresholdDisplay?: string | null;
+  readonly amountThresholdOverrides?: readonly { readonly nettingLevel: string; readonly amountThresholdDisplay: string }[];
 }
 
 export class PolicyInvalid extends Error {
@@ -58,6 +62,18 @@ export function policyProblems(p: PolicyInput): string[] {
     levels.add(o.nettingLevel);
     max(`maximum override ${o.nettingLevel}`, o.maxHedgeDisplay);
   }
+  // The amount threshold (decision 0020): in the display currency and above 0. It may sit below the minimum hedge amount; the minimum then decides. The strategy needs it.
+  const threshold = (label: string, v: string) => { if (!NUMBER.test(v) || Number(v) <= 0) out.push(`${label} must be a decimal above 0`); };
+  if (p.strategy !== undefined && !STRATEGIES.includes(p.strategy)) out.push(`strategy must be one of ${STRATEGIES.join(", ")}`);
+  if (p.amountThresholdDisplay !== undefined && p.amountThresholdDisplay !== null) threshold("amount threshold", p.amountThresholdDisplay);
+  if (p.strategy === "amount-threshold" && (p.amountThresholdDisplay === undefined || p.amountThresholdDisplay === null)) out.push("the amount-threshold strategy needs an amount threshold");
+  const thresholdLevels = new Set<string>();
+  for (const o of p.amountThresholdOverrides ?? []) {
+    if (!(NETTING_LEVELS as readonly string[]).includes(o.nettingLevel)) out.push(`amount threshold override level ${o.nettingLevel} must be one of ${NETTING_LEVELS.join(", ")}`);
+    if (thresholdLevels.has(o.nettingLevel)) out.push(`amount threshold override for ${o.nettingLevel} appears twice`);
+    thresholdLevels.add(o.nettingLevel);
+    threshold(`amount threshold override ${o.nettingLevel}`, o.amountThresholdDisplay);
+  }
   const pairs = new Set<string>();
   for (const o of p.ratioOverrides) {
     if (!/^[A-Z]{3}-[A-Z]{3}$/.test(o.pair)) out.push(`ratio override pair ${o.pair} must look like EUR-USD`);
@@ -89,18 +105,20 @@ export function policyCommands(db: Db, c: Collaborators, clock: () => Date) {
       await q(tx).deleteFrom("ratio_overrides").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();
       await q(tx).deleteFrom("rounding_overrides").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();
       await q(tx).deleteFrom("max_hedge_overrides").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();
+      await q(tx).deleteFrom("amount_threshold_overrides").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();
       // The policy goes last: its overrides refer to it (decision 0018).
       await q(tx).deleteFrom("policies").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();
       await q(tx).insertInto("policies").values({
         ...key, default_ratio: p.defaultRatio, min_hedge_display: p.minHedgeDisplay, rounding_default: p.roundingDefault, tenor: p.tenor,
-        trading_entity_code: p.tradingEntityCode, max_hedge_display: p.maxHedgeDisplay ?? null, split_method: p.splitMethod ?? "EVEN", updated_by: who(input.actor), updated_at: clock(),
+        trading_entity_code: p.tradingEntityCode, max_hedge_display: p.maxHedgeDisplay ?? null, split_method: p.splitMethod ?? "EVEN", strategy: p.strategy ?? "hedge-ratio-adjustment", amount_threshold_display: p.amountThresholdDisplay ?? null, updated_by: who(input.actor), updated_at: clock(),
       }).execute();
       if (p.ratioOverrides.length > 0) await q(tx).insertInto("ratio_overrides").values(p.ratioOverrides.map((o) => ({ ...key, currency_pair: o.pair, ratio: o.ratio }))).execute();
       if (p.roundingOverrides.length > 0) await q(tx).insertInto("rounding_overrides").values(p.roundingOverrides.map((o) => ({ ...key, currency: o.currency, rounding: o.rounding }))).execute();
       if ((p.maxHedgeOverrides ?? []).length > 0) await q(tx).insertInto("max_hedge_overrides").values((p.maxHedgeOverrides ?? []).map((o) => ({ ...key, netting_level: o.nettingLevel, max_hedge_display: o.maxHedgeDisplay }))).execute();
+      if ((p.amountThresholdOverrides ?? []).length > 0) await q(tx).insertInto("amount_threshold_overrides").values((p.amountThresholdOverrides ?? []).map((o) => ({ ...key, netting_level: o.nettingLevel, amount_threshold_display: o.amountThresholdDisplay }))).execute();
       const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
       const after = await readPolicy(tx, input.tenantId, input.programId);
-      const fields = (["defaultRatio", "ratioOverrides", "minHedgeDisplay", "roundingDefault", "roundingOverrides", "tenor", "tradingEntityCode", "maxHedgeDisplay", "maxHedgeOverrides", "splitMethod"] as const).filter((f) => !same(before[f], after[f]));
+      const fields = (["defaultRatio", "ratioOverrides", "minHedgeDisplay", "roundingDefault", "roundingOverrides", "tenor", "tradingEntityCode", "maxHedgeDisplay", "maxHedgeOverrides", "splitMethod", "strategy", "amountThresholdDisplay", "amountThresholdOverrides"] as const).filter((f) => !same(before[f], after[f]));
       await recordChange(tx, { tenantId: input.tenantId, programId: input.programId, actor: who(input.actor), action: "hedge-policy.set", targetType: "hedge-policy", targetId: input.programId, fields: before.saved ? fields : ["policy"] });
     });
   }
