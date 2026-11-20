@@ -60,7 +60,7 @@ export const toRecommendation = (r: Row, parts: readonly Selectable<HedgeRecomme
   valueDate: r.value_date, fixingDate: r.fixing_date, calendarGaps: (typeof r.calendar_gaps === "string" ? JSON.parse(r.calendar_gaps) : r.calendar_gaps) as CalendarGap[], status: r.status as RecommendationStatus, decidedAmount: opt(r.decided_amount), decidedBy: r.decided_by,
   decidedAt: r.decided_at === null ? null : r.decided_at.toISOString(), decisionNote: r.decision_note, preTradeId: parts[0]?.pre_trade_id ?? null, followUp: r.follow_up as FollowUp,
   maxExposureAmount: opt(r.max_exposure_amount), splitMethod: r.split_method as SplitMethod | null, splitNote: r.split_note,
-  roll: r.roll_type === null ? null : { type: r.roll_type as RollType, adjustment: r.roll_adjustment as RollAdjustment, nearDate: r.roll_near_date!, farDate: r.roll_far_date!, offsetDays: r.roll_offset_days! },
+  roll: r.roll_type === null ? null : { type: r.roll_type as RollType, adjustment: r.roll_adjustment as RollAdjustment | null, nearDate: r.roll_near_date!, farDate: r.roll_far_date!, offsetDays: r.roll_offset_days! },
   rollIssue: r.roll_issue === null || r.roll_issue === undefined ? null : ((typeof r.roll_issue === "string" ? JSON.parse(r.roll_issue) : r.roll_issue) as RollIssue),
   parts: parts.map((x): RecommendationPart => ({
     partNo: x.part_no, tradingEntityCode: x.trading_entity_code ?? r.trading_entity_code, role: x.role as PartRole, direction: (x.direction ?? r.direction) as RecommendationPart["direction"], valueDate: x.value_date ?? r.value_date, fixingDate: x.value_date === null ? r.fixing_date : x.fixing_date,

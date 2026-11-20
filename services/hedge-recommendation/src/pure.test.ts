@@ -298,6 +298,7 @@ test("roll dates: the near date is after the as-of date, and the far date after 
 test("a policy's roll settings are checked", () => {
   const ok = { defaultRatio: "1", ratioOverrides: [], minHedgeDisplay: "0", roundingDefault: "1000", roundingOverrides: [], tenor: "1M", tradingEntityCode: null };
   assert.deepEqual(policyProblems({ ...ok, rollType: "ADJUST_SWAP", rollAdjustment: "COMBINED", rollOffsetDays: 3 }), []);
+  assert.deepEqual(policyProblems({ ...ok, rollType: "CLOSE_OUT_NEW", rollOffsetDays: 3 }), []);
   assert.equal(policyProblems({ ...ok, rollType: "SWAP" as never, rollAdjustment: "SPLIT" as never, rollOffsetDays: 1.5 }).length, 3);
   assert.equal(policyProblems({ ...ok, rollOffsetDays: -1 }).length, 1);
 });

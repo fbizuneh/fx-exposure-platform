@@ -33,6 +33,7 @@ Events carry identifiers only.
 `hedge-ratio-adjustment` (decision 0011): target hedge = ratio x gross exposure; recommend the gap to what is already hedged, rounded down to the step, if it reaches the minimum (converted to the exposure currency). More strategies are added beside it.
 `amount-threshold` (decision 0020): when the net exposure (gross plus hedges) is at or above the threshold (display currency, converted at spot and compared unrounded; the level's own replaces the program's), the whole net is recommended; the strategy only decides the amount wanted. Rounding, the minimum and the split are shared by every strategy (`finishRecommendation`, `splitAmount`).
 
+Close-out+New (decision 0022, `rollType` CLOSE_OUT_NEW): the same close-outs and dates; the rule then runs on the hedges that remain, and its result is the new trades (role NEW) at the far date, split by the maximum; override changes them only.
 Roll (decision 0021, `rollType` ADJUST_SWAP): maturing hedges from the near date to near plus offset are closed per value date and rolled to the far date, with the strategy's adjustment at the far date, as parts of one recommendation decided as a package. No roll dates for the cycle: no action. Override changes the adjustment only. Close-outs are booked by the entity holding the hedge. A closed far date is shown, not moved. `checkExposureApproval` (called by Exposure Management) refuses stale dates and locks them for the approved run.
 
 ## Rules worth knowing

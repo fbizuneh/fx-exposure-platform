@@ -50,7 +50,7 @@ export function rollCommands(db: Db, c: Collaborators, clock: () => Date) {
     await require_(c.access, tenant, input.actor, "hedge-policy:manage", cycle.programId);
     if (cycle.approvedAt !== null || cycle.outcome !== null || cycle.exposureApprovedAt !== null) throw new RollDatesInvalid(["the exposure is approved or the cycle is closed; roll dates can no longer change"]);
     const policy = await readPolicy(db, tenant, cycle.programId);
-    if (policy.rollType !== "ADJUST_SWAP") throw new RollDatesInvalid(["the program's hedge policy does not roll; set its roll type first"]);
+    if (policy.rollType === "NONE") throw new RollDatesInvalid(["the program's hedge policy does not roll; set its roll type first"]);
     const problems = rollDatesProblems(input.dates, cycle.asOf, policy.rollOffsetDays);
     if (problems.length > 0) throw new RollDatesInvalid(problems);
     const d = input.dates;
@@ -87,7 +87,7 @@ export function rollCommands(db: Db, c: Collaborators, clock: () => Date) {
     const cycle = await c.management.getCycle(tenant, cycleId);
     if (!cycle) return { allowed: true };
     const policy = await readPolicy(db, tenant, cycle.programId);
-    if (policy.rollType !== "ADJUST_SWAP") return { allowed: true };
+    if (policy.rollType === "NONE") return { allowed: true };
     const groups = await c.analysis.netExposures(tenant, runId);
     return db.transaction().execute(async (tx) => {
       await lockCycleDecisions(tx, tenant, cycleId);

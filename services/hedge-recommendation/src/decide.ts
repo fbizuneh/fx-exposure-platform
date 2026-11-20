@@ -54,15 +54,16 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
     // as one trade, that one trade takes the amount and is not split.
     const have = await q(tx).selectFrom("recommendation_parts").select(["part_no", "role"]).where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).execute();
     const fixed = have.filter((x) => x.role === "CLOSE_OUT" || x.role === "ROLL").length;
+    const newRole = have.some((x) => x.role === "NEW") ? "NEW" as const : "ADJUSTMENT" as const; // Close-out+New (decision 0022): the new trades take the amount
     const combined = have.some((x) => x.role === "COMBINED");
-    await q(tx).deleteFrom("recommendation_parts").where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).where("role", "in", ["ADJUSTMENT", "COMBINED"]).execute();
+    await q(tx).deleteFrom("recommendation_parts").where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).where("role", "in", ["ADJUSTMENT", "COMBINED", "NEW"]).execute();
     if (combined) {
       await q(tx).insertInto("recommendation_parts").values({ tenant_id: tenant, recommendation_id: rec.recommendation_id, program_id: rec.program_id, part_no: fixed + 1, role: "COMBINED", amount: fmt(new Dec(total)) }).execute();
       await q(tx).updateTable("recommendations").set({ split_note: null }).where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).execute();
       return;
     }
     const split = splitAmount(new Dec(total), rec.max_exposure_amount === null ? null : new Dec(rec.max_exposure_amount), (rec.split_method ?? "EVEN") as SplitMethod, new Dec(rec.rounding), rec.min_exposure_amount === null ? null : new Dec(rec.min_exposure_amount));
-    await q(tx).insertInto("recommendation_parts").values(split.parts.map((part, i) => ({ tenant_id: tenant, recommendation_id: rec.recommendation_id, program_id: rec.program_id, part_no: fixed + i + 1, role: "ADJUSTMENT" as const, amount: fmt(part) }))).execute();
+    await q(tx).insertInto("recommendation_parts").values(split.parts.map((part, i) => ({ tenant_id: tenant, recommendation_id: rec.recommendation_id, program_id: rec.program_id, part_no: fixed + i + 1, role: newRole, amount: fmt(part) }))).execute();
     await q(tx).updateTable("recommendations").set({ split_note: split.note }).where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).execute();
   }
 
@@ -163,7 +164,7 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
     let amount = rec.amount;
     if (input.action === "OVERRIDE") {
       // A rolled recommendation can be overridden only where it has an adjustment (or a combined far trade); the close-outs and the roll are what is maturing (decision 0021).
-      if (rec.amount === null) throw new RecommendationError("there is no adjustment to override: this recommendation only closes and rolls the maturing hedges");
+      if (rec.amount === null) throw new RecommendationError(rec.roll_type === "CLOSE_OUT_NEW" ? "there is no new trade to override: this recommendation only closes the maturing hedges" : "there is no adjustment to override: this recommendation only closes and rolls the maturing hedges");
       if (input.amount === undefined || !/^\d+(\.\d{1,4})?$/.test(input.amount) || Number(input.amount) <= 0) throw new RecommendationError("an override needs a positive amount with up to 4 decimals");
       amount = input.amount;
     }
