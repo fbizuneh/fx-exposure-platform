@@ -99,5 +99,5 @@ export interface ExposureAnalysisDatabase {
     source: string | null;
     load_ids: JsonIn;
   };
-  outbox: { event_id: string; tenant_id: string; type: string; payload: string; created_at: Generated<Date>; seq: Generated<string>; published_at: Date | null };
+  outbox: { event_id: string; tenant_id: string; type: string; payload: string; created_at: Generated<Date>; seq: Generated<string>; published_at: Date | null; attempts: Generated<number>; last_error: string | null; retry_at: Date | null; stuck_at: Date | null };
 }

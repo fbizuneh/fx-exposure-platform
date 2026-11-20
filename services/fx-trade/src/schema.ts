@@ -62,5 +62,5 @@ export interface FxTradeDatabase {
   executed_trade_legs: LegColumns & { executed_trade_id: string; settlement_amount: string };
   trade_issues: { tenant_id: string; issue_id: string; batch_id: string; row_no: number; code: string; message: string; raw: Record<string, unknown> | string; created_at: Generated<Date> };
   handled_events: { tenant_id: string; event_id: string };
-  outbox: { event_id: string; tenant_id: string; type: string; payload: string; created_at: Generated<Date>; seq: Generated<string>; published_at: Date | null };
+  outbox: { event_id: string; tenant_id: string; type: string; payload: string; created_at: Generated<Date>; seq: Generated<string>; published_at: Date | null; attempts: Generated<number>; last_error: string | null; retry_at: Date | null; stuck_at: Date | null };
 }

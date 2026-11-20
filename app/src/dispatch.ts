@@ -1,5 +1,5 @@
 // Delivers each service's announcements to the services that listen, in the order they were written.
-// Every handler is safe to repeat, so an event that fails stays pending and is delivered again on the next drain.
+// Every handler is safe to repeat, so an event that fails is tried again later, a few times, and then waits for an operator (decision 0019).
 import type { TenantId } from "@shared/kernel";
 import type { App } from "./compose.ts";
 
@@ -69,24 +69,68 @@ async function deliver(app: App, e: Announced): Promise<void> {
   }
 }
 
-/** Delivers pending events until none are left (a delivery can write new events). Returns how many were delivered. */
-export async function drain(app: App, maxRounds = 25): Promise<number> {
-  const sources = [app.identity, app.masterData, app.fxRate, app.dataSource, app.exposureManagement, app.exposureAnalysis, app.fxTrade, app.hedgeRecommendation];
+/** A failed delivery is tried 5 times in all, the wait after the first failure being 1 minute and doubling (1, 2, 4, 8), then the event is stuck (decision 0019). */
+export const RETRY_POLICY = { maxAttempts: 5, firstDelayMs: 60_000 } as const;
+
+function sources(app: App) {
+  return [
+    ["identity", app.identity], ["master-data", app.masterData], ["fx-rate", app.fxRate], ["data-source", app.dataSource],
+    ["exposure-management", app.exposureManagement], ["exposure-analysis", app.exposureAnalysis], ["fx-trade", app.fxTrade], ["hedge-recommendation", app.hedgeRecommendation],
+  ] as const;
+}
+
+/**
+ * Delivers the events that are due until none are left (a delivery can write new events). Returns how many were delivered.
+ * A delivery that fails is recorded and tried again later; meanwhile that tenant's later events from the same service wait behind it, so their order is kept,
+ * and other tenants and services carry on (decision 0019). `now` is the clock (a fixed time, or a function) so tests can move time. The clock is read again when a failure is recorded, so the wait starts when the delivery failed, not when the drain began.
+ */
+export async function drain(app: App, options: { maxRounds?: number; now?: Date | (() => Date) } = {}): Promise<number> {
+  const maxRounds = options.maxRounds ?? 25;
+  const given = options.now;
+  const clock: () => Date = typeof given === "function" ? given : () => given ?? new Date();
   let delivered = 0;
   for (let round = 0; round < maxRounds; round++) {
     let any = false;
-    for (const s of sources) {
-      const pending = (await s.outbox.pending(200)) as unknown as Announced[];
+    for (const [, s] of sources(app)) {
+      const pending = (await s.outbox.pending(200, clock())) as unknown as Announced[];
+      const failedTenants = new Set<string>(); // a failure inside this batch holds the tenant's later events in the batch too
       for (const e of pending) {
-        await deliver(app, e);
+        if (failedTenants.has(e.tenantId)) continue;
+        any = true;
+        try {
+          await deliver(app, e);
+        } catch (err) {
+          failedTenants.add(e.tenantId);
+          await s.outbox.recordFailure(e.eventId, err instanceof Error ? err.message : String(err), clock(), RETRY_POLICY);
+          continue;
+        }
         await s.outbox.markPublished([e.eventId]);
         delivered++;
-        any = true;
       }
     }
     if (!any) return delivered;
   }
   throw new Error(`events were still being written after ${maxRounds} rounds; something is announcing in a loop`);
+}
+
+/** An event whose delivery has failed: retrying later, or stuck and waiting for an operator. */
+export interface DeliveryProblem {
+  readonly service: string; readonly eventId: string; readonly tenantId: string; readonly type: string; readonly attempts: number; readonly lastError: string | null;
+  readonly retryAt: Date | null; readonly stuckAt: Date | null;
+}
+
+/** Every undelivered event that has failed, across services, with its last error. */
+export async function deliveryProblems(app: App): Promise<DeliveryProblem[]> {
+  const all: DeliveryProblem[] = [];
+  for (const [service, s] of sources(app)) for (const p of await s.outbox.problems()) all.push({ service, ...p });
+  return all;
+}
+
+/** An operator's retry of a stuck event: its tries start again on the next drain. False when no such event is stuck. */
+export async function retryStuckEvent(app: App, service: string, eventId: string): Promise<boolean> {
+  const found = sources(app).find(([name]) => name === service);
+  if (!found) throw new Error(`no service called ${service}`);
+  return found[1].outbox.retryStuck(eventId);
 }
 
 /** Starts the cycles the schedule says are due today. A missed day is not made up. Returns the cycles started. */
