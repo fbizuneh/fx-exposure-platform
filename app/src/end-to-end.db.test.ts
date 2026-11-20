@@ -304,6 +304,60 @@ e2e("recalculating and approving the exposure at the same moment: exactly one wi
   }
 });
 
+e2e("a recalculated run approved before its run-finished event reaches Hedge Recommendation still gets exactly one set of recommendations; the earlier preview is superseded and a draft is released only at cycle approval", async () => {
+  const { t, admin, cycle, recs: previewA } = await finishedCycle(defaults, "ENTITY", false);
+  const a = previewA.find((r) => r.action === "HEDGE")!;
+  const runA = (await app.exposureAnalysis.questions.currentRun(t, cycle))!;
+  await app.exposureManagement.commands.rerunCycle({ tenantId: t, cycleId: cycle, actor: admin } as never);
+
+  // Deliver everything except run B's "run finished" to Hedge Recommendation (Exposure Management still learns B is complete).
+  let held: Record<string, unknown> | undefined;
+  for (let round = 0; round < 10; round++) {
+    let any = false;
+    for (const s of [app.exposureManagement, app.exposureAnalysis]) {
+      for (const e of (await s.outbox.pending(200)) as unknown as Array<Record<string, unknown> & { eventId: string; type: string }>) {
+        if (e.type === "exposure-management.cycle-initiated") await app.exposureAnalysis.commands.onCycleInitiated(e as never);
+        else if (e.type === "exposure-analysis.run-started") await app.exposureManagement.commands.onRunStarted(e as never);
+        else if (e.type === "exposure-analysis.run-finished") { await app.exposureManagement.commands.onRunFinished(e as never); held = e; }
+        await s.outbox.markPublished([e.eventId]);
+        any = true;
+      }
+    }
+    if (!any) break;
+  }
+  assert.ok(held, "run B finished and its event is being held back");
+  const runB = (await app.exposureAnalysis.questions.currentRun(t, cycle))!;
+  assert.notEqual(runB.runId, runA.runId);
+  assert.equal(held!.runId, runB.runId);
+  assert.equal((await app.hedgeRecommendation.questions.recommendations(t, cycle)).every((r) => r.runId === runA.runId), true, "only A's preview exists so far");
+
+  await approveExposure(t, cycle as string); // approves B before Hedge Recommendation has seen B finish
+  assert.equal((await app.exposureManagement.questions.getCycle(t, cycle))!.exposureApprovedRunId, runB.runId);
+
+  assert.equal(await app.hedgeRecommendation.commands.onRunFinished(held as never), "ISSUED", "A's preview rows do not stop the approved run's recommendations");
+  const live = await app.hedgeRecommendation.questions.recommendations(t, cycle);
+  const bRows = live.filter((r) => r.runId === runB.runId);
+  assert.ok(bRows.length > 0 && bRows.length === previewA.length, "exactly one set for B");
+  assert.equal((await app.hedgeRecommendation.questions.getRecommendation(t, a.recommendationId))!.status, "SUPERSEDED");
+  assert.ok(live.filter((r) => r.runId === runA.runId).every((r) => r.status === "SUPERSEDED"), "none of A's rows can be acted on");
+
+  // Replays, with the same or a new event ID, add nothing.
+  assert.equal(await app.hedgeRecommendation.commands.onRunFinished(held as never), "IGNORED");
+  assert.equal(await app.hedgeRecommendation.commands.onRunFinished({ ...(held as object), eventId: randomUUID() } as never), "IGNORED");
+  assert.equal((await app.hedgeRecommendation.questions.recommendations(t, cycle)).filter((r) => r.runId === runB.runId).length, bRows.length);
+
+  await assert.rejects(app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: a.recommendationId, actor: admin, action: "ACCEPT" }), /superseded and cannot be decided/);
+  const b = bRows.find((r) => r.action === "HEDGE")!;
+  const done = await app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: b.recommendationId, actor: admin, action: "ACCEPT" });
+  assert.equal(done.status, "ACCEPTED");
+  assert.deepEqual((await drafts(t, cycle, b.recommendationId)).map((p) => [p.preTradeId === done.preTradeId, p.status]), [[true, "DRAFT"]], "one draft");
+  assert.deepEqual(await drafts(t, cycle, a.recommendationId), [], "nothing from A's preview");
+  assert.deepEqual((await app.fxTrade.commands.exportPreTrades({ tenantId: t, actor: admin })).preTradeIds, [], "not releasable before the cycle is approved");
+  await app.exposureManagement.commands.approveCycle({ tenantId: t, cycleId: cycle as string, actor: admin });
+  await drain(app);
+  assert.equal((await drafts(t, cycle, b.recommendationId))[0]!.status, "READY");
+});
+
 e2e("a decision in progress cannot be replaced: recalculation is refused and a repeated run-finished event makes no replacement recommendation", async () => {
   const { t, admin, cycle, recs } = await finishedCycle(defaults);
   const rec = recs.find((r) => r.action === "HEDGE")!;

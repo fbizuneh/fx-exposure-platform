@@ -19,9 +19,10 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
     const run = await c.analysis.currentRun(tenant, event.cycleId);
     let stale = !cycle || cycle.approvedAt !== null || cycle.outcome !== null || !run || run.runId !== event.runId || run.status !== "FINISHED";
     // Once the exposure is approved the cycle is never recalculated, so nothing may replace its recommendations. The one thing still allowed is
-    // making them for the approved run itself, when its "run finished" event reached us after the approval.
+    // making them for the approved run itself, when its "run finished" event reached us after the approval. Only that run's own recommendations
+    // count as "already made"; an earlier run's preview rows must not block it (they are superseded below).
     if (!stale && cycle!.exposureApprovedAt !== null) {
-      const have = await q(db).selectFrom("recommendations").select("recommendation_id").where("tenant_id", "=", tenant).where("cycle_id", "=", event.cycleId).limit(1).executeTakeFirst();
+      const have = await q(db).selectFrom("recommendations").select("recommendation_id").where("tenant_id", "=", tenant).where("cycle_id", "=", event.cycleId).where("run_id", "=", event.runId).limit(1).executeTakeFirst();
       stale = cycle!.exposureApprovedRunId !== event.runId || have !== undefined;
     }
     if (stale) {
