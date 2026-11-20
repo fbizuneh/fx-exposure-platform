@@ -90,3 +90,6 @@ export const fmt = (d: Num): string => {
   const s = d.toDecimalPlaces(4).toFixed(4);
   return /\.\d{2}00$/.test(s) ? s.slice(0, -2) : s;
 };
+
+/** A pair without regard to which currency is written first: "USD-EUR" and "EUR-USD" are the same pair for a ratio. */
+export const pairKey = (pair: string): string => pair.split("-").sort().join("-");

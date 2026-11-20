@@ -20,9 +20,18 @@ export interface HedgePolicy {
   readonly saved: boolean;
 }
 
-export type RecommendationStatus = "OPEN" | "ACCEPTED" | "OVERRIDDEN" | "DISMISSED" | "LAPSED" | "SUPERSEDED" | "NONE";
+/** DECIDING: an accept or override has won and its pre-trade is being made; it ends as accepted, overridden, or back to open if FX Trade refuses. */
+export type RecommendationStatus = "OPEN" | "DECIDING" | "ACCEPTED" | "OVERRIDDEN" | "DISMISSED" | "LAPSED" | "SUPERSEDED" | "NONE";
 export type FollowUp = "NOT_STARTED" | "OPEN" | "PARTLY_EXECUTED" | "EXECUTED" | "CANCELLED";
-export type NoActionReason = "WITHIN_TARGET" | "ROUNDS_TO_ZERO" | "BELOW_MINIMUM" | "NO_RATE";
+export type NoActionReason = "WITHIN_TARGET" | "ROUNDS_TO_ZERO" | "BELOW_MINIMUM" | "NO_RATE" | "NO_TRADING_ENTITY";
+/** What to tell the user for each reason a group has no actionable recommendation. */
+export const NO_ACTION_MESSAGES: Readonly<Record<NoActionReason, string>> = {
+  WITHIN_TARGET: "Already hedged to the target ratio.",
+  ROUNDS_TO_ZERO: "The amount needed is smaller than the rounding step.",
+  BELOW_MINIMUM: "The rounded amount is below the minimum hedge amount.",
+  NO_RATE: "The spot rate needed to convert the minimum hedge amount is missing.",
+  NO_TRADING_ENTITY: "This netting group has no entity. Configure a default trading entity in the hedge policy to get a recommendation for it.",
+};
 
 export interface Recommendation {
   readonly recommendationId: string;
@@ -37,6 +46,8 @@ export interface Recommendation {
   readonly currencyPair: string;
   readonly exposureCurrency: string;
   readonly otherCurrency: string;
+  /** The group's entity when the netting level has one, otherwise the policy's default trading entity; null when neither exists. */
+  readonly tradingEntityCode: string | null;
   /** In the exposure currency, signed: positive is long. */
   readonly grossExposure: string;
   readonly hedgedAmount: string;

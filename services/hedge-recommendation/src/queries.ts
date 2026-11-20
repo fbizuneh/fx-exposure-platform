@@ -34,7 +34,7 @@ type Row = Selectable<HedgeRecommendationDatabase["recommendations"]>;
 export const toRecommendation = (r: Row): Recommendation => ({
   recommendationId: r.recommendation_id, programId: r.program_id as ProgramId, cycleId: r.cycle_id as CycleId, runId: r.run_id, strategy: r.strategy as Strategy,
   groupNo: r.group_no, nettingLevel: r.netting_level, region: r.region, entityCode: r.entity_code, currencyPair: r.currency_pair, exposureCurrency: r.exposure_currency,
-  otherCurrency: r.other_currency, grossExposure: amount(r.gross_exposure), hedgedAmount: amount(r.hedged_amount), ratio: ratio(r.ratio), targetHedge: amount(r.target_hedge),
+  otherCurrency: r.other_currency, tradingEntityCode: r.trading_entity_code, grossExposure: amount(r.gross_exposure), hedgedAmount: amount(r.hedged_amount), ratio: ratio(r.ratio), targetHedge: amount(r.target_hedge),
   neededAmount: amount(r.needed_amount), rounding: amount(r.rounding), minExposureAmount: opt(r.min_exposure_amount), action: r.action as Recommendation["action"],
   reason: r.reason as NoActionReason | null, direction: r.direction as Recommendation["direction"], amount: opt(r.amount), instrument: r.instrument as Recommendation["instrument"],
   valueDate: r.value_date, fixingDate: r.fixing_date, status: r.status as RecommendationStatus, decidedAmount: opt(r.decided_amount), decidedBy: r.decided_by,

@@ -4,7 +4,7 @@ Tier: core.
 
 ## Owns
 - Recommendations for a cycle: the calculation behind each, its decision (who, when, amount, note) and its follow-up status
-- Its hedge policy per program: target ratio (with pair overrides), minimum hedge amount in the display currency, rounding (with currency overrides), tenor, trading entity
+- Its hedge policy per program: target ratio (with pair overrides), minimum hedge amount in the display currency, rounding (with currency overrides), tenor, default trading entity
 - Decisions, frozen at approval (undecided ones lapse)
 
 ## Answers
@@ -30,7 +30,8 @@ Events carry identifiers only.
 
 ## Rules worth knowing
 - The app calls `onRunFinished` for each "run finished" event; a rerun replaces undecided recommendations and never doubles a group that has a decided one.
-- `decide` (accept, override, dismiss) needs the matching `hedge-recommendation:*` permission; accept and override make the pre-trade in FX Trade first, so a refusal leaves the recommendation open.
+- `decide` (accept, override, dismiss) needs the matching `hedge-recommendation:*` permission. The first decision wins atomically; only a winning accept or override reaches FX Trade, from its recorded amount (decision 0011 item 11).
+- The pre-trade is booked by the group's entity when the netting level has one, else the policy's default trading entity; with neither, no actionable recommendation.
 - `onCycleClosed` lapses what is still open when a cycle is approved, skipped or deleted.
 - `refreshFollowUp` follows the pre-trade's status.
 

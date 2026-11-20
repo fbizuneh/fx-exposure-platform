@@ -8,6 +8,8 @@ import { asOfDate, programId, type TenantId } from "@shared/kernel";
 import type { Actor } from "@services/identity/contract";
 import { migrate } from "../../scripts/migrate.mjs";
 import { composeApp, type App } from "./compose.ts";
+import { NO_ACTION_MESSAGES } from "../../services/hedge-recommendation/contract/index.ts";
+import { connect as connectHr, createHedgeRecommendation } from "../../services/hedge-recommendation/src/index.ts";
 import { parseExecutedFile } from "../../services/fx-trade/src/index.ts";
 import { drain, startDueCycles } from "./dispatch.ts";
 
@@ -39,7 +41,7 @@ const spot = (base: string, quote: string, allIn: string) => ({ base, quote, typ
 const row = (entityCode: string, currency: string, balance: string) => ({ entityCode, accountNumber: "4000", currency, balance, debit: null, credit: null, asOf: null, dimensions: {} });
 
 const admins = new Map<TenantId, Actor>();
-async function tenantWithProgram(): Promise<TenantId> {
+async function tenantWithProgram(level = "ENTITY"): Promise<TenantId> {
   const t = await app.identity.commands.createTenant("Acme");
   const ops = (await app.identity.commands.createPlatformUser({ issuer: "platform", externalSubject: randomUUID() })) as string;
   await app.identity.commands.enableProgram(t, programId("BS"), ops);
@@ -47,7 +49,7 @@ async function tenantWithProgram(): Promise<TenantId> {
   admins.set(t, { kind: "user", userId: adminId });
   await app.exposureManagement.commands.defineProgram({
     tenantId: t, programId: "BS", name: "Daily balance sheet", type: "BALANCE_SHEET", effectiveFrom: "2026-01-01", actor: admins.get(t)!,
-    settings: { nettingLevel: "ENTITY", bucketScheme: { kind: "MONTHS" }, schedule: { frequency: "DAILY", asOfOffsetDays: 1 } },
+    settings: { nettingLevel: level, bucketScheme: { kind: "MONTHS" }, schedule: { frequency: "DAILY", asOfOffsetDays: 1 } },
   });
   const md = (kind: "applyEntities" | "applyHierarchy" | "applyAccounts" | "applyCurrencies", rows: unknown[]) =>
     app.masterData.commands[kind]({ tenantId: t, sourceSystem: "erp", asOf: D0, mode: "SNAPSHOT", rows: rows as never, by: "test" });
@@ -174,9 +176,9 @@ e2e("approval releases a recommended pre-trade; a simulated platform returns the
 });
 
 /** A tenant whose cycle for the 12th has finished its run, with the recommendations it produced. */
-async function finishedCycle(policy?: object) {
+async function finishedCycle(policy?: object, level = "ENTITY") {
   clock.now = new Date("2026-11-11T23:00:00Z");
-  const t = await tenantWithProgram();
+  const t = await tenantWithProgram(level);
   const admin = admins.get(t)!;
   if (policy) await app.hedgeRecommendation.commands.setPolicy({ tenantId: t, programId: programId("BS"), actor: admin, policy: policy as never });
   await sendRates(t, "2026-11-11", "1.1");
@@ -195,8 +197,7 @@ e2e("a finished run produces recommendations; accepting one makes a draft pre-tr
   assert.equal(recs.find((r) => r.entityCode === "DE01")!.reason, "ROUNDS_TO_ZERO", "550 USD against a rounding of 1,000 gives nothing to trade");
   assert.ok(act[0]!.valueDate! > "2026-11-12" && ![0, 6].includes(new Date(`${act[0]!.valueDate}T00:00:00Z`).getUTCDay()), "a weekday after the as-of date");
 
-  await assert.rejects(app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: act[0]!.recommendationId, actor: admin, action: "ACCEPT" }), /trading entity/);
-  await app.hedgeRecommendation.commands.setPolicy({ tenantId: t, programId: programId("BS"), actor: admin, policy: defaults });
+  assert.deepEqual([act[0]!.tradingEntityCode, recs.find((r) => r.entityCode === "DE01")!.tradingEntityCode], ["US01", "DE01"], "at entity level each group is booked by its own entity; no policy is needed");
   const accepted = await app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: act[0]!.recommendationId, actor: admin, action: "ACCEPT", note: "ok" });
   assert.deepEqual([accepted.status, accepted.decidedAmount, accepted.followUp, accepted.decisionNote], ["ACCEPTED", "1000.00", "OPEN", "ok"]);
   assert.ok(accepted.decidedBy!.startsWith("user:") && accepted.decidedAt !== null);
@@ -220,6 +221,16 @@ e2e("a finished run produces recommendations; accepting one makes a draft pre-tr
   await app.fxTrade.commands.importExecutedTrades({ tenantId: t, rows: parseExecutedFile(reply), by: "simulator" });
   await drain(app);
   assert.equal((await app.hedgeRecommendation.questions.getRecommendation(t, accepted.recommendationId))!.followUp, "EXECUTED");
+
+  // The next cycle counts the executed hedge in the entity group it was booked for, so that group is already at target.
+  clock.now = new Date("2026-11-12T23:00:00Z");
+  await sendRates(t, "2026-11-12", "1.1");
+  await sendBalances(t, "2026-11-12");
+  await drain(app);
+  const [next] = await startDueCycles(app, t, "2026-11-13", admin);
+  await drain(app);
+  const us = (await app.hedgeRecommendation.questions.recommendations(t, next as never)).find((r) => r.entityCode === "US01" && r.currencyPair === "EUR-USD")!;
+  assert.deepEqual([us.hedgedAmount, us.action, us.reason], ["-1000.00", "NONE", "WITHIN_TARGET"]);
 });
 
 e2e("the policy shapes the recommendation: ratio override, rounding override, and a minimum set in the display currency and tested in the exposure currency", async () => {
@@ -273,4 +284,135 @@ e2e("the same run-finished event delivered twice changes nothing the second time
   assert.deepEqual((await app.hedgeRecommendation.questions.recommendations(t, cycle)).map((r) => r.recommendationId), once);
   assert.equal(await app.hedgeRecommendation.commands.onRunFinished({ ...event, eventId: randomUUID(), runId: randomUUID() }), "IGNORED", "not the cycle's current run");
   assert.equal(recs.length, once.length);
+});
+
+e2e("a group without an entity is booked by the policy's default trading entity; with none configured it gets no actionable recommendation and says why", async () => {
+  const roundTo100 = { ...defaults, roundingDefault: "100" };
+  const without = await finishedCycle({ ...roundTo100, tradingEntityCode: null }, "GROUP_NATURAL");
+  const none = without.recs.find((r) => r.currencyPair === "EUR-USD")!;
+  assert.deepEqual([none.entityCode, none.action, none.status, none.reason, none.tradingEntityCode, none.direction, none.amount], [null, "NONE", "NONE", "NO_TRADING_ENTITY", null, null, null]);
+  assert.match(NO_ACTION_MESSAGES.NO_TRADING_ENTITY, /default trading entity/);
+
+  const withDefault = await finishedCycle(roundTo100, "GROUP_NATURAL");
+  const rec = withDefault.recs.find((r) => r.currencyPair === "EUR-USD")!;
+  assert.deepEqual([rec.entityCode, rec.action, rec.tradingEntityCode, rec.direction, rec.amount, rec.status], [null, "HEDGE", "US01", "SELL", "500.00", "OPEN"]);
+  const accepted = await app.hedgeRecommendation.commands.decide({ tenantId: withDefault.t, recommendationId: rec.recommendationId, actor: withDefault.admin, action: "ACCEPT" });
+  assert.equal((await app.fxTrade.questions.getPreTrade(withDefault.t, accepted.preTradeId!))!.tradingEntityCode, "US01");
+});
+
+e2e("a 50% override entered as USD-EUR applies to the EUR-USD group instead of silently using the default", async () => {
+  const { recs } = await finishedCycle({ ...defaults, roundingDefault: "100", ratioOverrides: [{ pair: "USD-EUR", ratio: "0.5" }] });
+  const us = recs.find((r) => r.entityCode === "US01")!;
+  assert.deepEqual([us.currencyPair, us.ratio, us.amount, us.direction], ["EUR-USD", "0.5", "500.00", "SELL"]);
+  const { t, admin } = await finishedCycle();
+  await assert.rejects(
+    app.hedgeRecommendation.commands.setPolicy({ tenantId: t, programId: programId("BS"), actor: admin, policy: { ...defaults, ratioOverrides: [{ pair: "EUR-USD", ratio: "0.5" }, { pair: "USD-EUR", ratio: "0.8" }] } }),
+    /appears twice/,
+  );
+});
+
+/** A second Hedge Recommendation over the same database whose call to FX Trade is replaced, to play out failures. */
+function withFxTrade(createPreTrades: (input: never) => Promise<readonly { recommendationId: string; preTradeId: string }[]>) {
+  const db = connectHr(url!);
+  const hr = createHedgeRecommendation(db, {
+    access: app.identity.questions, management: app.exposureManagement.questions, analysis: app.exposureAnalysis.questions, masterData: app.masterData.questions,
+    rates: app.fxRate.questions, preTrades: app.fxTrade.questions, createPreTrades: createPreTrades as never,
+  }, { now: () => clock.now });
+  return { hr, done: () => db.destroy() };
+}
+const drafts = async (t: TenantId, cycle: never, recommendationId: string) => (await app.fxTrade.questions.preTrades(t, { cycleId: cycle })).filter((p) => p.recommendationId === recommendationId);
+const real = (input: never) => app.fxTrade.commands.createPreTrades(input);
+
+e2e("accept and dismiss racing: exactly one wins, and only an accept leaves a draft, matching the recorded amount, that approval releases", async () => {
+  const seen = new Set<string>();
+  for (let i = 0; i < 6; i++) {
+    const { t, admin, cycle, recs } = await finishedCycle(defaults);
+    const rec = recs.find((r) => r.action === "HEDGE")!;
+    const results = await Promise.allSettled([
+      app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "ACCEPT" }),
+      app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "DISMISS" }),
+    ]);
+    assert.equal(results.filter((r) => r.status === "fulfilled").length, 1, "exactly one decision wins");
+    const final = (await app.hedgeRecommendation.questions.getRecommendation(t, rec.recommendationId))!;
+    seen.add(final.status);
+    await app.exposureManagement.commands.approveCycle({ tenantId: t, cycleId: cycle, actor: admin });
+    await drain(app);
+    const made = await drafts(t, cycle, rec.recommendationId);
+    if (final.status === "DISMISSED") assert.deepEqual(made, [], "a dismissal that won leaves nothing to release");
+    else {
+      assert.equal(final.status, "ACCEPTED");
+      assert.deepEqual(made.map((p) => [p.status, p.legs[0]!.dealAmount]), [["READY", "1000.0000"]]);
+      assert.equal(final.decidedAmount, "1000.00");
+    }
+  }
+  assert.ok(seen.size >= 1);
+});
+
+e2e("an override racing an accept: one draft, and its amount is the winning decision's", async () => {
+  const { t, admin, cycle, recs } = await finishedCycle(defaults);
+  const rec = recs.find((r) => r.action === "HEDGE")!;
+  const results = await Promise.allSettled([
+    app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "ACCEPT" }),
+    app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "OVERRIDE", amount: "300" }),
+  ]);
+  assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+  const final = (await app.hedgeRecommendation.questions.getRecommendation(t, rec.recommendationId))!;
+  const made = await drafts(t, cycle, rec.recommendationId);
+  assert.equal(made.length, 1);
+  assert.equal(Number(made[0]!.legs[0]!.dealAmount), Number(final.decidedAmount));
+});
+
+e2e("a definite refusal from FX Trade reopens the recommendation and leaves no draft; it can then be dismissed", async () => {
+  const { t, admin, cycle, recs } = await finishedCycle(defaults);
+  const rec = recs.find((r) => r.action === "HEDGE")!;
+  const { hr, done } = withFxTrade(async () => { throw Object.assign(new Error("no"), { problems: ["entity is not a hedge execution entity"] }); });
+  try {
+    await assert.rejects(hr.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "ACCEPT" }), /FX Trade refused the pre-trade: entity is not a hedge execution entity/);
+    assert.equal((await hr.questions.getRecommendation(t, rec.recommendationId))!.status, "OPEN");
+    assert.equal((await hr.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "DISMISS" })).status, "DISMISSED");
+    assert.deepEqual(await drafts(t, cycle, rec.recommendationId), []);
+  } finally { await done(); }
+});
+
+e2e("FX Trade answering after a failure is not mistaken for a refusal: the draft that exists is the one recorded, exactly once", async () => {
+  const { t, admin, cycle, recs } = await finishedCycle(defaults);
+  const rec = recs.find((r) => r.action === "HEDGE")!;
+  const { hr, done } = withFxTrade(async (input) => { await real(input); throw new Error("connection reset after commit"); });
+  try {
+    const out = await hr.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "OVERRIDE", amount: "300" });
+    assert.deepEqual([out.status, out.decidedAmount], ["OVERRIDDEN", "300.00"]);
+    assert.equal((await drafts(t, cycle, rec.recommendationId)).length, 1);
+    assert.equal((await app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "OVERRIDE", amount: "300" }).catch((e: Error) => e.message)).toString().includes("overridden"), true, "deciding again is refused, not repeated");
+  } finally { await done(); }
+});
+
+e2e("when FX Trade cannot be reached the winning decision stays recorded: dismissal is refused, a retry finishes it with the recorded amount, and nothing else can create a draft", async () => {
+  const { t, admin, cycle, recs } = await finishedCycle(defaults);
+  const rec = recs.find((r) => r.action === "HEDGE")!;
+  const down = withFxTrade(async () => { throw new Error("FX Trade unreachable"); });
+  try {
+    await assert.rejects(down.hr.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "OVERRIDE", amount: "300" }), /unreachable/);
+  } finally { await down.done(); }
+  assert.equal((await app.hedgeRecommendation.questions.getRecommendation(t, rec.recommendationId))!.status, "DECIDING");
+  await assert.rejects(app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "DISMISS" }), /already in progress/);
+  await assert.rejects(app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "ACCEPT" }), /already in progress/);
+  // The retry may pass a different amount; the recorded decision is what is made.
+  const out = await app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "OVERRIDE", amount: "999" });
+  assert.deepEqual([out.status, out.decidedAmount], ["OVERRIDDEN", "300.00"]);
+  const made = await drafts(t, cycle, rec.recommendationId);
+  assert.deepEqual(made.map((p) => p.legs[0]!.dealAmount), ["300.0000"]);
+});
+
+e2e("approval settles a decision that never got its pre-trade: it lapses, and nothing releasable exists", async () => {
+  const { t, admin, cycle, recs } = await finishedCycle(defaults);
+  const rec = recs.find((r) => r.action === "HEDGE")!;
+  const down = withFxTrade(async () => { throw new Error("FX Trade unreachable"); });
+  try {
+    await assert.rejects(down.hr.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "ACCEPT" }), /unreachable/);
+  } finally { await down.done(); }
+  await app.exposureManagement.commands.approveCycle({ tenantId: t, cycleId: cycle, actor: admin });
+  await drain(app);
+  const after = (await app.hedgeRecommendation.questions.getRecommendation(t, rec.recommendationId))!;
+  assert.deepEqual([after.status, after.decidedBy, after.preTradeId], ["LAPSED", null, null]);
+  assert.deepEqual(await drafts(t, cycle, rec.recommendationId), []);
 });

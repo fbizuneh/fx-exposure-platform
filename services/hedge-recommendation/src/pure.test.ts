@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { D, addTenor, recommend, roundDownToStep, valueDateFor, weekdaysBefore } from "./calc.ts";
+import { D, addTenor, pairKey, recommend, roundDownToStep, valueDateFor, weekdaysBefore } from "./calc.ts";
 import { policyProblems } from "./policy.ts";
 
 const base = { grossExposure: "1000000", hedgedAmount: "0", ratio: "1", rounding: "1000", minExposure: null, rateMissing: false } as const;
@@ -51,4 +51,12 @@ test("a policy is checked before it is saved", () => {
   assert.deepEqual(policyProblems(ok), []);
   const bad = policyProblems({ ...ok, defaultRatio: "-1", roundingDefault: "0", tenor: "monthly", ratioOverrides: [{ pair: "EURUSD", ratio: "1" }], roundingOverrides: [{ currency: "EUR", rounding: "100" }, { currency: "EUR", rounding: "10" }] });
   assert.equal(bad.length, 5);
+});
+
+test("a pair override is the same pair whichever currency is written first, and a pair of one currency is rejected", () => {
+  assert.equal(pairKey("USD-EUR"), pairKey("EUR-USD"));
+  const ok = { defaultRatio: "1", ratioOverrides: [], minHedgeDisplay: "0", roundingDefault: "1000", roundingOverrides: [], tenor: "1M", tradingEntityCode: null };
+  assert.deepEqual(policyProblems({ ...ok, ratioOverrides: [{ pair: "USD-EUR", ratio: "0.5" }] }), []);
+  assert.match(policyProblems({ ...ok, ratioOverrides: [{ pair: "EUR-USD", ratio: "0.5" }, { pair: "USD-EUR", ratio: "0.8" }] })[0]!, /appears twice/);
+  assert.match(policyProblems({ ...ok, ratioOverrides: [{ pair: "EUR-EUR", ratio: "0.5" }] })[0]!, /same currency twice/);
 });

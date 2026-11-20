@@ -1,25 +1,19 @@
 // Turn a finished run's net exposure into recommendations (decision 0011 items 2 to 8, 12).
 import { randomUUID } from "node:crypto";
 import type { CycleId, ProgramId, TenantId } from "@shared/kernel";
-import { D, fmt, recommend, valueDateFor, weekdaysBefore } from "./calc.ts";
-import { q, type Db, type Queryable } from "./db.ts";
+import { D, fmt, pairKey, recommend, valueDateFor, weekdaysBefore } from "./calc.ts";
+import { firstTime } from "./events.ts";
+import { q, type Db } from "./db.ts";
 import { announce } from "./outbox.ts";
 import type { Collaborators } from "./ports.ts";
 import { readPolicy } from "./queries.ts";
 
 export interface RunFinishedEvent { readonly eventId: string; readonly tenantId: TenantId; readonly cycleId: CycleId; readonly programId: ProgramId; readonly runId: string }
-export interface CycleClosedEvent { readonly eventId: string; readonly tenantId: TenantId; readonly cycleId: CycleId }
 
 const groupKey = (region: string | null, entity: string | null, pair: string, exposureCurrency: string): string => [region ?? "", entity ?? "", pair, exposureCurrency].join("\u0000");
 const DECIDED = ["ACCEPTED", "OVERRIDDEN", "DISMISSED"];
 
 export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
-  /** True the first time an event is seen; the mark is written in the caller's transaction. */
-  async function firstTime(tx: Queryable, tenant: TenantId, eventId: string): Promise<boolean> {
-    const r = await q(tx).insertInto("processed_events").values({ tenant_id: tenant, event_id: eventId }).onConflict((oc) => oc.doNothing()).executeTakeFirst();
-    return Number(r.numInsertedOrUpdatedRows ?? 0) > 0;
-  }
-
   /** For a "run finished" event: replaces the cycle's undecided recommendations with ones from this run. */
   async function onRunFinished(event: RunFinishedEvent): Promise<"ISSUED" | "IGNORED"> {
     const { tenantId: tenant } = event;
@@ -45,7 +39,7 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
         rateTo.set(ccy, r ? r.rate : null);
       }
     }
-    const ratioFor = new Map(policy.ratioOverrides.map((o) => [o.pair, o.ratio]));
+    const ratioFor = new Map(policy.ratioOverrides.map((o) => [pairKey(o.pair), o.ratio]));
     const roundingFor = new Map(policy.roundingOverrides.map((o) => [o.currency, o.rounding]));
     const valueDate = valueDateFor(run.asOf, policy.tenor);
 
@@ -60,20 +54,25 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
       for (const g of groups) {
         if (decided.has(groupKey(g.region, g.entityCode, g.currencyPair, g.exposureCurrency))) continue;
         const other = g.exposureCurrency === g.currency1 ? g.currency2 : g.currency1;
-        const ratio = ratioFor.get(g.currencyPair) ?? policy.defaultRatio;
+        const ratio = ratioFor.get(pairKey(g.currencyPair)) ?? policy.defaultRatio;
         const rounding = roundingFor.get(g.exposureCurrency) ?? policy.roundingDefault;
         const rate = rateTo.get(g.exposureCurrency);
         const minExposure = minDisplay.isZero() ? null : rate ? fmt(minDisplay.div(rate)) : null;
         const hedged = g.hedges.exposureAmount;
         const out = recommend({ grossExposure: g.gross.exposureAmount, hedgedAmount: hedged, ratio, rounding, minExposure, rateMissing: minDisplay.gt(0) && !rate });
-        const instrument = out.action === "HEDGE" ? (ndf.has(g.exposureCurrency) ? "NDF" : "FORWARD") : null;
+        // The trade is booked by the group's entity when the netting level has one; otherwise by the policy's default trading entity (decision 0011 item 9).
+        const tradingEntity = g.entityCode ?? policy.tradingEntityCode;
+        const noEntity = out.action === "HEDGE" && tradingEntity === null;
+        const action = noEntity ? "NONE" : out.action;
+        const instrument = action === "HEDGE" ? (ndf.has(g.exposureCurrency) ? "NDF" : "FORWARD") : null;
         rows.push({
           tenant_id: tenant, recommendation_id: randomUUID(), program_id: event.programId, cycle_id: event.cycleId, run_id: event.runId, strategy: "hedge-ratio-adjustment",
           group_no: g.groupNo, netting_level: g.nettingLevel, region: g.region, entity_code: g.entityCode, currency_pair: g.currencyPair, exposure_currency: g.exposureCurrency, other_currency: other,
           gross_exposure: g.gross.exposureAmount, hedged_amount: hedged, ratio, target_hedge: fmt(out.target), needed_amount: fmt(out.needed), rounding, min_exposure_amount: minExposure,
-          action: out.action, reason: out.reason, direction: out.direction, amount: out.amount === null ? null : fmt(out.amount), instrument,
-          value_date: out.action === "HEDGE" ? valueDate : null, fixing_date: instrument === "NDF" ? weekdaysBefore(valueDate, 2) : null,
-          status: out.action === "HEDGE" ? "OPEN" : "NONE", created_at: clock(),
+          trading_entity_code: tradingEntity, action, reason: noEntity ? "NO_TRADING_ENTITY" : out.reason, direction: noEntity ? null : out.direction,
+          amount: out.amount === null || noEntity ? null : fmt(out.amount), instrument,
+          value_date: action === "HEDGE" ? valueDate : null, fixing_date: instrument === "NDF" ? weekdaysBefore(valueDate, 2) : null,
+          status: action === "HEDGE" ? "OPEN" : "NONE", created_at: clock(),
         });
       }
       for (let i = 0; i < rows.length; i += 200) await q(tx).insertInto("recommendations").values(rows.slice(i, i + 200)).execute();
@@ -82,14 +81,5 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
     });
   }
 
-  /** Approval, skip or deletion of a cycle: what nobody decided lapses. */
-  async function onCycleClosed(event: CycleClosedEvent): Promise<number> {
-    return db.transaction().execute(async (tx) => {
-      if (!(await firstTime(tx, event.tenantId, event.eventId))) return 0;
-      const r = await q(tx).updateTable("recommendations").set({ status: "LAPSED" }).where("tenant_id", "=", event.tenantId).where("cycle_id", "=", event.cycleId).where("status", "=", "OPEN").executeTakeFirst();
-      return Number(r.numUpdatedRows);
-    });
-  }
-
-  return { onRunFinished, onCycleClosed };
+  return { onRunFinished };
 }

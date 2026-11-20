@@ -2,7 +2,7 @@
 import type { ProgramId, TenantId } from "@shared/kernel";
 import type { Actor } from "@services/identity/contract";
 import { require_, who } from "./access.ts";
-import { TENOR } from "./calc.ts";
+import { TENOR, pairKey } from "./calc.ts";
 import { q, type Db } from "./db.ts";
 import type { Collaborators } from "./ports.ts";
 
@@ -36,8 +36,10 @@ export function policyProblems(p: PolicyInput): string[] {
   const pairs = new Set<string>();
   for (const o of p.ratioOverrides) {
     if (!/^[A-Z]{3}-[A-Z]{3}$/.test(o.pair)) out.push(`ratio override pair ${o.pair} must look like EUR-USD`);
-    if (pairs.has(o.pair)) out.push(`ratio override for ${o.pair} appears twice`);
-    pairs.add(o.pair);
+    if (/^[A-Z]{3}-[A-Z]{3}$/.test(o.pair) && o.pair.slice(0, 3) === o.pair.slice(4)) out.push(`ratio override pair ${o.pair} has the same currency twice`);
+    // EUR-USD and USD-EUR are the same pair: a ratio does not depend on which is written first.
+    if (pairs.has(pairKey(o.pair))) out.push(`ratio override for ${o.pair} appears twice (EUR-USD and USD-EUR are the same pair)`);
+    pairs.add(pairKey(o.pair));
     ratio(`ratio override ${o.pair}`, o.ratio);
   }
   const ccys = new Set<string>();

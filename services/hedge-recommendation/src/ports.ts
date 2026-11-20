@@ -30,7 +30,7 @@ export interface Collaborators {
   readonly analysis: Pick<ExposureAnalysisQuestions, "currentRun" | "netExposures">;
   readonly masterData: Pick<MasterDataQuestions, "getCurrencies">;
   readonly rates: Pick<FxRateQuestions, "getRate">;
-  readonly preTrades: Pick<FxTradeQuestions, "getPreTrade">;
+  readonly preTrades: Pick<FxTradeQuestions, "getPreTrade" | "preTrades">;
   /** FX Trade's command, handed in by app/. */
   readonly createPreTrades: (input: { tenantId: TenantId; cycleId: CycleId; items: readonly PreTradeRequest[]; by: string }) => Promise<readonly { recommendationId: string; preTradeId: string }[]>;
 }
