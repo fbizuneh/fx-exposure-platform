@@ -1,5 +1,5 @@
 // What a sync, upload or manual edit sends in. Rows refer to each other by code, never by id.
-import type { EntityType, HierarchyClassification, NormalBalance, StatementType } from "../contract/index.ts";
+import type { EntityType, Weekday, HierarchyClassification, NormalBalance, StatementType } from "../contract/index.ts";
 
 export interface EntityRow {
   readonly code: string;
@@ -38,8 +38,16 @@ export interface CurrencyRow {
   readonly isNdf: boolean;
 }
 
+/** One currency's business-day calendar (decision 0014). */
+export interface CalendarRow {
+  readonly currencyCode: string;
+  readonly weekendDays: readonly Weekday[];
+  readonly coveredThrough: string;
+  readonly holidays: readonly { readonly date: string; readonly name: string | null }[];
+}
+
 export type Mode = "SNAPSHOT" | "PARTIAL";
-export type Kind = "ENTITY" | "HIERARCHY" | "ACCOUNT" | "CURRENCY";
+export type Kind = "ENTITY" | "HIERARCHY" | "ACCOUNT" | "CURRENCY" | "CALENDAR";
 
 /** Natural key of a hierarchy node or account within its chart. */
 export const chartKey = (chartCode: string, code: string): string => JSON.stringify([chartCode, code]);

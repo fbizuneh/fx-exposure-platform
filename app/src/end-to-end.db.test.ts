@@ -186,11 +186,12 @@ e2e("approval releases a recommended pre-trade; a simulated platform returns the
 });
 
 /** A tenant whose cycle for the 12th has finished its run, with the recommendations it produced. */
-async function finishedCycle(policy?: object, level = "ENTITY", approve = true, segregation = false) {
+async function finishedCycle(policy?: object, level = "ENTITY", approve = true, segregation = false, before?: (t: TenantId) => Promise<unknown>) {
   clock.now = new Date("2026-11-11T23:00:00Z");
   const t = await tenantWithProgram(level, segregation);
   const admin = admins.get(t)!;
   if (policy) await app.hedgeRecommendation.commands.setPolicy({ tenantId: t, programId: programId("BS"), actor: admin, policy: policy as never });
+  if (before) await before(t);
   await sendRates(t, "2026-11-11", "1.1");
   await sendBalances(t, "2026-11-11");
   await drain(app);
@@ -905,4 +906,32 @@ e2e("an interrupted approval strands its holder's hedge decisions; recovery lets
   assert.ok((await app.exposureManagement.questions.getCycle(t, cycle))!.approvedAt);
   assert.equal((await trailOf(t, { action: "cycle.approval-recovered" })).length, 1, "one recovery recorded");
   await dyingDb.destroy();
+});
+
+
+const loadCalendars = (t: TenantId, rows: { currencyCode: string; weekendDays: ("SAT" | "SUN")[]; coveredThrough: string; holidays: { date: string; name: string | null }[] }[]) =>
+  app.masterData.commands.applyCalendars({ tenantId: t, sourceSystem: "manual", asOf: asOfDate("2026-01-01"), mode: "PARTIAL", rows, by: "test" });
+
+e2e("value dates follow the pair's business-day calendars; a currency without a calendar, or one that ends too early, is flagged", async () => {
+  // The cycle's as-of date is the 11th; plus one month is Friday 11 December 2026, a business day. With no calendars it stays, and both currencies are flagged.
+  const bare = await finishedCycle();
+  const rec = bare.recs.find((r) => r.action === "HEDGE")!;
+  assert.deepEqual([rec.valueDate, rec.calendarGaps], ["2026-12-11", [{ currency: "EUR", reason: "NO_CALENDAR" }, { currency: "USD", reason: "NO_CALENDAR" }]]);
+  assert.deepEqual(bare.recs.find((r) => r.action === "NONE")!.calendarGaps, [], "a group with no trade has no dates to doubt");
+
+  // USD is closed on the 11th and EUR on the 14th (the 12th and 13th are a weekend): the first day open in both is the 15th. The holiday of either currency counts, both calendars cover it, so nothing is flagged.
+  const full = await finishedCycle(undefined, "ENTITY", true, false, (t) => loadCalendars(t, [
+    { currencyCode: "USD", weekendDays: ["SAT", "SUN"], coveredThrough: "2026-12-31", holidays: [{ date: "2026-12-11", name: "test holiday" }] },
+    { currencyCode: "EUR", weekendDays: ["SAT", "SUN"], coveredThrough: "2026-12-31", holidays: [{ date: "2026-12-14", name: null }] },
+  ]));
+  const fullRec = full.recs.find((r) => r.action === "HEDGE")!;
+  assert.deepEqual([fullRec.valueDate, fullRec.calendarGaps], ["2026-12-15", []]);
+
+  // USD's holidays are known only to 1 December: the value date is judged on what is there and the gap says USD could not be fully trusted.
+  const short = await finishedCycle(undefined, "ENTITY", true, false, (t) => loadCalendars(t, [
+    { currencyCode: "USD", weekendDays: ["SAT", "SUN"], coveredThrough: "2026-12-01", holidays: [] },
+    { currencyCode: "EUR", weekendDays: ["SAT", "SUN"], coveredThrough: "2026-12-31", holidays: [] },
+  ]));
+  const shortRec = short.recs.find((r) => r.action === "HEDGE")!;
+  assert.deepEqual([shortRec.valueDate, shortRec.calendarGaps], ["2026-12-11", [{ currency: "USD", reason: "CALENDAR_ENDED" }]]);
 });

@@ -28,7 +28,7 @@ export interface Collaborators {
   readonly access: Pick<IdentityQuestions, "checkAccess">;
   readonly management: Pick<ExposureManagementQuestions, "getCycle">;
   readonly analysis: Pick<ExposureAnalysisQuestions, "currentRun" | "netExposures">;
-  readonly masterData: Pick<MasterDataQuestions, "getCurrencies">;
+  readonly masterData: Pick<MasterDataQuestions, "getCurrencies" | "getCalendars">;
   readonly rates: Pick<FxRateQuestions, "getRate">;
   readonly preTrades: Pick<FxTradeQuestions, "getPreTrade" | "preTrades">;
   /** FX Trade's command, handed in by app/. */

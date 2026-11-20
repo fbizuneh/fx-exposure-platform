@@ -66,6 +66,19 @@ export interface Currency {
   readonly isNdf: boolean;
 }
 
+export const WEEKDAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] as const;
+export type Weekday = (typeof WEEKDAYS)[number];
+
+/** One currency's business-day calendar (decision 0014): the days of the week that are not business days, and the holidays loaded. */
+export interface CurrencyCalendar {
+  readonly currency: string;
+  /** Usually SAT and SUN. */
+  readonly weekendDays: readonly Weekday[];
+  /** The holidays are known up to and including this date; the calendar says nothing about later days. */
+  readonly coveredThrough: string;
+  readonly holidays: readonly { readonly date: string; readonly name: string | null }[];
+}
+
 /** Every question reads the version valid on `asOf`, so history does not change when master data does. */
 export interface MasterDataQuestions {
   getEntity(tenantId: TenantId, code: string, asOf: AsOfDate): Promise<Entity | null>;
@@ -80,6 +93,8 @@ export interface MasterDataQuestions {
   ): Promise<readonly Account[]>;
   /** The currencies on record on the date, with whether each trades as an NDF. A currency not on record is not an NDF. */
   getCurrencies(tenantId: TenantId, asOf: AsOfDate): Promise<readonly Currency[]>;
+  /** The calendars of the currencies asked about, as on the date. A currency with no calendar on record is left out. */
+  getCalendars(tenantId: TenantId, currencies: readonly string[], asOf: AsOfDate): Promise<readonly CurrencyCalendar[]>;
   /** For each hierarchy node: its own code, then its ancestors nearest first. Unknown nodes are left out. */
   hierarchyPaths(
     tenantId: TenantId,
@@ -106,7 +121,7 @@ export interface MasterDataChanged {
   readonly tenantId: TenantId;
   readonly occurredAt: string;
   readonly batchId: string;
-  readonly kind: "ENTITY" | "HIERARCHY" | "ACCOUNT" | "CURRENCY";
+  readonly kind: "ENTITY" | "HIERARCHY" | "ACCOUNT" | "CURRENCY" | "CALENDAR";
   readonly asOf: AsOfDate;
 }
 
