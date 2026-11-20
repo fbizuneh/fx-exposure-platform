@@ -62,7 +62,7 @@ export type CycleStage = (typeof CYCLE_STAGES)[number];
 export type CycleOutcome = "SKIPPED" | "DELETED";
 
 export interface CycleHistoryEntry {
-  readonly kind: "INITIATED" | "RUN_STARTED" | "RUN_FINISHED" | "RERUN" | "SKIPPED" | "DELETED" | "APPROVED";
+  readonly kind: "INITIATED" | "RUN_STARTED" | "RUN_FINISHED" | "RERUN" | "SKIPPED" | "DELETED" | "EXPOSURE_APPROVED" | "APPROVED";
   /** "user:<id>" or "platform:<id>"; null when the step came from another service. */
   readonly by: string | null;
   readonly at: string;
@@ -78,6 +78,11 @@ export interface CycleSummary {
   readonly outcome: CycleOutcome | null;
   readonly outcomeReason: string | null;
   readonly rerunCount: number;
+  /** Approve Exposure: set once the completed run is locked. Decisions on recommendations need it; recalculation is refused after it. */
+  readonly exposureApprovedAt: string | null;
+  readonly exposureApprovedBy: string | null;
+  /** The run ID that was locked. */
+  readonly exposureApprovedRunId: string | null;
   readonly approvedAt: string | null;
   readonly approvedBy: string | null;
   readonly initiatedBy: string;
@@ -125,6 +130,13 @@ export interface CycleCompleted extends Announcement {
   readonly cycleId: CycleId;
   readonly programId: ProgramId;
 }
+/** The exposure of the cycle was approved: this exact run is locked (and so are the executed-trade versions it used). */
+export interface ExposureApproved extends Announcement {
+  readonly type: "exposure-management.exposure-approved";
+  readonly cycleId: CycleId;
+  readonly programId: ProgramId;
+  readonly runId: string;
+}
 /** Each service freezes its part under the cycle ID on this. */
 export interface CycleApproved extends Announcement {
   readonly type: "exposure-management.cycle-approved";
@@ -146,4 +158,4 @@ export interface ProgramChanged extends Announcement {
   readonly type: "exposure-management.program-changed";
   readonly programId: ProgramId;
 }
-export type ExposureManagementEvents = CycleInitiated | CycleCompleted | CycleApproved | CycleSkipped | CycleDeleted | ProgramChanged;
+export type ExposureManagementEvents = CycleInitiated | CycleCompleted | ExposureApproved | CycleApproved | CycleSkipped | CycleDeleted | ProgramChanged;

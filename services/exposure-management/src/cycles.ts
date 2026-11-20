@@ -13,7 +13,7 @@ import { randomUUID } from "./outbox.ts";
 /** The cycle cannot take this step as it stands. */
 export class CycleRefused extends Error {}
 
-type HistoryKind = "INITIATED" | "RUN_STARTED" | "RUN_FINISHED" | "RERUN" | "SKIPPED" | "DELETED" | "APPROVED";
+type HistoryKind = "INITIATED" | "RUN_STARTED" | "RUN_FINISHED" | "RERUN" | "SKIPPED" | "DELETED" | "EXPOSURE_APPROVED" | "APPROVED";
 
 /** What Exposure Analysis announces. Its contract will define these with the same fields. */
 export interface RunEvent {
@@ -99,6 +99,7 @@ export function cycleCommands(db: Db, access: IdentityPort, clock: () => Date) {
       const c = await lock(tx, input.tenantId, input.cycleId);
       if (!c) throw new CycleRefused("cycle not found");
       if (c.approved_at !== null) throw new CycleRefused("an approved cycle cannot be rerun; start a new cycle for a correction");
+      if (c.exposure_approved_at !== null) throw new CycleRefused("the exposure is approved, so it cannot be recalculated; skip the cycle and start a new one for a correction");
       if (c.outcome !== null) throw new CycleRefused(`the cycle was ${c.outcome.toLowerCase()}`);
       if (c.stage === "IN_PROGRESS") throw new CycleRefused("a run is in progress; wait for it to finish");
       await q(tx).updateTable("cycles").set({ stage: "INITIATED", current_run_id: null, rerun_count: c.rerun_count + 1 }).where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).execute();
@@ -125,6 +126,26 @@ export function cycleCommands(db: Db, access: IdentityPort, clock: () => Date) {
     });
   }
 
+  /**
+   * Approve Exposure: locks the exact run that has just completed. From here the cycle cannot be recalculated, and recommendations made
+   * from this run can be decided; approving the cycle (a separate, later gate) is what releases any pre-trades.
+   */
+  async function approveExposure(input: { tenantId: TenantId; cycleId: string; actor: Actor }): Promise<void> {
+    const program = await find(input.tenantId, input.cycleId);
+    await require_(access, input.tenantId, input.actor, "exposure:approve", program);
+    await db.transaction().execute(async (tx) => {
+      const c = await lock(tx, input.tenantId, input.cycleId);
+      if (!c) throw new CycleRefused("cycle not found");
+      if (c.approved_at !== null) throw new CycleRefused("the cycle is already approved");
+      if (c.outcome !== null) throw new CycleRefused(`the cycle was ${c.outcome.toLowerCase()}`);
+      if (c.exposure_approved_at !== null) throw new CycleRefused("the exposure is already approved");
+      if (c.stage !== "COMPLETED" || c.current_run_id === null) throw new CycleRefused("the exposure can be approved once its run has completed");
+      await q(tx).updateTable("cycles").set({ exposure_approved_at: clock(), exposure_approved_by: who(input.actor), exposure_approved_run_id: c.current_run_id }).where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).execute();
+      await note(tx, input.tenantId, input.cycleId, "EXPOSURE_APPROVED", who(input.actor), `run ${c.current_run_id}`);
+      await announce(tx, { type: "exposure-management.exposure-approved", tenantId: input.tenantId, cycleId: toCycleId(input.cycleId), programId: toProgramId(c.program_id), runId: c.current_run_id });
+    });
+  }
+
   async function approveCycle(input: { tenantId: TenantId; cycleId: string; actor: Actor }): Promise<void> {
     const program = await find(input.tenantId, input.cycleId);
     await require_(access, input.tenantId, input.actor, "cycle:approve", program);
@@ -134,6 +155,7 @@ export function cycleCommands(db: Db, access: IdentityPort, clock: () => Date) {
       if (c.approved_at !== null) throw new CycleRefused("the cycle is already approved");
       if (c.outcome !== null) throw new CycleRefused(`the cycle was ${c.outcome.toLowerCase()}`);
       if (c.stage !== "COMPLETED") throw new CycleRefused("only a completed cycle can be approved");
+      if (c.exposure_approved_at === null) throw new CycleRefused("approve the exposure before approving the cycle");
       await q(tx).updateTable("cycles").set({ approved_at: clock(), approved_by: who(input.actor) }).where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).execute();
       await note(tx, input.tenantId, input.cycleId, "APPROVED", who(input.actor));
       await announce(tx, { type: "exposure-management.cycle-approved", tenantId: input.tenantId, cycleId: toCycleId(input.cycleId), programId: toProgramId(c.program_id) });
@@ -147,6 +169,7 @@ export function cycleCommands(db: Db, access: IdentityPort, clock: () => Date) {
     rerunCycle,
     skipCycle: (input: { tenantId: TenantId; cycleId: string; reason: string; actor: Actor }) => close("SKIPPED", input),
     deleteCycle: (input: { tenantId: TenantId; cycleId: string; reason: string; actor: Actor }) => close("DELETED", input),
+    approveExposure,
     approveCycle,
   };
 }

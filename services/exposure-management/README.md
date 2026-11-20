@@ -4,7 +4,7 @@ Tier: core.
 
 ## Owns
 - Programs, their types and settings (netting level, display currency, exposure currency overrides, date buckets, schedule), with the combination rules
-- The cycle record: stages (initiated, in progress, completed), outcomes (skipped, deleted), reruns, approval, and the settings in force when it started
+- The cycle record: stages (initiated, in progress, completed), outcomes (skipped, deleted), reruns, two approvals (exposure, then cycle), and the settings in force when it started
 See docs/decisions/0007-exposure-management.md.
 
 ## Answers
@@ -17,7 +17,7 @@ Each is defined in contract/.
 ## Announces
 - Cycle initiated (also on a rerun)
 - Cycle completed
-- Cycle approved
+- Exposure approved (with the locked run ID); cycle approved
 - Cycle skipped, cycle deleted
 - Program changed
 Events carry identifiers only.

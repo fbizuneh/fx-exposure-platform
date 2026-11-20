@@ -6,6 +6,7 @@ import { connect as connectExposureAnalysis, createExposureAnalysis } from "../.
 import { connect as connectExposureManagement, createExposureManagement } from "../../services/exposure-management/src/index.ts";
 import { connect as connectFxRate, createFxRate } from "../../services/fx-rate/src/index.ts";
 import { connect as connectFxTrade, createFxTrade } from "../../services/fx-trade/src/index.ts";
+import { connect as connectHedgeRecommendation, createHedgeRecommendation } from "../../services/hedge-recommendation/src/index.ts";
 import { connect as connectIdentity, createIdentity } from "../../services/identity/src/index.ts";
 import { connect as connectMasterData, createMasterData } from "../../services/master-data/src/index.ts";
 
@@ -21,6 +22,7 @@ export function composeApp(connectionString: string, now: () => Date = () => new
     exposureManagement: connectExposureManagement(connectionString),
     exposureAnalysis: connectExposureAnalysis(connectionString),
     fxTrade: connectFxTrade(connectionString),
+    hedgeRecommendation: connectHedgeRecommendation(connectionString),
   };
   const identity = createIdentity(dbs.identity);
   const masterData = createMasterData(dbs.masterData);
@@ -36,8 +38,17 @@ export function composeApp(connectionString: string, now: () => Date = () => new
     trades: fxTrade.questions,
     now,
   });
+  const hedgeRecommendation = createHedgeRecommendation(dbs.hedgeRecommendation, {
+    access: identity.questions,
+    management: exposureManagement.questions,
+    analysis: exposureAnalysis.questions,
+    masterData: masterData.questions,
+    rates: fxRate.questions,
+    preTrades: fxTrade.questions,
+    createPreTrades: fxTrade.commands.createPreTrades,
+  }, { now });
   return {
-    identity, masterData, fxRate, dataSource, exposureManagement, exposureAnalysis, fxTrade,
+    identity, masterData, fxRate, dataSource, exposureManagement, exposureAnalysis, fxTrade, hedgeRecommendation,
     async close(): Promise<void> {
       await Promise.all(Object.values(dbs).map((d) => d.destroy()));
     },

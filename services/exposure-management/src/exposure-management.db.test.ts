@@ -69,7 +69,7 @@ async function ready(...programs: string[]) {
   return t;
 }
 const analyst = () => user(["cycle:read", "cycle:initiate"]);
-const approver = () => user(["cycle:read", "cycle:initiate", "cycle:skip", "cycle:approve"]);
+const approver = () => user(["cycle:read", "cycle:initiate", "cycle:skip", "cycle:approve", "exposure:approve"]);
 /** Start a cycle and take it through a run to completed. */
 async function completed(t: TenantId, p = "BS", asOf = "2026-03-05") {
   const id = await em.commands.startCycle({ tenantId: t, programId: p, asOf, actor: analyst() });
@@ -208,6 +208,17 @@ dbTest("approval: only a completed cycle, only with the approve permission, and 
   await assert.rejects(em.commands.approveCycle({ tenantId: t, cycleId: id, actor: analyst() }), AccessDenied);
   const notDone = await em.commands.startCycle({ tenantId: t, programId: "BS", asOf: "2026-03-04", actor: analyst() }).catch((e: Error) => e);
   assert.match(String(notDone), /open cycle/, "the completed cycle still blocks a new one until it is approved");
+  // Approve Exposure is its own gate, before the cycle's: it locks the completed run and ends recalculation.
+  await assert.rejects(em.commands.approveCycle({ tenantId: t, cycleId: id, actor: ap }), /approve the exposure before approving the cycle/);
+  await assert.rejects(em.commands.approveExposure({ tenantId: t, cycleId: id, actor: analyst() }), AccessDenied);
+  await em.commands.approveExposure({ tenantId: t, cycleId: id, actor: ap });
+  const locked = (await em.questions.getCycle(t, id))!;
+  assert.ok(locked.exposureApprovedAt && locked.exposureApprovedRunId && locked.exposureApprovedBy === `user:${(ap as { userId: string }).userId}`);
+  assert.equal(locked.approvedAt, null, "the cycle itself is not approved yet");
+  assert.deepEqual([locked.history.at(-1)?.kind, (await events(t)).at(-1)?.type], ["EXPOSURE_APPROVED", "exposure-management.exposure-approved"]);
+  assert.equal(((await events(t)).at(-1) as { runId?: string }).runId, locked.exposureApprovedRunId, "the event names the locked run");
+  await assert.rejects(em.commands.approveExposure({ tenantId: t, cycleId: id, actor: ap }), /already approved/);
+  await assert.rejects(em.commands.rerunCycle({ tenantId: t, cycleId: id, actor: ap }), /exposure is approved, so it cannot be recalculated/);
   await em.commands.approveCycle({ tenantId: t, cycleId: id, actor: ap });
   const c = (await em.questions.getCycle(t, id))!;
   assert.equal(c.approvedBy, `user:${(ap as { userId: string }).userId}`);
@@ -224,6 +235,7 @@ dbTest("approval: only a completed cycle, only with the approve permission, and 
   const t2 = await ready("BS");
   const fresh = await em.commands.startCycle({ tenantId: t2, programId: "BS", asOf: "2026-03-05", actor: analyst() });
   await assert.rejects(em.commands.approveCycle({ tenantId: t2, cycleId: fresh, actor: approver() }), /only a completed cycle/);
+  await assert.rejects(em.commands.approveExposure({ tenantId: t2, cycleId: fresh, actor: approver() }), /once its run has completed/);
 });
 
 dbTest("skipping and deleting need a reason and the skip permission, keep the record, and free the program", async () => {
