@@ -1813,3 +1813,39 @@ e2e("roll: an approval attempt that is refused cannot release the lock of anothe
   assert.ok((await app.exposureManagement.questions.getCycle(run.t, run.cycle))!.exposureApprovedAt, "A committed");
   assert.equal((await app.hedgeRecommendation.questions.rollParameters(run.t, run.cycle))!.nearDate, "2026-12-15", "the dates are the ones A approved");
 });
+
+e2e("roll: a date edit after a run finished cannot be picked up by that run's delayed recommendations; approval is refused for it and goes through only after a fresh run", async () => {
+  const run = await finishedCycle(rollPolicy({}), "ENTITY", false, false, async (t) => {
+    await app.fxTrade.commands.importExecutedTrades({ tenantId: t, rows: parseExecutedFile(rollFile), by: "simulator" });
+  });
+  await setDates(run, { nearDate: "2026-12-15", farDate: FAR }); // revision 1
+  // Run R finishes, but its "run finished" event does not reach Hedge Recommendation yet (delivery to it is held).
+  const hr = app.hedgeRecommendation.commands as unknown as { onRunFinished: (e: unknown) => Promise<unknown> };
+  const real = hr.onRunFinished;
+  hr.onRunFinished = async () => { throw new Error("held"); };
+  try {
+    await app.exposureManagement.commands.rerunCycle({ tenantId: run.t, cycleId: run.cycle, actor: run.admin } as never);
+    await drain(app);
+    const finished = await app.exposureAnalysis.questions.currentRun(run.t, run.cycle);
+    assert.equal(finished!.status, "FINISHED", "R is finished");
+    // The far date is edited after R finished (revision 2), before its event is delivered.
+    const NEW = "2027-01-20";
+    await setDates(run, { nearDate: "2026-12-15", farDate: NEW });
+    await setDates(run, { nearDate: "2026-12-15", farDate: "2027-01-21" }); // a second edit (revision 3) must not replace what R finished with
+    // Delivery is released.
+    hr.onRunFinished = real;
+    await drain(app, { now: new Date(Date.now() + 3_600_000) });
+    const late = groupOf(await app.hedgeRecommendation.questions.recommendations(run.t, run.cycle), "US01");
+    assert.equal(late.runId, finished!.runId);
+    assert.equal(late.roll!.farDate, FAR, "R's recommendations are made from the dates R finished with, not the ones entered afterwards");
+    await assert.rejects(approveExposure(run.t, run.cycle as string), /roll dates changed after this run's recommendations were made; rerun the cycle/);
+    await assert.rejects(app.hedgeRecommendation.commands.decide({ tenantId: run.t, recommendationId: late.recommendationId, actor: run.admin, action: "ACCEPT" }));
+    assert.equal((await app.exposureManagement.questions.getCycle(run.t, run.cycle))!.exposureApprovedAt, null, "nothing was approved on R");
+    // A fresh run takes the edited date; only then can the exposure be approved.
+    await rerun(run);
+    const fresh = groupOf(await app.hedgeRecommendation.questions.recommendations(run.t, run.cycle), "US01");
+    assert.equal(fresh.roll!.farDate, "2027-01-21");
+    await approveExposure(run.t, run.cycle as string);
+    assert.equal((await app.hedgeRecommendation.commands.decide({ tenantId: run.t, recommendationId: fresh.recommendationId, actor: run.admin, action: "ACCEPT" })).status, "ACCEPTED");
+  } finally { hr.onRunFinished = real; }
+});

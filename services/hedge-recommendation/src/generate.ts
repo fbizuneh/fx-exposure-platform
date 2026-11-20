@@ -71,7 +71,10 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
       if (!(await firstTime(tx, tenant, event.eventId))) return "IGNORED";
       // The dates and the approval of the exposure take this lock, so these recommendations are made from dates that cannot change before the approval looks at them (review of PR 14).
       await lockCycleDecisions(tx, tenant, event.cycleId);
-      const rollDates = rolling ? await q(tx).selectFrom("roll_parameters").selectAll().where("tenant_id", "=", tenant).where("cycle_id", "=", event.cycleId).executeTakeFirst() : undefined;
+      // The dates this run finished with: the ones now in force, unless they were edited after the run finished, in which case the ones it finished with (review of PR 14).
+      const bound = rolling ? await q(tx).selectFrom("roll_run_bindings").selectAll().where("tenant_id", "=", tenant).where("cycle_id", "=", event.cycleId).where("run_id", "=", event.runId).executeTakeFirst() : undefined;
+      const current = rolling ? await q(tx).selectFrom("roll_parameters").selectAll().where("tenant_id", "=", tenant).where("cycle_id", "=", event.cycleId).executeTakeFirst() : undefined;
+      const rollDates = bound ? (bound.near_date === null ? undefined : { near_date: bound.near_date, far_date: bound.far_date, offset_days: bound.offset_days, revision: bound.revision }) : current;
       const offsetDays = rollDates?.offset_days ?? policy.rollOffsetDays;
       await q(tx).updateTable("recommendations").set({ status: "SUPERSEDED" }).where("tenant_id", "=", tenant).where("cycle_id", "=", event.cycleId).where("status", "in", ["OPEN", "NONE"]).execute();
       const rows = [];

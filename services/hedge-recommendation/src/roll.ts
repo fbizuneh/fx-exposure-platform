@@ -54,14 +54,22 @@ export function rollCommands(db: Db, c: Collaborators, clock: () => Date) {
     const problems = rollDatesProblems(input.dates, cycle.asOf, policy.rollOffsetDays);
     if (problems.length > 0) throw new RollDatesInvalid(problems);
     const d = input.dates;
-    const run = await c.analysis.currentRun(tenant, input.cycleId);
     await db.transaction().execute(async (tx) => {
       // The approval of the exposure takes this lock to check the dates and lock them for the run it approves, so an edit is wholly before it (and the approval then
       // refuses until the cycle is rerun) or wholly after it (and is refused here).
       await lockCycleDecisions(tx, tenant, input.cycleId);
+      const run = await c.analysis.currentRun(tenant, input.cycleId);
       const locked = await q(tx).selectFrom("roll_locks").select("run_id").where("tenant_id", "=", tenant).where("cycle_id", "=", input.cycleId).executeTakeFirst();
       if (locked && run && locked.run_id === run.runId) throw new RollDatesInvalid(["the exposure is being approved on the current run, so its roll dates are locked; rerun the cycle first"]);
-      const before = await q(tx).selectFrom("roll_parameters").select("revision").where("tenant_id", "=", tenant).where("cycle_id", "=", input.cycleId).executeTakeFirst();
+      const before = await q(tx).selectFrom("roll_parameters").selectAll().where("tenant_id", "=", tenant).where("cycle_id", "=", input.cycleId).executeTakeFirst();
+      // A run that has finished is bound to the dates it finished with (review of PR 14): this edit comes after it, so its recommendations, even if its "run finished"
+      // event is delivered late, are made from the dates as they were, and the approval then refuses until the cycle is rerun. The first edit after the run keeps them.
+      if (run && run.status === "FINISHED") {
+        await q(tx).insertInto("roll_run_bindings").values({
+          tenant_id: tenant, program_id: cycle.programId, cycle_id: input.cycleId, run_id: run.runId,
+          revision: before?.revision ?? null, near_date: before?.near_date ?? null, far_date: before?.far_date ?? null, offset_days: before?.offset_days ?? null,
+        }).onConflict((oc) => oc.columns(["tenant_id", "program_id", "cycle_id", "run_id"]).doNothing()).execute();
+      }
       await q(tx).deleteFrom("roll_parameters").where("tenant_id", "=", tenant).where("cycle_id", "=", input.cycleId).execute();
       await q(tx).insertInto("roll_parameters").values({
         tenant_id: tenant, program_id: cycle.programId, cycle_id: input.cycleId, near_date: d.nearDate, far_date: d.farDate ?? null, offset_days: d.offsetDays ?? null, set_by: who(input.actor), set_at: clock(),
