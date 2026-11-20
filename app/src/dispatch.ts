@@ -82,16 +82,17 @@ function sources(app: App) {
 /**
  * Delivers the events that are due until none are left (a delivery can write new events). Returns how many were delivered.
  * A delivery that fails is recorded and tried again later; meanwhile that tenant's later events from the same service wait behind it, so their order is kept,
- * and other tenants and services carry on (decision 0019). `now` is the clock, so tests can move time.
+ * and other tenants and services carry on (decision 0019). `now` is the clock (a fixed time, or a function) so tests can move time. The clock is read again when a failure is recorded, so the wait starts when the delivery failed, not when the drain began.
  */
-export async function drain(app: App, options: { maxRounds?: number; now?: Date } = {}): Promise<number> {
+export async function drain(app: App, options: { maxRounds?: number; now?: Date | (() => Date) } = {}): Promise<number> {
   const maxRounds = options.maxRounds ?? 25;
-  const now = options.now ?? new Date();
+  const given = options.now;
+  const clock: () => Date = typeof given === "function" ? given : () => given ?? new Date();
   let delivered = 0;
   for (let round = 0; round < maxRounds; round++) {
     let any = false;
     for (const [, s] of sources(app)) {
-      const pending = (await s.outbox.pending(200, now)) as unknown as Announced[];
+      const pending = (await s.outbox.pending(200, clock())) as unknown as Announced[];
       const failedTenants = new Set<string>(); // a failure inside this batch holds the tenant's later events in the batch too
       for (const e of pending) {
         if (failedTenants.has(e.tenantId)) continue;
@@ -100,7 +101,7 @@ export async function drain(app: App, options: { maxRounds?: number; now?: Date 
           await deliver(app, e);
         } catch (err) {
           failedTenants.add(e.tenantId);
-          await s.outbox.recordFailure(e.eventId, err instanceof Error ? err.message : String(err), now, RETRY_POLICY);
+          await s.outbox.recordFailure(e.eventId, err instanceof Error ? err.message : String(err), clock(), RETRY_POLICY);
           continue;
         }
         await s.outbox.markPublished([e.eventId]);

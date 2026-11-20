@@ -1377,3 +1377,29 @@ e2e("a failure is persisted whole: an interrupted recording cannot leave an even
     await client.end();
   }
 });
+
+e2e("the wait after a failure starts when the delivery failed, not when the drain began", async () => {
+  const tenant = await app.identity.commands.createTenant("Acme");
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  const cmds = app.exposureAnalysis.commands as unknown as { retryWaiting: (t: TenantId) => Promise<unknown> };
+  const real = cmds.retryWaiting;
+  const t0 = new Date("2032-01-01T00:00:00Z").getTime();
+  let current = t0;
+  cmds.retryWaiting = async () => { current += 70_000; throw new Error("slow failure"); }; // the handler takes 70 seconds to fail
+  try {
+    const id = randomUUID();
+    await client.query("INSERT INTO fx_rate.outbox (event_id, tenant_id, type, payload) VALUES ($1, $2, 'fx-rate.loaded', $3)", [id, tenant, JSON.stringify({ type: "fx-rate.loaded", tenantId: tenant, eventId: id, occurredAt: new Date(t0).toISOString() })]);
+    await drain(app, { now: () => new Date(current) });
+    const failedAt = t0 + 70_000;
+    const problem = (await deliveryProblems(app)).find((p) => p.eventId === id)!;
+    assert.equal(problem.retryAt!.getTime(), failedAt + 60_000, "the minute runs from the failure");
+    const eligible = async (ms: number) => (await app.fxRate.outbox.pending(200, new Date(ms))).some((e) => (e as unknown as { eventId: string }).eventId === id);
+    assert.equal(await eligible(failedAt + 59_000), false);
+    assert.equal(await eligible(failedAt + 60_000), true);
+    await client.query("UPDATE fx_rate.outbox SET published_at = now() WHERE event_id = $1", [id]); // leave nothing pending for later tests
+  } finally {
+    cmds.retryWaiting = real;
+    await client.end();
+  }
+});
