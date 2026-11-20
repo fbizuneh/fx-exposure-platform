@@ -933,7 +933,7 @@ e2e("the split note follows the parts: an override that merges a remainder gets 
   assert.deepEqual([ob.parts.map((p) => p.amount), ob.splitNote], [["300.00", "150.00"], null], "the note describes the parts that stand");
 });
 
-e2e("cancelled pre-trades reach the recommendation: one cancelled part leaves it open, cancelling every part cancels it, a part that was executed keeps it partly executed, and a cycle closed before approval cancels the drafts", async () => {
+e2e("cancelled pre-trades reach the recommendation: one cancelled part leaves it open, cancelling every part cancels it, a part executed with the rest cancelled closes it out, and a cycle closed before approval cancels the drafts", async () => {
   const accept = async () => {
     const x = await finishedCycle(split({ splitMethod: "THRESHOLD_REMAINDER" }));
     const rec = us01(x.recs);
@@ -954,7 +954,7 @@ e2e("cancelled pre-trades reach the recommendation: one cancelled part leaves it
   assert.deepEqual(await now(a), ["CANCELLED", ["CANCELLED", "CANCELLED", "CANCELLED", "CANCELLED"]]);
   assert.equal(await drain(app), 0, "nothing is left to deliver");
 
-  // One part executed, the others cancelled: the hedge happened in part, so the whole is partly executed, not cancelled.
+  // One part executed, the others cancelled: every part is finished, part of the hedge happened and the rest did not: closed out (decision 0017).
   const b = await accept();
   await app.exposureManagement.commands.approveCycle({ tenantId: b.t, cycleId: b.cycle, actor: b.admin });
   await drain(app);
@@ -968,7 +968,7 @@ e2e("cancelled pre-trades reach the recommendation: one cancelled part leaves it
   assert.equal((await app.fxTrade.commands.importExecutedTrades({ tenantId: b.t, rows: parseExecutedFile(reply), by: "simulator" })).matched, 1);
   await drain(app);
   for (const p of b.parts.filter((x) => x.legs[0]!.dealAmount !== "100.0000")) await cancel(b, p.preTradeId);
-  assert.deepEqual(await now(b), ["PARTLY_EXECUTED", ["CANCELLED", "CANCELLED", "CANCELLED", "EXECUTED"]]);
+  assert.deepEqual(await now(b), ["EXECUTED_REST_CANCELLED", ["CANCELLED", "CANCELLED", "CANCELLED", "EXECUTED"]]);
 
   // A cycle closed before approval cancels its drafts, and so the recommendation's parts. The event is delivered to FX Trade as Exposure Management would
   // send it (skipping a cycle once its exposure is approved is refused by a database constraint there today; that is outside this change).

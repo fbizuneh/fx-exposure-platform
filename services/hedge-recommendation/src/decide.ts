@@ -24,11 +24,16 @@ export class RecommendationError extends Error {}
 export type Decision = "ACCEPT" | "OVERRIDE" | "DISMISS";
 const PERMISSION = { ACCEPT: "hedge-recommendation:accept", OVERRIDE: "hedge-recommendation:override", DISMISS: "hedge-recommendation:dismiss" } as const;
 const FOLLOW_UP: Record<string, FollowUp> = { DRAFT: "OPEN", READY: "OPEN", SENT: "OPEN", PARTLY_EXECUTED: "PARTLY_EXECUTED", EXECUTED: "EXECUTED", CANCELLED: "CANCELLED" };
-/** A recommendation's follow-up from its parts: executed when every part is, partly executed once any part has been (or all but some are cancelled), cancelled when every part is. */
+/**
+ * A recommendation's follow-up from its parts (decisions 0016, 0017): executed when every part is; cancelled when every part is; executed with the rest cancelled
+ * when every part is finished, some executed and some cancelled (nothing is left to do, and part of the amount was not hedged); partly executed while any part
+ * has been executed or partly filled and another is still live; open otherwise.
+ */
 export function overallFollowUp(parts: readonly FollowUp[]): FollowUp {
   if (parts.length === 0) return "NOT_STARTED";
   if (parts.every((p) => p === "EXECUTED")) return "EXECUTED";
   if (parts.every((p) => p === "CANCELLED")) return "CANCELLED";
+  if (parts.every((p) => p === "EXECUTED" || p === "CANCELLED")) return "EXECUTED_REST_CANCELLED";
   if (parts.some((p) => p === "EXECUTED" || p === "PARTLY_EXECUTED")) return "PARTLY_EXECUTED";
   return parts.every((p) => p === "NOT_STARTED") ? "NOT_STARTED" : "OPEN";
 }

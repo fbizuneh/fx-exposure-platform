@@ -154,7 +154,11 @@ test("follow-up of the whole: executed when every part is, partly once any is, c
   assert.equal(overallFollowUp(["EXECUTED", "EXECUTED"]), "EXECUTED");
   assert.equal(overallFollowUp(["EXECUTED", "OPEN"]), "PARTLY_EXECUTED");
   assert.equal(overallFollowUp(["PARTLY_EXECUTED", "OPEN"]), "PARTLY_EXECUTED");
-  assert.equal(overallFollowUp(["EXECUTED", "CANCELLED"]), "PARTLY_EXECUTED", "the part that was cancelled does not make the rest less done");
+  assert.equal(overallFollowUp(["EXECUTED", "CANCELLED"]), "EXECUTED_REST_CANCELLED", "every part is finished, some cancelled: closed out");
+  assert.equal(overallFollowUp(["CANCELLED", "EXECUTED", "CANCELLED", "EXECUTED"]), "EXECUTED_REST_CANCELLED");
+  assert.equal(overallFollowUp(["EXECUTED", "CANCELLED", "OPEN"]), "PARTLY_EXECUTED", "a live part keeps it open for follow-up");
+  assert.equal(overallFollowUp(["EXECUTED", "CANCELLED", "PARTLY_EXECUTED"]), "PARTLY_EXECUTED", "a part that is only partly filled is still live");
+  assert.equal(overallFollowUp(["CANCELLED", "OPEN"]), "OPEN");
   assert.equal(overallFollowUp(["CANCELLED", "CANCELLED"]), "CANCELLED");
   assert.equal(overallFollowUp(["OPEN", "CANCELLED"]), "OPEN");
   assert.equal(overallFollowUp(["NOT_STARTED"]), "NOT_STARTED");
