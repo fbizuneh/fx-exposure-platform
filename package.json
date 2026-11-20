@@ -11,7 +11,8 @@
     "test": "node --test --test-concurrency=1 \"scripts/checks/tests/*.test.mjs\" \"shared/kernel/src/*.test.ts\" \"services/**/*.test.ts\" \"app/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "db:up": "docker compose up -d",
-    "db:migrate": "node scripts/migrate.mjs"
+    "db:migrate": "node scripts/migrate.mjs",
+    "start": "node app/src/server.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -1,9 +1,10 @@
 // Identity's entry point for app/ to wire. Other services never import this; they import contract/.
+import type { TenantId } from "@shared/kernel";
 import type { IdentityQuestions } from "../contract/index.ts";
 import { decide } from "./access.ts";
 import { recordChange } from "./change-record.ts";
 import { identityCommands } from "./commands.ts";
-import { connect, type Db } from "./db.ts";
+import { connect, q, type Db } from "./db.ts";
 import { loadAccessFacts, loadEnabledPrograms } from "./facts.ts";
 import { deliveryProblems, markPublished, pendingEvents, recordFailure, retryStuck, type RetryPolicy } from "./outbox.ts";
 
@@ -27,6 +28,10 @@ export function identityQuestions(db: Db): IdentityQuestions {
       const restriction = facts.user?.programRestriction ?? null;
       if (facts.user === null || facts.user.status !== "ACTIVE") return { restricted: true, programs: [] };
       return restriction === null ? { restricted: false, programs: [] } : { restricted: true, programs: restriction };
+    },
+    async activeTenants() {
+      const rows = await q(db).selectFrom("tenants").select("tenant_id").where("status", "=", "ACTIVE").orderBy("created_at").orderBy("tenant_id").execute();
+      return rows.map((r) => r.tenant_id as TenantId);
     },
   };
 }
