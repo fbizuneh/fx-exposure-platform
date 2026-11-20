@@ -1,6 +1,6 @@
 # 0021 Roll-based strategy: Adjust+Swap
 
-Status: proposed, for the owner's review. Resolves part of the recorded gap "a roll-based strategy" (decision 0011 item 1; decision 0009 listed "roll or swap recommendation" as out of scope). Source: the owner's file `Roll-based_decision_strategy.md`. This record covers **Adjust+Swap** only; **Close-out+New** is the next change.
+Status: proposed, for the owner's review. Resolves part of the recorded gap "a roll-based strategy" (decision 0011 item 1; decision 0009 listed "roll or swap recommendation" as out of scope). Source: the owner's file `Roll-based_decision_strategy.md`. This record covers **Adjust+Swap** only; **Close-out+New** is decision 0022.
 
 ## Owner answers (asked in chat)
 1. **Roll inputs** (near date, far date, offset) are **entered per cycle**. The far date defaults to the policy's tenor date (with calendars) and the offset to a policy default. They live in Hedge Recommendation; Exposure Management is unchanged.
@@ -39,7 +39,7 @@ A delayed "run finished" event could make recommendations from dates entered aft
 - The edit reads the current run inside the cycle lock, so it is wholly before or after any other step on the cycle. No transaction spans two services.
 Test: delivery to Hedge Recommendation is held, the far date is edited twice, delivery is released; R's recommendations show the old date, approval and decision are refused, a fresh run takes the last date and is approved. Mutations (binding ignored, not recorded, overwritten by a second edit) each fail it.
 
-## Defaults I chose, to confirm or change
+## Defaults I chose (confirmed by the owner on 2026-11-20)
 1. **The recommendation ID is the roll ID**, so FX Trade gets no new column (the earlier plan was a `roll_group_id`). The link already exists, is made together and is read back by FX Trade. Change it if you want a roll ID that groups several recommendations, which is not needed while a roll is one group.
 2. **The maximum hedge applies to the adjustment only**, and not at all when roll and adjustment are one trade. The roll is existing hedge, not new.
 3. **Close-outs are booked at each maturing value date** and the far legs at the far date entered. An entered far date is never moved (point 3 above); a defaulted one is rolled modified following as the tenor date is.
@@ -54,7 +54,7 @@ Exposure Analysis: migration `0007_hedge_row_placement`, `hedgeRowPlacement`, an
 Pure: the window (both ends, offset 0), netting by date, direction, offsetting dates, nothing maturing, combined sums (same side, smaller, exact, flipped), date and policy checks. Exposure Analysis: each leg's value date, group and amount, adding up to the group's hedge. End to end: no dates; separate trades from accept to pre-trades; override changing only the adjustment, with a split after the roll; combined (shrunk, removed, flipped, overridden); roll only (accepted, dismissed, not overridable); empty window, tenor default and a tenor inside the window; refusals (no roll, too early, after exposure approval). Review: a date edit between run and approval, the approval looking first and the edit looking first, both at once (exactly one wins and an approved run keeps its dates), a refused approval not leaving the lock, the last-guard decision check, per-entity close-outs in separate and combined mode with the pre-trades booked by those entities, no entity, a holiday in only EUR or only USD, and the user-entered date. Mutations (window end exclusive, close-out direction, combined sign, override rewriting every part, missing dates treated as an adjustment, close-outs at the far date, split in combined mode, placement in the wrong currency or group) each fail a test.
 
 ## Not done, and why
-- **Close-out+New**: next change.
+- **Close-out+New**: decision 0022.
 - **A screen or API for entering roll dates or choosing the roll type**: the commands exist; no UI.
 - **Per-group or per-level roll dates, or a roll type per netting level**: one set per cycle and one roll type per program.
 - **Rolling executed legs that are partly matched or cancelled**: Exposure Analysis already counts only live open legs.

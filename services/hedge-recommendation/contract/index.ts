@@ -5,10 +5,13 @@ import type { CycleId, ProgramId, TenantId } from "@shared/kernel";
 export const STRATEGIES = ["hedge-ratio-adjustment", "amount-threshold"] as const;
 export type Strategy = (typeof STRATEGIES)[number];
 
-/** NONE: no roll. ADJUST_SWAP: maturing hedges are rolled to the far date and the adjustment is made at the far date (decision 0021). */
-export const ROLL_TYPES = ["NONE", "ADJUST_SWAP"] as const;
+/**
+ * NONE: no roll. ADJUST_SWAP: maturing hedges are rolled to the far date and the adjustment is made at the far date (decision 0021).
+ * CLOSE_OUT_NEW: maturing hedges are closed and the new hedges at the far date are what the rule gives on the hedges that remain (decision 0022).
+ */
+export const ROLL_TYPES = ["NONE", "ADJUST_SWAP", "CLOSE_OUT_NEW"] as const;
 export type RollType = (typeof ROLL_TYPES)[number];
-/** SEPARATE: the close-outs, the roll and the adjustment are separate trades. COMBINED: the roll and the adjustment are one trade at the far date. */
+/** SEPARATE: the close-outs, the roll and the adjustment are separate trades. COMBINED: the roll and the adjustment are one trade at the far date. Used by ADJUST_SWAP only. */
 export const ROLL_ADJUSTMENTS = ["SEPARATE", "COMBINED"] as const;
 export type RollAdjustment = (typeof ROLL_ADJUSTMENTS)[number];
 
@@ -135,8 +138,8 @@ export interface Recommendation {
   readonly followUp: FollowUp;
 }
 
-/** What a part of a recommendation is (decision 0021): an adjustment, the close-out of the maturing hedges of one value date, the roll that replaces them at the far date, or the roll and the adjustment as one trade. */
-export type PartRole = "ADJUSTMENT" | "CLOSE_OUT" | "ROLL" | "COMBINED";
+/** What a part of a recommendation is (decision 0021): an adjustment, the close-out of the maturing hedges of one value date, the roll that replaces them at the far date, or the roll and the adjustment as one trade; for Close-out+New (decision 0022), a new hedge at the far date. */
+export type PartRole = "ADJUSTMENT" | "CLOSE_OUT" | "ROLL" | "COMBINED" | "NEW";
 
 /** The roll dates of a cycle, and what they came to once defaults were filled in. */
 export interface RollParameters {
@@ -152,7 +155,8 @@ export interface RollParameters {
 
 export interface RecommendationRoll {
   readonly type: RollType;
-  readonly adjustment: RollAdjustment;
+  /** Null for CLOSE_OUT_NEW, which has no adjustment. */
+  readonly adjustment: RollAdjustment | null;
   readonly nearDate: string;
   readonly farDate: string;
   readonly offsetDays: number;

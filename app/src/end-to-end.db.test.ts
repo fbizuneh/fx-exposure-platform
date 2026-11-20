@@ -1849,3 +1849,99 @@ e2e("roll: a date edit after a run finished cannot be picked up by that run's de
     assert.equal((await app.hedgeRecommendation.commands.decide({ tenantId: run.t, recommendationId: fresh.recommendationId, actor: run.admin, action: "ACCEPT" })).status, "ACCEPTED");
   } finally { hr.onRunFinished = real; }
 });
+
+// Decision 0022: Close-out+New. The maturing hedges are closed; the new hedges are what the rule gives on the hedges that remain.
+const closeOutNew = (over: object = {}) => ({ rollType: "CLOSE_OUT_NEW", ...over });
+
+e2e("close-out+new: the maturing hedges are closed and the new hedge is the rule applied to what remains; accepted as one package of linked single-leg trades", async () => {
+  const { t, admin, cycle, recs } = await rolledCycle(closeOutNew());
+  const us = groupOf(recs, "US01");
+  // 650 sold; 450 of it matures in the window, so 200 remains hedged and the rule (100% of 1,000) wants 800 sold, all of it new.
+  assert.deepEqual([us.action, us.direction, us.amount, us.valueDate, us.reason, us.hedgedAmount, us.neededAmount], ["HEDGE", "SELL", "800.00", FAR, null, "-200.00", "-800.00"]);
+  assert.deepEqual(us.roll, { type: "CLOSE_OUT_NEW", adjustment: null, nearDate: "2026-12-15", farDate: FAR, offsetDays: 5 });
+  assert.deepEqual(partsShown(us), [[1, "CLOSE_OUT", "BUY", "250.00", "2026-12-15"], [2, "CLOSE_OUT", "BUY", "200.00", "2026-12-18"], [3, "NEW", "SELL", "800.00", FAR]], "the 20 Jan hedge is outside the window and stays");
+  const done = await app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: us.recommendationId, actor: admin, action: "ACCEPT" });
+  assert.deepEqual([done.status, done.decidedAmount, done.parts.every((p) => p.preTradeId !== null)], ["ACCEPTED", "800.00", true]);
+  const pre = (await app.fxTrade.questions.preTrades(t, { cycleId: cycle })).filter((p) => p.recommendationId === us.recommendationId);
+  assert.deepEqual(pre.map((p) => [p.partNo, p.instrument, p.legs[0]!.role, p.legs[0]!.direction, p.legs[0]!.dealAmount, p.legs[0]!.valueDate]), [
+    [1, "FORWARD", "SINGLE", "BUY", "250.0000", "2026-12-15"], [2, "FORWARD", "SINGLE", "BUY", "200.0000", "2026-12-18"], [3, "FORWARD", "SINGLE", "SELL", "800.0000", FAR]], "linked by the recommendation ID");
+  // The policy's way of booking an adjustment is for Adjust+Swap only: it changes nothing here, and the record has none.
+  const ignored = groupOf((await rolledCycle(closeOutNew({ rollAdjustment: "COMBINED" }))).recs, "US01");
+  assert.deepEqual([partsShown(ignored), ignored.roll!.adjustment], [partsShown(us), null]);
+});
+
+e2e("close-out+new: new trades without close-outs, close-outs without new trades, a new trade even when the hedge was already on target, and one the other way", async () => {
+  // Nothing matures in the window: the plain rule at the far date, no close-outs.
+  const none = groupOf((await rolledCycle(closeOutNew(), { nearDate: "2026-12-22", farDate: FAR, offsetDays: 0 })).recs, "US01");
+  assert.deepEqual([none.direction, none.amount, none.hedgedAmount, partsShown(none).map((p) => p[1])], ["SELL", "350.00", "-650.00", ["NEW"]]);
+  // At 65% the hedge was on target; Adjust+Swap rolls 450 and adds nothing, Close-out+New puts 450 back as a new hedge.
+  const onTarget = groupOf((await rolledCycle(closeOutNew({ defaultRatio: "0.65" }))).recs, "US01");
+  assert.deepEqual([onTarget.direction, onTarget.amount, onTarget.reason, partsShown(onTarget).map((p) => [p[1], p[3]])], ["SELL", "450.00", null, [["CLOSE_OUT", "250.00"], ["CLOSE_OUT", "200.00"], ["NEW", "450.00"]]]);
+  // At 20% what remains (200 sold) is already the target: close-outs and no new trade.
+  const closeOnly = await rolledCycle(closeOutNew({ defaultRatio: "0.2" }));
+  const c = groupOf(closeOnly.recs, "US01");
+  assert.deepEqual([c.action, c.direction, c.amount, c.reason, partsShown(c).map((p) => p[1])], ["HEDGE", null, null, "WITHIN_TARGET", ["CLOSE_OUT", "CLOSE_OUT"]]);
+  await assert.rejects(app.hedgeRecommendation.commands.decide({ tenantId: closeOnly.t, recommendationId: c.recommendationId, actor: closeOnly.admin, action: "OVERRIDE", amount: "100" }), /no new trade to override/);
+  assert.equal((await app.hedgeRecommendation.commands.decide({ tenantId: closeOnly.t, recommendationId: c.recommendationId, actor: closeOnly.admin, action: "ACCEPT" })).parts.length, 2);
+  // At 0% everything is to be bought back: 200 remain sold after the close-outs, so the new trade is a purchase.
+  const flip = groupOf((await rolledCycle(closeOutNew({ defaultRatio: "0" }))).recs, "US01");
+  assert.deepEqual([flip.direction, flip.amount, partsShown(flip).slice(2)], ["BUY", "200.00", [[3, "NEW", "BUY", "200.00", FAR]]]);
+});
+
+e2e("close-out+new: the minimum applies to the new trade, the maximum splits it, and an override replaces only the new trades", async () => {
+  // A minimum of 400 EUR (440 USD): the 350 Adjust+Swap would add is too small, but the new trade of 800 is not.
+  const min = groupOf((await rolledCycle(closeOutNew({ minHedgeDisplay: "440" }))).recs, "US01");
+  assert.deepEqual([min.direction, min.amount, partsShown(min).map((p) => p[1])], ["SELL", "800.00", ["CLOSE_OUT", "CLOSE_OUT", "NEW"]]);
+  // A maximum of 200 EUR splits the new trade, never the close-outs.
+  const split = await rolledCycle(closeOutNew({ maxHedgeDisplay: "220" }));
+  const s = groupOf(split.recs, "US01");
+  assert.deepEqual(s.parts.map((p) => p.role), ["CLOSE_OUT", "CLOSE_OUT", "NEW", "NEW", "NEW", "NEW"]);
+  assert.equal(s.parts.filter((p) => p.role === "NEW").reduce((a, p) => a + Number(p.amount), 0), 800);
+  assert.deepEqual(s.parts.slice(0, 2).map((p) => p.amount), ["250.00", "200.00"]);
+  // An override changes the new trades only; close-outs stay as they are.
+  const over = await app.hedgeRecommendation.commands.decide({ tenantId: split.t, recommendationId: s.recommendationId, actor: split.admin, action: "OVERRIDE", amount: "300" });
+  assert.deepEqual([over.status, over.decidedAmount], ["OVERRIDDEN", "300.00"]);
+  assert.deepEqual(over.parts.slice(0, 2).map((p) => [p.role, p.amount]), [["CLOSE_OUT", "250.00"], ["CLOSE_OUT", "200.00"]]);
+  assert.equal(over.parts.filter((p) => p.role === "NEW").reduce((a, p) => a + Number(p.amount), 0), 300);
+  assert.ok(over.parts.every((p, i) => p.partNo === i + 1 && (i < 2 || p.role === "NEW")));
+});
+
+e2e("close-out+new: each holder closes its own hedge, the group's trading entity books the new trade, and without an entity only close-outs are made", async () => {
+  const run = await rolledCycle(closeOutNew({ tradingEntityCode: "DE01" }), { nearDate: "2026-12-15", farDate: FAR }, { level: "GROUP_NATURAL", file: entityFile, before: deExecutes });
+  const g = naturalGroup(run.recs);
+  assert.deepEqual(g.parts.filter((p) => p.role === "CLOSE_OUT").map((p) => [p.tradingEntityCode, p.direction, p.amount, p.valueDate]), [["DE01", "SELL", "100.00", "2026-12-15"], ["US01", "BUY", "300.00", "2026-12-15"], ["US01", "BUY", "200.00", "2026-12-18"]]);
+  assert.ok(g.parts.filter((p) => p.role === "NEW").every((p) => p.tradingEntityCode === "DE01"));
+  const none = naturalGroup((await rolledCycle(closeOutNew({ tradingEntityCode: null }), { nearDate: "2026-12-15", farDate: FAR }, { level: "GROUP_NATURAL", file: entityFile, before: deExecutes })).recs);
+  assert.deepEqual([none.action, none.reason, none.parts.length], ["NONE", "NO_TRADING_ENTITY", 0]);
+});
+
+e2e("close-out+new: no dates, a closed far date and the approval gate work as they do for Adjust+Swap", async () => {
+  const noDates = (await rolledCycle(closeOutNew(), null)).recs;
+  assert.ok(noDates.length > 0 && noDates.every((r) => r.action === "NONE" && r.reason === "ROLL_DATES_NOT_SET"));
+  const closed = await rolledCycle(closeOutNew(), { nearDate: "2026-12-15", farDate: FAR }, { approve: false, before: holidayOn({ EUR: FAR, USD: null }) });
+  assert.equal(groupOf(closed.recs, "US01").reason, "FAR_DATE_CLOSED");
+  await assert.rejects(approveExposure(closed.t, closed.cycle as string), /far date entered for the roll is closed for some groups/);
+  const edited = await rolledCycle(closeOutNew(), { nearDate: "2026-12-15", farDate: FAR }, { approve: false });
+  await setDates(edited, { nearDate: "2026-12-15", farDate: "2027-01-20" });
+  await assert.rejects(approveExposure(edited.t, edited.cycle as string), /roll dates changed after this run's recommendations were made/);
+});
+
+e2e("close-out+new with the amount threshold: the net is taken after the close-outs, so a hedge that nets the exposure to zero is closed and put back as a new trade; Adjust+Swap is unchanged", async () => {
+  // 1,000 EUR of exposure fully hedged by a sale that matures in the window: the net is 0 now and +1,000 once the hedge is closed. 1,100 USD is 1,000 EUR.
+  const file = [
+    "trade_id,execution_platform_id,trading_entity,counterparty,trade_date,value_date,deal_currency,deal_amount,settlement_currency,settlement_amount,instrument,buy_sell,hedging_program_id,pre_trade_reference",
+    "T1,SIMFX,US01,Sim Bank,2026-11-10,2026-12-15,EUR,1000.0000,USD,1100.0000,FORWARD,SELL,BS,",
+  ].join("\n");
+  const threshold = (over: object) => ({ strategy: "amount-threshold", amountThresholdDisplay: "1100", ...over });
+  const dates = { nearDate: "2026-12-15", farDate: FAR };
+  const us = groupOf((await rolledCycle(threshold({ rollType: "CLOSE_OUT_NEW" }), dates, { file })).recs, "US01");
+  // The comparison is inclusive: a net of exactly the threshold is hedged, all of it, and brought to zero.
+  assert.deepEqual([us.action, us.direction, us.amount, us.reason, us.hedgedAmount], ["HEDGE", "SELL", "1000.00", null, "0.00"]);
+  assert.deepEqual(partsShown(us), [[1, "CLOSE_OUT", "BUY", "1000.00", "2026-12-15"], [2, "NEW", "SELL", "1000.00", FAR]], "the near buy closes the hedge and the far sale replaces it");
+  // A threshold just above the net after the close-outs: the net is within it, so there are close-outs and no new trade.
+  const within = groupOf((await rolledCycle(threshold({ rollType: "CLOSE_OUT_NEW", amountThresholdDisplay: "1100.01" }), dates, { file })).recs, "US01");
+  assert.deepEqual([within.action, within.reason, partsShown(within).map((p) => p[1])], ["HEDGE", "WITHIN_THRESHOLD", ["CLOSE_OUT"]]);
+  // Adjust+Swap keeps deciding on the net as it stands (0, within the threshold): the roll and no adjustment.
+  const swap = groupOf((await rolledCycle(threshold({}), dates, { file })).recs, "US01");
+  assert.deepEqual([swap.reason, partsShown(swap).map((p) => [p[1], p[2], p[3]])], ["WITHIN_THRESHOLD", [["CLOSE_OUT", "BUY", "1000.00"], ["ROLL", "SELL", "1000.00"]]]);
+});
