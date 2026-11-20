@@ -67,15 +67,17 @@ Finish the PR description with: what changed, which checks ran and their result,
 **Order of hand-over**
 
 1. D step D1 (file layouts agreed and written down) and E steps E1 and E2 (data design, configuration) start together. E's files cannot be generated until the layouts are fixed. E5 (the simulator) can start at once.
-2. D step D2 needs Fikre's choice first (decision row #10), then D3 to D6; these and J run in parallel from day one. They touch different directories, apart from `docs/STATUS.md` and, in J, the Audit, Data Source and Identity contracts. D7 waits for J1.
+2. D steps D2 to D6 and J run in parallel from day one. They touch different directories, apart from `docs/STATUS.md` and, in J, the Audit, Data Source and Identity contracts. D7 waits for J1.
 3. E step E3 (generate the files) starts when D step D1 is merged. E step E7 (the rehearsal, which loads the pack) needs D's loaders, A's server and J, and is the first point where all four streams meet.
 4. When all four are merged, one person runs `npm run uat:rehearse` (E7). It is the acceptance test for the four streams together.
 
 **Merge conflicts to expect**: `docs/STATUS.md` (everyone) and `app/src/` (A and D). Rebase onto `main` before opening the PR and keep STATUS edits to the lines about your own stream.
 
-## Decisions to confirm before work starts
+## Decisions
 
-Each has a recommendation. A programmer who meets one of these unconfirmed writes a DECISION REQUIRED block instead of choosing. Rows 1 and 2 are built (decision 0023, PR #16).
+**All ten are confirmed by Fikre (2026-11-20), as recommended.** Rows 1 and 2 are built (decision 0023, PR #16). Row 10 is option A: each service keeps its own `csv.ts`.
+
+If a programmer finds a choice that is not covered by a row here, they write a DECISION REQUIRED block instead of choosing.
 
 | # | Stream | Decision | Recommendation |
 | --- | --- | --- | --- |
@@ -88,4 +90,4 @@ Each has a recommendation. A programmer who meets one of these unconfirmed write
 | 7 | J | Audit for Data Source and Exposure Analysis | Record batch loaded (by a person), mapping rule added, mapping rule ended. For Exposure Analysis, record only commands a person can call that change what the next run shows; if there are none, record nothing and say so. Automated runs and connector feeds stay unrecorded, as in decision 0012. |
 | 8 | J | Who may retry a stuck event | New permission `operations:manage-events`, held by TREASURY_ADMIN for that tenant's events and by the platform role for all tenants. Every retry is written to Audit. Skipping or discarding an event stays out of scope. |
 | 9 | E | Which program types and strategies the UAT tenant uses | Two balance sheet programs on the same GL, since GL balances are the only data type in Release 1: `BS-ENT` (daily, ENTITY netting) and `BS-REG` (weekly, REGION netting). One strategy per program (decision 0020): `BS-ENT` uses hedge-ratio-adjustment (75% default, 90% on one pair through the per-pair ratio override) and rolls (Adjust + Swap); `BS-REG` uses amount-threshold (one program threshold in USD; no override, since a program nets at one level) and does not roll. |
-| 10 | D | Where the CSV reader lives | `shared/kernel` is reserved for the seven identifiers (AGENTS.md), so it does not move there. Each of the four services that read files keeps its own small `csv.ts`, with the same test cases in each. The alternative is a new `shared/csv` package, which needs an architecture decision that amends AGENTS.md. D3 waits for this choice (see D2). |
+| 10 | D | Where the CSV reader lives | `shared/kernel` is reserved for the seven identifiers (AGENTS.md), so it does not move there. Each of the four services that read files keeps its own small `csv.ts`, with the same test cases in each. The alternative is a new `shared/csv` package, which needs an architecture decision that amends AGENTS.md. Confirmed: option A. |

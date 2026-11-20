@@ -16,7 +16,7 @@ Master Data, Data Source, FX Rate and FX Trade take their data through commands,
 
 ## Decisions this task relies on
 
-Overview table (README) **#3** (parsers live in the owning service), **#4** (one CSV per kind, snake_case headers, all or nothing), **#5** (SNAPSHOT for full loads) and **#10** (where the CSV reader lives). Write the layouts below as the starting point of D1 and change them only with Fikre's agreement.
+Overview table (README) **#3** (parsers live in the owning service), **#4** (one CSV per kind, snake_case headers, all or nothing), **#5** (SNAPSHOT for full loads) and **#10** (a CSV reader in each service). Write the layouts below as the starting point of D1 and change them only with Fikre's agreement.
 
 ## Steps
 
@@ -47,15 +47,16 @@ Rules to write into the document:
 
 Done when: the document is merged and Fikre has said the layouts are agreed. **E step E3 starts from this.**
 
-### D2. Where the CSV reader lives (decision first; D3 waits for it)
+### D2. A CSV reader in each service (decided: option A)
 
-`splitCsv` is in FX Trade (`services/fx-trade/src/file.ts`). Master Data, Data Source and FX Rate need the same reader, and a service cannot import another service's `src/`. `shared/kernel` is not an option: AGENTS.md reserves it for the seven shared identifiers and says nothing else is shared. **Do not move or copy the reader until Fikre has chosen.** Write DECISION REQUIRED with these options:
+`splitCsv` is in FX Trade (`services/fx-trade/src/file.ts`). Master Data, Data Source and FX Rate need the same reader, and a service cannot import another service's `src/`. `shared/kernel` is reserved for the seven identifiers (AGENTS.md), so the reader does not go there. Fikre chose option A on 2026-11-20 (README row #10): each of the four services that read files keeps its own small `csv.ts`.
 
-- **A (recommended).** Each of the four services keeps its own small `csv.ts` (FX Trade's existing code and tests, copied). Costs: four copies that can drift; reduce it by giving every copy the same test cases. Needs no change to AGENTS.md or the checks.
-- **B.** A new package `shared/csv` holding one pure function from text to rows, with nothing about FX in it. Costs: one copy, but it widens the shared set, so it needs a decision record (the next free number) that amends AGENTS.md, and the import-boundary check must be taught the package.
-- **C.** FX Trade exports it through its contract. Not recommended: three services would depend on a trade service for a utility.
+1. Copy FX Trade's reader and its tests into `services/master-data/src/csv.ts`, `services/data-source/src/csv.ts` and `services/fx-rate/src/csv.ts`, one commit per service. FX Trade keeps its own, unchanged. Do not import across services.
+2. Give every copy the same test cases (quoted commas, escaped quotes, CRLF and LF, byte-order mark, blank lines, a trailing newline), so drift shows up as a failing test.
+3. Put a one-line comment at the top of each copy: it is one of four copies and a change is made in all four.
+4. Write a short decision record (the next free number) stating the choice and its cost.
 
-Done when the choice is recorded in a decision record and, for A or B, the code is in place as its own commit with every existing FX Trade test passing untouched.
+Done when the three copies and the record are merged and the existing FX Trade tests pass untouched.
 
 ### D3. Parsers, one per kind, no database
 
@@ -65,7 +66,7 @@ Each parser is a pure function from text to a result:
 parseXFile(text): { rows: Row[]; problems: { rowNo: number | null; column: string | null; message: string }[] }
 ```
 
-Use the reader chosen in D2. Place and name the parsers: `services/master-data/src/files.ts` (`parseEntitiesFile`, `parseHierarchyFile`, `parseAccountsFile`, `parseCurrenciesFile`, `parseCalendarsFile`, `parseExposureCurrenciesFile`), `services/data-source/src/file.ts` (`parseGlFile`), `services/fx-rate/src/file.ts` (`parseRatesFile`). Export each from its service's entry point. The executed-trade parser already exists.
+Use the service's own `csv.ts` from D2. Place and name the parsers: `services/master-data/src/files.ts` (`parseEntitiesFile`, `parseHierarchyFile`, `parseAccountsFile`, `parseCurrenciesFile`, `parseCalendarsFile`, `parseExposureCurrenciesFile`), `services/data-source/src/file.ts` (`parseGlFile`), `services/fx-rate/src/file.ts` (`parseRatesFile`). Export each from its service's entry point. The executed-trade parser already exists.
 
 Rules for all of them:
 
@@ -114,7 +115,7 @@ ERP-native layouts and mapping from them; any other data type than the four abov
 
 ## Done when
 
-1. D1 merged and agreed; D2's decision recorded; D3 to D6 merged (D7 when J1 is in), with a decision record covering #3, #4 and #5.
+1. D1 merged and agreed; D2 to D6 merged (D7 when J1 is in), with a decision record covering #3, #4 and #5.
 2. A file of each kind loads from the command line against a fresh database, and a bad file stores nothing.
 3. `npx tsc --noEmit`, `npm run check`, `npm test` pass, and the speed numbers are in the PR.
 4. Each touched service README (60 lines or fewer) lists its file parser; `docs/STATUS.md` is updated.
