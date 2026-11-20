@@ -4,10 +4,11 @@ import { sql } from "kysely";
 import { asOfDate, cycleId as toCycleId, programId as toProgramId, type CycleId, type TenantId } from "@shared/kernel";
 import type { Actor } from "@services/identity/contract";
 import { require_, who, type IdentityPort } from "./access.ts";
+import type { DecisionsPort } from "./ports.ts";
 import { q, type Db, type Queryable, type Tx } from "./db.ts";
 import { recordChange } from "./change-record.ts";
 import { announce } from "./outbox.ts";
-import { settingsOn } from "./queries.ts";
+import { lockTenantPolicy, segregationOn, settingsOn } from "./queries.ts";
 import { realDate } from "./rules.ts";
 import { randomUUID } from "./outbox.ts";
 
@@ -30,7 +31,7 @@ async function note(tx: Queryable, tenant: TenantId, cycle: string, kind: Histor
 
 const isOpen = (c: { outcome: string | null; approved_at: Date | null }) => c.outcome === null && c.approved_at === null;
 
-export function cycleCommands(db: Db, access: IdentityPort, clock: () => Date) {
+export function cycleCommands(db: Db, access: IdentityPort, decisions: DecisionsPort, clock: () => Date) {
   const lock = (tx: Tx, tenant: TenantId, cycle: string) =>
     q(tx).selectFrom("cycles").selectAll().where("tenant_id", "=", tenant).where("cycle_id", "=", cycle).forUpdate().executeTakeFirst();
 
@@ -130,42 +131,125 @@ export function cycleCommands(db: Db, access: IdentityPort, clock: () => Date) {
     });
   }
 
+  /** A refusal for segregation of duties is itself written to the audit trail, in its own transaction since the approval's was not made. */
+  async function refuseDuty(gate: "EXPOSURE" | "CYCLE", input: { tenantId: TenantId; cycleId: string; actor: Actor }, program: ReturnType<typeof toProgramId>, why: string): Promise<never> {
+    await db.transaction().execute((tx) => recordChange(tx, {
+      tenantId: input.tenantId, programId: program, actor: who(input.actor), action: gate === "EXPOSURE" ? "exposure.approval-refused-by-segregation-of-duties" : "cycle.approval-refused-by-segregation-of-duties",
+      targetType: "cycle", targetId: input.cycleId, fields: [],
+    }));
+    throw new CycleRefused(why);
+  }
+
+  const EXPOSURE_WHY = "segregation of duties: you started or reran this cycle, so someone else must approve its exposure";
+  const CYCLE_WHY = "segregation of duties: you accepted or overrode a hedge on this cycle, so someone else must approve the cycle";
+
   /**
    * Approve Exposure: locks the exact run that has just completed. From here the cycle cannot be recalculated, and recommendations made
    * from this run can be decided; approving the cycle (a separate, later gate) is what releases any pre-trades.
+   *
+   * Segregation of duties is decided inside this one transaction, after the cycle row is locked: the history of who started or reran the cycle
+   * is read under that lock, so a rerun cannot slip in between the check and the approval, and the tenant policy is read under its shared lock,
+   * so a change to the policy is either wholly before or wholly after this approval. State refusals come first.
    */
   async function approveExposure(input: { tenantId: TenantId; cycleId: string; actor: Actor }): Promise<void> {
     const program = await find(input.tenantId, input.cycleId);
     await require_(access, input.tenantId, input.actor, "exposure:approve", program);
-    await db.transaction().execute(async (tx) => {
+    const refused = await db.transaction().execute(async (tx) => {
       const c = await lock(tx, input.tenantId, input.cycleId);
       if (!c) throw new CycleRefused("cycle not found");
       if (c.approved_at !== null) throw new CycleRefused("the cycle is already approved");
       if (c.outcome !== null) throw new CycleRefused(`the cycle was ${c.outcome.toLowerCase()}`);
       if (c.exposure_approved_at !== null) throw new CycleRefused("the exposure is already approved");
       if (c.stage !== "COMPLETED" || c.current_run_id === null) throw new CycleRefused("the exposure can be approved once its run has completed");
+      await lockTenantPolicy(tx, input.tenantId, "shared");
+      if (await segregationOn(tx, input.tenantId)) {
+        const starters = await q(tx).selectFrom("cycle_history").select("by_who").where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).where("kind", "in", ["INITIATED", "RERUN"]).execute();
+        if (starters.some((s) => s.by_who === who(input.actor))) return true;
+      }
       await q(tx).updateTable("cycles").set({ exposure_approved_at: clock(), exposure_approved_by: who(input.actor), exposure_approved_run_id: c.current_run_id }).where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).execute();
       await note(tx, input.tenantId, input.cycleId, "EXPOSURE_APPROVED", who(input.actor), `run ${c.current_run_id}`);
       await announce(tx, { type: "exposure-management.exposure-approved", tenantId: input.tenantId, cycleId: toCycleId(input.cycleId), programId: toProgramId(c.program_id), runId: c.current_run_id });
       await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(c.program_id), actor: who(input.actor), action: "exposure.approved", targetType: "cycle", targetId: input.cycleId, fields: [] });
+      return false;
     });
+    if (refused) await refuseDuty("EXPOSURE", input, program, EXPOSURE_WHY);
   }
 
+  /**
+   * Approve Cycle. With segregation of duties off, one transaction. With it on, the decision about who accepted or overrode a hedge lives in
+   * Hedge Recommendation's database, so no single transaction can see both. The approval is then an attempt, recorded durably here:
+   *   1. one transaction checks state and policy and, finding the policy on, records the attempt as IN_FLIGHT;
+   *   2. it reserves itself in Hedge Recommendation (which atomically checks the approver has not already decided, and stops them doing so);
+   *   3. one transaction re-checks state, requires the attempt to still be IN_FLIGHT, approves, and marks it COMMITTED;
+   *   4. it releases the reservation and, if it did not commit, marks itself FAILED.
+   * An attempt that stops before step 3 commits leaves a reservation behind, which only keeps its holder from winning hedge decisions on the cycle.
+   * `recoverApproval` is the way out; it stops such attempts for good (an attempt can commit only while IN_FLIGHT) before it releases anything.
+   */
   async function approveCycle(input: { tenantId: TenantId; cycleId: string; actor: Actor }): Promise<void> {
     const program = await find(input.tenantId, input.cycleId);
     await require_(access, input.tenantId, input.actor, "cycle:approve", program);
-    await db.transaction().execute(async (tx) => {
+    const attemptId = randomUUID();
+    const approve = async (tx: Tx, mode: "FIRST" | "COMMIT"): Promise<"DONE" | "RESERVE"> => {
       const c = await lock(tx, input.tenantId, input.cycleId);
       if (!c) throw new CycleRefused("cycle not found");
       if (c.approved_at !== null) throw new CycleRefused("the cycle is already approved");
       if (c.outcome !== null) throw new CycleRefused(`the cycle was ${c.outcome.toLowerCase()}`);
       if (c.stage !== "COMPLETED") throw new CycleRefused("only a completed cycle can be approved");
       if (c.exposure_approved_at === null) throw new CycleRefused("approve the exposure before approving the cycle");
+      if (mode === "FIRST") {
+        await lockTenantPolicy(tx, input.tenantId, "shared");
+        if (await segregationOn(tx, input.tenantId)) {
+          await q(tx).insertInto("approval_attempts").values({ tenant_id: input.tenantId, attempt_id: attemptId, cycle_id: input.cycleId, approver: who(input.actor), state: "IN_FLIGHT", started_at: clock() }).execute();
+          return "RESERVE";
+        }
+      } else {
+        // Under the cycle lock, so a recovery is wholly before this (the attempt is ABANDONED and cannot commit) or wholly after (it finds COMMITTED and leaves it).
+        const moved = await q(tx).updateTable("approval_attempts").set({ state: "COMMITTED", ended_at: clock() }).where("tenant_id", "=", input.tenantId).where("attempt_id", "=", attemptId).where("state", "=", "IN_FLIGHT").executeTakeFirst();
+        if (Number(moved.numUpdatedRows) === 0) throw new CycleRefused("this approval was stopped by a recovery before it could finish; approve the cycle again");
+      }
       await q(tx).updateTable("cycles").set({ approved_at: clock(), approved_by: who(input.actor) }).where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).execute();
       await note(tx, input.tenantId, input.cycleId, "APPROVED", who(input.actor));
       await announce(tx, { type: "exposure-management.cycle-approved", tenantId: input.tenantId, cycleId: toCycleId(input.cycleId), programId: toProgramId(c.program_id) });
       await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(c.program_id), actor: who(input.actor), action: "cycle.approved", targetType: "cycle", targetId: input.cycleId, fields: [] });
+      return "DONE";
+    };
+
+    if ((await db.transaction().execute((tx) => approve(tx, "FIRST"))) === "DONE") return;
+    try {
+      const hold = await decisions.reserveApproval(input.tenantId, input.cycleId as CycleId, who(input.actor), attemptId);
+      if (!hold.held) return await refuseDuty("CYCLE", input, program, CYCLE_WHY);
+      // The reservation was made while the policy was on. If it has been switched off since, approving is allowed anyway.
+      await db.transaction().execute((tx) => approve(tx, "COMMIT"));
+    } finally {
+      // Whatever happened, let the reservation go and close the attempt. If either step fails the attempt stays IN_FLIGHT, which is what recovery looks for;
+      // the failure must not hide the approval's own outcome.
+      try {
+        await decisions.releaseApproval(input.tenantId, attemptId);
+        await q(db).updateTable("approval_attempts").set({ state: "FAILED", ended_at: clock() }).where("tenant_id", "=", input.tenantId).where("attempt_id", "=", attemptId).where("state", "=", "IN_FLIGHT").execute();
+      } catch { /* left for recovery */ }
+    }
+  }
+
+  /**
+   * Recovery for an Approve Cycle that stopped before it committed and left its reservation behind (decision 0013). Needs `cycle:approve`.
+   * Under the cycle lock it marks every IN_FLIGHT attempt on the cycle ABANDONED, which an attempt can no longer commit from, and records that once.
+   * Only then does it release reservations, for every abandoned attempt of the cycle (so a reservation that arrives late is cleared by running it again).
+   * Repeating it is safe and changes nothing once there is nothing left. Returns how many attempts this call stopped.
+   */
+  async function recoverApproval(input: { tenantId: TenantId; cycleId: string; actor: Actor }): Promise<number> {
+    const program = await find(input.tenantId, input.cycleId);
+    await require_(access, input.tenantId, input.actor, "cycle:approve", program);
+    const stopped = await db.transaction().execute(async (tx) => {
+      await lock(tx, input.tenantId, input.cycleId);
+      const r = await q(tx).updateTable("approval_attempts").set({ state: "ABANDONED", ended_at: clock(), ended_by: who(input.actor) })
+        .where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).where("state", "=", "IN_FLIGHT").executeTakeFirst();
+      const n = Number(r.numUpdatedRows);
+      if (n > 0) await recordChange(tx, { tenantId: input.tenantId, programId: program, actor: who(input.actor), action: "cycle.approval-recovered", targetType: "cycle", targetId: input.cycleId, fields: [] });
+      return n;
     });
+    const abandoned = await q(db).selectFrom("approval_attempts").select("attempt_id").where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).where("state", "=", "ABANDONED").execute();
+    for (const a of abandoned) await decisions.releaseApproval(input.tenantId, a.attempt_id);
+    return stopped;
   }
 
   return {
@@ -177,5 +261,6 @@ export function cycleCommands(db: Db, access: IdentityPort, clock: () => Date) {
     deleteCycle: (input: { tenantId: TenantId; cycleId: string; reason: string; actor: Actor }) => close("DELETED", input),
     approveExposure,
     approveCycle,
+    recoverApproval,
   };
 }

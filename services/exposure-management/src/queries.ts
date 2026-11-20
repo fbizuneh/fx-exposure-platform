@@ -1,7 +1,8 @@
 // The questions Exposure Management answers.
+import { sql } from "kysely";
 import { asOfDate, cycleId, programId, type AsOfDate, type TenantId } from "@shared/kernel";
 import type { Cycle, CycleSummary, ExposureManagementQuestions, ProgramSettings, Schedule } from "../contract/index.ts";
-import { q, type Db, type Queryable } from "./db.ts";
+import { q, type Db, type Queryable, type Tx } from "./db.ts";
 import { scheduledAsOf } from "./rules.ts";
 
 const json = <T>(v: unknown): T => (typeof v === "string" ? JSON.parse(v) : v) as T;
@@ -28,8 +29,25 @@ const summary = (r: CycleRow): CycleSummary => ({
   rerunCount: r.rerun_count, exposureApprovedAt: r.exposure_approved_at?.toISOString() ?? null, exposureApprovedBy: r.exposure_approved_by, exposureApprovedRunId: r.exposure_approved_run_id, approvedAt: r.approved_at?.toISOString() ?? null, approvedBy: r.approved_by, initiatedBy: r.initiated_by, initiatedAt: r.initiated_at.toISOString(),
 });
 
+export const segregationOn = async (db: Queryable, tenant: TenantId): Promise<boolean> =>
+  (await q(db).selectFrom("tenant_settings").select("segregation_of_duties").where("tenant_id", "=", tenant).executeTakeFirst())?.segregation_of_duties ?? true;
+
+/**
+ * Serializes the tenant policy with the steps that read it (decision 0013). A change to the policy holds this exclusively for its whole
+ * transaction (compare, write, audit); an approval holds it shared from the moment it reads the policy until it commits, so it never
+ * decides on a policy that is being changed, and a change waits for approvals already reading the old one. Held until the transaction ends.
+ */
+export async function lockTenantPolicy(tx: Tx, tenant: TenantId, mode: "shared" | "exclusive"): Promise<void> {
+  const key = `tenant-policy:${tenant}`;
+  await (mode === "shared" ? sql`SELECT pg_advisory_xact_lock_shared(hashtextextended(${key}, 0))` : sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`).execute(tx);
+}
+
 export function exposureManagementQuestions(db: Db): ExposureManagementQuestions {
   return {
+    async tenantSettings(tenant) {
+      return { segregationOfDuties: await segregationOn(db, tenant) };
+    },
+
     async programCatalog(tenant) {
       const rows = await q(db).selectFrom("programs").select(["program_id", "name", "program_type", "enabled"]).where("tenant_id", "=", tenant).orderBy("program_id").execute();
       return rows.map((r) => ({ programId: programId(r.program_id), name: r.name, type: r.program_type, enabled: r.enabled }));

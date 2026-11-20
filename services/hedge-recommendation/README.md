@@ -6,11 +6,14 @@ Tier: core.
 - Recommendations for a cycle: the calculation behind each, its decision (who, when, amount, note) and its follow-up status
 - Its hedge policy per program: target ratio (with pair overrides), minimum hedge amount in the display currency, rounding (with currency overrides), tenor, default trading entity
 - Decisions, frozen at approval (undecided ones lapse)
+- Reservations by an Approve Cycle in flight under segregation of duties (decision 0013)
 
 ## Answers
 - The policy of a program, with defaults filled in
 - A cycle's recommendations, including groups where no action was needed and why
 - One recommendation
+- Who accepted or overrode a hedge on a cycle (dismissals excluded)
+- Who has an Approve Cycle in flight on a cycle
 Each is defined in contract/.
 
 ## Announces

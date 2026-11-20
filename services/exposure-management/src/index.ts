@@ -5,19 +5,21 @@ import { markPublished, pendingEvents } from "./outbox.ts";
 import { programCommands } from "./programs.ts";
 import { exposureManagementQuestions } from "./queries.ts";
 import type { IdentityPort } from "./access.ts";
+import type { DecisionsPort } from "./ports.ts";
+import { tenantCommands } from "./tenant.ts";
 
 // The Identity questions are passed as `access`: the schema check reads "identity." in code as a table reference.
-export function createExposureManagement(db: Db, deps: { access: IdentityPort; now?: () => Date }) {
+export function createExposureManagement(db: Db, deps: { access: IdentityPort; decisions: DecisionsPort; now?: () => Date }) {
   const now = deps.now ?? (() => new Date());
   return {
     questions: exposureManagementQuestions(db),
-    commands: { ...programCommands(db, deps.access), ...cycleCommands(db, deps.access, now) },
+    commands: { ...programCommands(db, deps.access), ...cycleCommands(db, deps.access, deps.decisions, now), ...tenantCommands(db, deps.access, now) },
     outbox: { pending: (limit?: number) => pendingEvents(db, limit), markPublished: (ids: readonly string[]) => markPublished(db, ids) },
   };
 }
 
 export { connect };
-export type { Db, IdentityPort };
+export type { Db, IdentityPort, DecisionsPort };
 export { AccessDenied } from "./access.ts";
 export { CycleRefused } from "./cycles.ts";
 export { ProgramRefused } from "./programs.ts";

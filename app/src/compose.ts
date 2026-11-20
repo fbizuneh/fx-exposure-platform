@@ -4,7 +4,7 @@ import type { Actor } from "@services/identity/contract";
 import { connect as connectAudit, createAudit } from "../../services/audit/src/index.ts";
 import { connect as connectDataSource, createDataSource } from "../../services/data-source/src/index.ts";
 import { connect as connectExposureAnalysis, createExposureAnalysis } from "../../services/exposure-analysis/src/index.ts";
-import { connect as connectExposureManagement, createExposureManagement } from "../../services/exposure-management/src/index.ts";
+import { connect as connectExposureManagement, createExposureManagement, type DecisionsPort } from "../../services/exposure-management/src/index.ts";
 import { connect as connectFxRate, createFxRate } from "../../services/fx-rate/src/index.ts";
 import { connect as connectFxTrade, createFxTrade } from "../../services/fx-trade/src/index.ts";
 import { connect as connectHedgeRecommendation, createHedgeRecommendation } from "../../services/hedge-recommendation/src/index.ts";
@@ -31,7 +31,12 @@ export function composeApp(connectionString: string, now: () => Date = () => new
   const masterData = createMasterData(dbs.masterData);
   const fxRate = createFxRate(dbs.fxRate, { now });
   const dataSource = createDataSource(dbs.dataSource, { masterData: masterData.questions, now });
-  const exposureManagement = createExposureManagement(dbs.exposureManagement, { access: identity.questions, now });
+  // Approve Cycle under segregation of duties reserves itself in Hedge Recommendation (decision 0013); Hedge Recommendation is built after Exposure Management, so the calls are passed as functions.
+  const decisions: DecisionsPort = {
+    reserveApproval: (tenant, cycle, approver, id) => hedgeRecommendation.commands.reserveApproval(tenant, cycle, approver, id),
+    releaseApproval: (tenant, id) => hedgeRecommendation.commands.releaseApproval(tenant, id),
+  };
+  const exposureManagement = createExposureManagement(dbs.exposureManagement, { access: identity.questions, decisions, now });
   const fxTrade = createFxTrade(dbs.fxTrade, { access: identity.questions, masterData: masterData.questions, management: exposureManagement.questions }, { now });
   const exposureAnalysis = createExposureAnalysis(dbs.exposureAnalysis, {
     management: exposureManagement.questions,

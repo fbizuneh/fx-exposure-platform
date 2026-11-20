@@ -101,7 +101,14 @@ export interface DueCycle {
   readonly asOf: AsOfDate;
 }
 
+/** Settings that apply to a whole tenant. */
+export interface TenantSettings {
+  /** On unless switched off: whoever started or reran a cycle cannot approve its exposure, and whoever accepted or overrode a hedge on it cannot approve the cycle (decision 0013). */
+  readonly segregationOfDuties: boolean;
+}
+
 export interface ExposureManagementQuestions {
+  tenantSettings(tenantId: TenantId): Promise<TenantSettings>;
   programCatalog(tenantId: TenantId): Promise<readonly ProgramSummary[]>;
   /** Null when the program is unknown or has no settings in force on that date. */
   programSettings(tenantId: TenantId, programId: ProgramId, asOf: AsOfDate): Promise<ProgramSettings | null>;

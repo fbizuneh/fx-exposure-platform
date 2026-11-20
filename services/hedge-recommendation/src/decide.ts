@@ -9,6 +9,7 @@ import type { CycleId, TenantId } from "@shared/kernel";
 import type { Actor } from "@services/identity/contract";
 import type { FollowUp, Recommendation } from "../contract/index.ts";
 import { require_, who } from "./access.ts";
+import { lockCycleDecisions } from "./approval.ts";
 import { q, type Db } from "./db.ts";
 import { recordChange } from "./change-record.ts";
 import { firstTime } from "./events.ts";
@@ -114,15 +115,26 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
     }
     if (rec.trading_entity_code === null) throw new RecommendationError("this recommendation has no trading entity");
     // Claiming is not yet a decision: FX Trade may still refuse, which reopens the recommendation. Audit hears of it when it is confirmed.
-    const won = await q(db).updateTable("recommendations").set({ status: "DECIDING", decision_kind: input.action, decided_amount: amount, decided_by: by, decided_at: clock(), decision_note: note })
-      .where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).where("status", "=", "OPEN").executeTakeFirst();
-    if (Number(won.numUpdatedRows) === 0) return lost();
+    // The claim takes the cycle's decision lock and looks for a reservation by this same person (an Approve Cycle in flight, decision 0013), so
+    // a person cannot win a decision and an approval of the same cycle at once.
+    const claim = await db.transaction().execute(async (tx) => {
+      await lockCycleDecisions(tx, tenant, rec.cycle_id);
+      const reserved = await q(tx).selectFrom("approval_holds").select("hold_id").where("tenant_id", "=", tenant).where("cycle_id", "=", rec.cycle_id).where("approver", "=", by).limit(1).executeTakeFirst();
+      if (reserved) return "RESERVED" as const;
+      const r = await q(tx).updateTable("recommendations").set({ status: "DECIDING", decision_kind: input.action, decided_amount: amount, decided_by: by, decided_at: clock(), decision_note: note })
+        .where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).where("status", "=", "OPEN").executeTakeFirst();
+      return Number(r.numUpdatedRows) === 0 ? ("LOST" as const) : ("WON" as const);
+    });
+    if (claim === "RESERVED") throw new RecommendationError("segregation of duties: you are approving this cycle, so someone else must decide its hedge recommendations");
+    if (claim === "LOST") return lost();
     return complete(tenant, rec.recommendation_id);
   }
 
   /** Approval, skip or deletion of a cycle: what nobody decided lapses; a decision that won but never got its pre-trade is settled from what FX Trade holds. */
   async function onCycleClosed(event: CycleClosedEvent): Promise<number> {
     const { tenantId: tenant } = event;
+    // The cycle can no longer be approved, so no approval is in flight: clear any reservation left behind (decision 0013).
+    await q(db).deleteFrom("approval_holds").where("tenant_id", "=", tenant).where("cycle_id", "=", event.cycleId).execute();
     const deciding = await q(db).selectFrom("recommendations").select("recommendation_id").where("tenant_id", "=", tenant).where("cycle_id", "=", event.cycleId).where("status", "=", "DECIDING").execute();
     const held = new Map((await c.preTrades.preTrades(tenant, { cycleId: event.cycleId })).filter((p) => p.recommendationId !== null).map((p) => [p.recommendationId!, p.preTradeId]));
     let changed = 0;
