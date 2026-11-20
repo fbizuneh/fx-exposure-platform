@@ -41,6 +41,8 @@ const deciders = new Map<string, string[]>();
 const holds = new Map<string, { key: string; approver: string }>();
 const hooks: { beforeReserve?: () => Promise<void>; afterReserve?: () => Promise<void>; failRelease?: boolean } = {};
 const decisions = {
+  async checkExposureApproval() { return { allowed: true as const }; },
+  async releaseExposureCheck() { /* nothing is locked in these tests */ },
   async reserveApproval(t: TenantId, c: CycleId, approver: string, reservationId: string) {
     await hooks.beforeReserve?.();
     const key = `${t}:${c}`;

@@ -111,6 +111,8 @@ export interface HedgeRow extends NetRow {
   readonly dealCurrency: string;
   readonly settlementCurrency: string;
   readonly pair: string;
+  /** When the leg matures. */
+  readonly valueDate: string;
 }
 const flat = (r: Baseline | NetRow): NetRow =>
   "kept" in r ? { rowNo: r.rowNo, entityCode: r.kept.balance.entityCode, region: r.region, currency1: r.kept.currency1, currency2: r.kept.currency2, amount1: r.amount1, amount2: r.amount2, functional: r.kept.functionalCurrency } : r;
@@ -143,7 +145,7 @@ export function buildHedgeRows(
       const a1 = round2(dealIs1 ? dealSigned : settleSigned), a2 = round2(dealIs1 ? settleSigned : dealSigned);
       rows.push({
         rowNo: rows.length + 1, entityCode: t.tradingEntityCode, region: info.region, currency1: c1, currency2: c2, amount1: a1, amount2: a2, functional: info.functional,
-        executedTradeId: t.executedTradeId, platform: t.platform, tradeId: t.tradeId, legNo: leg.legNo, dealCurrency: leg.dealCurrency, settlementCurrency: leg.settlementCurrency, pair: pairName(c1, c2),
+        executedTradeId: t.executedTradeId, platform: t.platform, tradeId: t.tradeId, legNo: leg.legNo, dealCurrency: leg.dealCurrency, settlementCurrency: leg.settlementCurrency, pair: pairName(c1, c2), valueDate: leg.valueDate,
       });
     }
   }
@@ -343,4 +345,26 @@ export function netExposure(
       net: { net1: n.net1, net2: n.net2, exposure: n.exposureAmount, display: n.displayAmount },
     };
   });
+}
+
+/**
+ * Where each hedge row fell (decision 0021): the net group it belongs to (1-based, in the order of `net`) and its amount in that group's exposure currency.
+ * A group's key comes from each contribution alone, so netting the hedge rows by themselves gives the same keys as netting them with the balances.
+ */
+export function hedgeRowPlacement(
+  hedgeRows: readonly HedgeRow[], level: NettingLevel, period: string, display: string, rateOf: (base: string, quote: string) => string,
+  exposureRules: ExposureCurrencyRules, net: readonly NetGroupResult[],
+): Map<number, { readonly groupNo: number; readonly exposureAmount: Num }> {
+  const index = new Map(net.map((n, i) => [groupKey(n.group), i + 1] as const));
+  const out = new Map<number, { groupNo: number; exposureAmount: Num }>();
+  for (const g of netByLevel(hedgeRows, level, period, display, rateOf, exposureRules)) {
+    const groupNo = index.get(groupKey(g));
+    if (groupNo === undefined) continue;
+    for (const m of g.members) {
+      const amount = g.exposureCurrency === g.currency1 ? m.amount1 : m.amount2;
+      const have = out.get(m.rowNo);
+      out.set(m.rowNo, { groupNo, exposureAmount: (have?.exposureAmount ?? new D(0)).plus(amount) });
+    }
+  }
+  return out;
 }

@@ -159,6 +159,11 @@ export interface HedgeRow {
   readonly currencyPair: string;
   readonly amount1: string;
   readonly amount2: string;
+  /** When the leg matures (decision 0021). Null for a run made before it was kept. */
+  readonly valueDate: AsOfDate | null;
+  /** The net group (its `groupNo`) the leg fell in, and its amount in that group's exposure currency. Null for a run made before they were kept. */
+  readonly groupNo: number | null;
+  readonly exposureAmount: string | null;
 }
 
 export interface RateUsed {

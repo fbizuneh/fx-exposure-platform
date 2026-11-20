@@ -35,6 +35,8 @@ export function composeApp(connectionString: string, now: () => Date = () => new
   const decisions: DecisionsPort = {
     reserveApproval: (tenant, cycle, approver, id) => hedgeRecommendation.commands.reserveApproval(tenant, cycle, approver, id),
     releaseApproval: (tenant, id) => hedgeRecommendation.commands.releaseApproval(tenant, id),
+    checkExposureApproval: (tenant, cycle, runId, attemptId) => hedgeRecommendation.commands.checkExposureApproval(tenant, cycle, runId, attemptId),
+    releaseExposureCheck: (tenant, cycle, attemptId) => hedgeRecommendation.commands.releaseExposureCheck(tenant, cycle, attemptId),
   };
   const exposureManagement = createExposureManagement(dbs.exposureManagement, { access: identity.questions, decisions, now });
   const fxTrade = createFxTrade(dbs.fxTrade, { access: identity.questions, masterData: masterData.questions, management: exposureManagement.questions }, { now });

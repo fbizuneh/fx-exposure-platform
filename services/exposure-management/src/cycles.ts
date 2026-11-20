@@ -154,25 +154,41 @@ export function cycleCommands(db: Db, access: IdentityPort, decisions: Decisions
   async function approveExposure(input: { tenantId: TenantId; cycleId: string; actor: Actor }): Promise<void> {
     const program = await find(input.tenantId, input.cycleId);
     await require_(access, input.tenantId, input.actor, "exposure:approve", program);
-    const refused = await db.transaction().execute(async (tx) => {
-      const c = await lock(tx, input.tenantId, input.cycleId);
-      if (!c) throw new CycleRefused("cycle not found");
-      if (c.approved_at !== null) throw new CycleRefused("the cycle is already approved");
-      if (c.outcome !== null) throw new CycleRefused(`the cycle was ${c.outcome.toLowerCase()}`);
-      if (c.exposure_approved_at !== null) throw new CycleRefused("the exposure is already approved");
-      if (c.stage !== "COMPLETED" || c.current_run_id === null) throw new CycleRefused("the exposure can be approved once its run has completed");
-      await lockTenantPolicy(tx, input.tenantId, "shared");
-      if (await segregationOn(tx, input.tenantId)) {
-        const starters = await q(tx).selectFrom("cycle_history").select("by_who").where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).where("kind", "in", ["INITIATED", "RERUN"]).execute();
-        if (starters.some((s) => s.by_who === who(input.actor))) return true;
-      }
-      await q(tx).updateTable("cycles").set({ exposure_approved_at: clock(), exposure_approved_by: who(input.actor), exposure_approved_run_id: c.current_run_id }).where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).execute();
-      await note(tx, input.tenantId, input.cycleId, "EXPOSURE_APPROVED", who(input.actor), `run ${c.current_run_id}`);
-      await announce(tx, { type: "exposure-management.exposure-approved", tenantId: input.tenantId, cycleId: toCycleId(input.cycleId), programId: toProgramId(c.program_id), runId: c.current_run_id });
-      await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(c.program_id), actor: who(input.actor), action: "exposure.approved", targetType: "cycle", targetId: input.cycleId, fields: [] });
-      return false;
-    });
-    if (refused) await refuseDuty("EXPOSURE", input, program, EXPOSURE_WHY);
+    // Hedge Recommendation is asked first whether the run's recommendations still match their roll dates, and locks the dates for the run (decision 0021). No transaction
+    // spans the two, so the run is read once here and the approval below refuses if the cycle was rerun meanwhile; any other way out unlocks the dates again.
+    const attemptId = randomUUID(); // this attempt's own lock on the roll dates, so another attempt's cleanup cannot release it
+    const pre = await q(db).selectFrom("cycles").select(["current_run_id", "stage"]).where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).executeTakeFirst();
+    const gateRun = pre && pre.stage === "COMPLETED" ? pre.current_run_id : null;
+    if (gateRun !== null) {
+      const gate = await decisions.checkExposureApproval(input.tenantId, input.cycleId as CycleId, gateRun, attemptId);
+      if (!gate.allowed) throw new CycleRefused(gate.reason);
+    }
+    let approved = false;
+    try {
+      const refused = await db.transaction().execute(async (tx) => {
+        const c = await lock(tx, input.tenantId, input.cycleId);
+        if (!c) throw new CycleRefused("cycle not found");
+        if (c.approved_at !== null) throw new CycleRefused("the cycle is already approved");
+        if (c.outcome !== null) throw new CycleRefused(`the cycle was ${c.outcome.toLowerCase()}`);
+        if (c.exposure_approved_at !== null) throw new CycleRefused("the exposure is already approved");
+        if (c.stage !== "COMPLETED" || c.current_run_id === null) throw new CycleRefused("the exposure can be approved once its run has completed");
+        if (c.current_run_id !== gateRun) throw new CycleRefused("the cycle was rerun while the approval was being checked; try again");
+        await lockTenantPolicy(tx, input.tenantId, "shared");
+        if (await segregationOn(tx, input.tenantId)) {
+          const starters = await q(tx).selectFrom("cycle_history").select("by_who").where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).where("kind", "in", ["INITIATED", "RERUN"]).execute();
+          if (starters.some((s) => s.by_who === who(input.actor))) return true;
+        }
+        await q(tx).updateTable("cycles").set({ exposure_approved_at: clock(), exposure_approved_by: who(input.actor), exposure_approved_run_id: c.current_run_id }).where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).execute();
+        await note(tx, input.tenantId, input.cycleId, "EXPOSURE_APPROVED", who(input.actor), `run ${c.current_run_id}`);
+        await announce(tx, { type: "exposure-management.exposure-approved", tenantId: input.tenantId, cycleId: toCycleId(input.cycleId), programId: toProgramId(c.program_id), runId: c.current_run_id });
+        await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(c.program_id), actor: who(input.actor), action: "exposure.approved", targetType: "cycle", targetId: input.cycleId, fields: [] });
+        return false;
+      });
+      approved = !refused;
+      if (refused) await refuseDuty("EXPOSURE", input, program, EXPOSURE_WHY);
+    } finally {
+      if (!approved && gateRun !== null) await decisions.releaseExposureCheck(input.tenantId, input.cycleId as CycleId, attemptId);
+    }
   }
 
   /**

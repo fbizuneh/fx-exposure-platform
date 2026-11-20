@@ -294,6 +294,9 @@ dbTest("net exposure is gross plus outstanding hedges; a matured leg and an unkn
   assert.deepEqual([eur.hedges.net1, eur.hedges.net2, eur.net.net1, eur.net.net2, eur.net.displayAmount, eur.hedges.displayAmount], ["-400.00", "440.00", "100.00", "-110.00", "110.00", "-440.00"]);
   const rows = await ea.questions.hedgeRows(t, run.runId);
   assert.deepEqual(rows.map((r) => [r.tradeId, r.entityCode, r.region, r.currencyPair, r.amount1, r.amount2]), [["h1", "US01", "AMER", "EUR-USD", "-400.00", "440.00"], ["h2", "US01", "AMER", "GBP-USD", "-100.00", "125.00"]]);
+  // Each leg says when it matures, which net group it fell in and its amount in that group's exposure currency (decision 0021).
+  assert.deepEqual(rows.map((r) => [r.tradeId, r.valueDate, r.groupNo, r.exposureAmount]), [["h1", "2027-01-15", eur.groupNo, "-400.00"], ["h2", "2027-01-15", net[1]!.groupNo, "-100.00"]]);
+  assert.equal(net.map((n) => n.hedges.exposureAmount).join(), rows.map((r) => r.exposureAmount).join(), "the legs of a group add up to its hedge amount");
 });
 
 dbTest("a program with no executed trades has net equal to gross", async () => {

@@ -1,6 +1,6 @@
 // Reads: the policy with defaults filled in, and the cycle's recommendations.
 import type { CycleId, ProgramId, TenantId } from "@shared/kernel";
-import type { CalendarGap, FollowUp, HedgePolicy, HedgeRecommendationQuestions, NoActionReason, Recommendation, RecommendationPart, RecommendationStatus, SplitMethod, Strategy } from "../contract/index.ts";
+import type { CalendarGap, FollowUp, HedgePolicy, HedgeRecommendationQuestions, NoActionReason, PartRole, Recommendation, RollIssue, RecommendationPart, RecommendationStatus, RollAdjustment, RollType, SplitMethod, Strategy } from "../contract/index.ts";
 import type { Selectable } from "kysely";
 import { q, type Db, type Queryable } from "./db.ts";
 import type { HedgeRecommendationDatabase } from "./schema.ts";
@@ -11,7 +11,7 @@ const opt = (v: string | null): string | null => (v === null ? null : amount(v))
 /** A ratio column (6 places) as a plain decimal: "1.000000" is "1", "0.800000" is "0.8". */
 const ratio = (v: string): string => (v.includes(".") ? v.replace(/0+$/, "").replace(/\.$/, "") : v);
 
-export const DEFAULTS = { defaultRatio: "1", minHedgeDisplay: "0", roundingDefault: "1000", tenor: "1M", splitMethod: "EVEN", strategy: "hedge-ratio-adjustment" } as const;
+export const DEFAULTS = { defaultRatio: "1", minHedgeDisplay: "0", roundingDefault: "1000", tenor: "1M", splitMethod: "EVEN", strategy: "hedge-ratio-adjustment", rollType: "NONE", rollAdjustment: "SEPARATE", rollOffsetDays: 0 } as const;
 
 /**
  * The policy with its overrides, read from one snapshot. A save replaces the policy and its overrides in one transaction, so separate statements that each took
@@ -43,6 +43,9 @@ async function readPolicyRows(db: Queryable, tenant: TenantId, program: ProgramI
     strategy: row ? (row.strategy as Strategy) : DEFAULTS.strategy,
     amountThresholdDisplay: row ? opt(row.amount_threshold_display) : null,
     amountThresholdOverrides: thresholds.map((m) => ({ nettingLevel: m.netting_level, amountThresholdDisplay: amount(m.amount_threshold_display) })),
+    rollType: row ? (row.roll_type as RollType) : DEFAULTS.rollType,
+    rollAdjustment: row ? (row.roll_adjustment as RollAdjustment) : DEFAULTS.rollAdjustment,
+    rollOffsetDays: row ? row.roll_offset_days : DEFAULTS.rollOffsetDays,
     saved: row !== undefined,
   };
 }
@@ -57,7 +60,12 @@ export const toRecommendation = (r: Row, parts: readonly Selectable<HedgeRecomme
   valueDate: r.value_date, fixingDate: r.fixing_date, calendarGaps: (typeof r.calendar_gaps === "string" ? JSON.parse(r.calendar_gaps) : r.calendar_gaps) as CalendarGap[], status: r.status as RecommendationStatus, decidedAmount: opt(r.decided_amount), decidedBy: r.decided_by,
   decidedAt: r.decided_at === null ? null : r.decided_at.toISOString(), decisionNote: r.decision_note, preTradeId: parts[0]?.pre_trade_id ?? null, followUp: r.follow_up as FollowUp,
   maxExposureAmount: opt(r.max_exposure_amount), splitMethod: r.split_method as SplitMethod | null, splitNote: r.split_note,
-  parts: parts.map((x): RecommendationPart => ({ partNo: x.part_no, amount: amount(x.amount), preTradeId: x.pre_trade_id, followUp: x.follow_up as FollowUp })),
+  roll: r.roll_type === null ? null : { type: r.roll_type as RollType, adjustment: r.roll_adjustment as RollAdjustment, nearDate: r.roll_near_date!, farDate: r.roll_far_date!, offsetDays: r.roll_offset_days! },
+  rollIssue: r.roll_issue === null || r.roll_issue === undefined ? null : ((typeof r.roll_issue === "string" ? JSON.parse(r.roll_issue) : r.roll_issue) as RollIssue),
+  parts: parts.map((x): RecommendationPart => ({
+    partNo: x.part_no, tradingEntityCode: x.trading_entity_code ?? r.trading_entity_code, role: x.role as PartRole, direction: (x.direction ?? r.direction) as RecommendationPart["direction"], valueDate: x.value_date ?? r.value_date, fixingDate: x.value_date === null ? r.fixing_date : x.fixing_date,
+    amount: amount(x.amount), preTradeId: x.pre_trade_id, followUp: x.follow_up as FollowUp,
+  })),
 });
 
 /** The recommendations with their parts, read together. */
@@ -70,6 +78,10 @@ export async function withParts(db: Queryable, tenant: TenantId, rows: readonly 
 export function hedgeRecommendationQuestions(db: Db): HedgeRecommendationQuestions {
   return {
     policy: (tenant, program) => readPolicy(db, tenant, program),
+    async rollParameters(tenant, cycle) {
+      const r = await q(db).selectFrom("roll_parameters").selectAll().where("tenant_id", "=", tenant).where("cycle_id", "=", cycle).executeTakeFirst();
+      return r ? { cycleId: cycle, programId: r.program_id as ProgramId, nearDate: r.near_date, farDate: r.far_date, offsetDays: r.offset_days, setBy: r.set_by } : null;
+    },
     async recommendations(tenant, cycle) {
       const rows = await q(db).selectFrom("recommendations").selectAll().where("tenant_id", "=", tenant).where("cycle_id", "=", cycle).where("status", "<>", "SUPERSEDED")
         .orderBy("action", "asc").orderBy("group_no").execute();

@@ -50,9 +50,19 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
 
   /** (Re)write a recommendation's parts, and the note that explains them, from an amount split the way the recommendation was (decision 0016). Called inside the claim, and to put the original parts and note back. */
   async function writeParts(tx: Tx, tenant: TenantId, rec: { recommendation_id: string; program_id: string; max_exposure_amount: string | null; split_method: string | null; min_exposure_amount: string | null; rounding: string }, total: string): Promise<void> {
+    // A rolled recommendation (decision 0021) keeps its close-outs and its roll as they are: only the adjustment changes. When the adjustment is booked with the roll
+    // as one trade, that one trade takes the amount and is not split.
+    const have = await q(tx).selectFrom("recommendation_parts").select(["part_no", "role"]).where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).execute();
+    const fixed = have.filter((x) => x.role === "CLOSE_OUT" || x.role === "ROLL").length;
+    const combined = have.some((x) => x.role === "COMBINED");
+    await q(tx).deleteFrom("recommendation_parts").where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).where("role", "in", ["ADJUSTMENT", "COMBINED"]).execute();
+    if (combined) {
+      await q(tx).insertInto("recommendation_parts").values({ tenant_id: tenant, recommendation_id: rec.recommendation_id, program_id: rec.program_id, part_no: fixed + 1, role: "COMBINED", amount: fmt(new Dec(total)) }).execute();
+      await q(tx).updateTable("recommendations").set({ split_note: null }).where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).execute();
+      return;
+    }
     const split = splitAmount(new Dec(total), rec.max_exposure_amount === null ? null : new Dec(rec.max_exposure_amount), (rec.split_method ?? "EVEN") as SplitMethod, new Dec(rec.rounding), rec.min_exposure_amount === null ? null : new Dec(rec.min_exposure_amount));
-    await q(tx).deleteFrom("recommendation_parts").where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).execute();
-    await q(tx).insertInto("recommendation_parts").values(split.parts.map((part, i) => ({ tenant_id: tenant, recommendation_id: rec.recommendation_id, program_id: rec.program_id, part_no: i + 1, amount: fmt(part) }))).execute();
+    await q(tx).insertInto("recommendation_parts").values(split.parts.map((part, i) => ({ tenant_id: tenant, recommendation_id: rec.recommendation_id, program_id: rec.program_id, part_no: fixed + i + 1, role: "ADJUSTMENT" as const, amount: fmt(part) }))).execute();
     await q(tx).updateTable("recommendations").set({ split_note: split.note }).where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).execute();
   }
 
@@ -84,10 +94,14 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
     try {
       const made = await c.createPreTrades({
         tenantId: tenant, cycleId: rec.cycle_id as CycleId, by: rec.decided_by!,
-        items: parts.map((part) => ({
-          recommendationId: id, partNo: part.part_no, tradingEntityCode: rec.trading_entity_code!, instrument: rec.instrument as "FORWARD" | "NDF",
-          legs: [{ role: "SINGLE", direction: rec.direction as "BUY" | "SELL", dealCurrency: rec.exposure_currency, dealAmount: part.amount, settlementCurrency: rec.other_currency, settlementAmount: null, valueDate: rec.value_date!, fixingDate: rec.fixing_date }],
-        })),
+        items: parts.map((part) => {
+          // A close-out and the roll carry their own direction and dates; an adjustment (or the combined trade) takes the recommendation's.
+          const own = part.value_date !== null;
+          return {
+            recommendationId: id, partNo: part.part_no, tradingEntityCode: (part.trading_entity_code ?? rec.trading_entity_code)!, instrument: rec.instrument as "FORWARD" | "NDF",
+            legs: [{ role: "SINGLE" as const, direction: (part.direction ?? rec.direction) as "BUY" | "SELL", dealCurrency: rec.exposure_currency, dealAmount: part.amount, settlementCurrency: rec.other_currency, settlementAmount: null, valueDate: part.value_date ?? rec.value_date!, fixingDate: own ? part.fixing_date : rec.fixing_date }],
+          };
+        }),
       });
       const byPart = new Map(made.map((m) => [m.partNo, m.preTradeId] as const));
       if (parts.some((part) => !byPart.has(part.part_no))) throw new RecommendationError("FX Trade did not return a pre-trade for every part");
@@ -146,24 +160,32 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
       return reread(tenant, rec.recommendation_id);
     }
 
-    let amount = rec.amount!;
+    let amount = rec.amount;
     if (input.action === "OVERRIDE") {
+      // A rolled recommendation can be overridden only where it has an adjustment (or a combined far trade); the close-outs and the roll are what is maturing (decision 0021).
+      if (rec.amount === null) throw new RecommendationError("there is no adjustment to override: this recommendation only closes and rolls the maturing hedges");
       if (input.amount === undefined || !/^\d+(\.\d{1,4})?$/.test(input.amount) || Number(input.amount) <= 0) throw new RecommendationError("an override needs a positive amount with up to 4 decimals");
       amount = input.amount;
     }
-    if (rec.trading_entity_code === null) throw new RecommendationError("this recommendation has no trading entity");
+    if ((await partsOf(tenant, rec.recommendation_id)).some((part) => (part.trading_entity_code ?? rec.trading_entity_code) === null)) throw new RecommendationError("this recommendation has no trading entity");
     // Claiming is not yet a decision: FX Trade may still refuse, which reopens the recommendation. Audit hears of it when it is confirmed.
     // The claim takes the cycle's decision lock and looks for a reservation by this same person (an Approve Cycle in flight, decision 0013), so
     // a person cannot win a decision and an approval of the same cycle at once.
     const claim = await db.transaction().execute(async (tx) => {
       await lockCycleDecisions(tx, tenant, rec.cycle_id);
+      // A roll was made from the dates as they were (decision 0021). The dates change under this same lock, and the approval of the exposure refuses while they differ, so this
+      // only stops a recommendation whose dates have moved on since; it is decided after a rerun or not at all.
+      if (rec.roll_type !== null) {
+        const now = await q(tx).selectFrom("roll_parameters").select("revision").where("tenant_id", "=", tenant).where("cycle_id", "=", rec.cycle_id).executeTakeFirst();
+        if ((now?.revision ?? null) !== rec.roll_revision) throw new RecommendationError("the roll dates changed after this recommendation was made; rerun the cycle");
+      }
       const reserved = await q(tx).selectFrom("approval_holds").select("hold_id").where("tenant_id", "=", tenant).where("cycle_id", "=", rec.cycle_id).where("approver", "=", by).limit(1).executeTakeFirst();
       if (reserved) return "RESERVED" as const;
       const r = await q(tx).updateTable("recommendations").set({ status: "DECIDING", decision_kind: input.action, decided_amount: amount, decided_by: by, decided_at: clock(), decision_note: note })
         .where("tenant_id", "=", tenant).where("recommendation_id", "=", rec.recommendation_id).where("status", "=", "OPEN").executeTakeFirst();
       if (Number(r.numUpdatedRows) === 0) return "LOST" as const;
       // An override is split the way the recommendation was: its amount against the same maximum, method and minimum (decision 0016).
-      if (input.action === "OVERRIDE") await writeParts(tx, tenant, rec, amount);
+      if (input.action === "OVERRIDE") await writeParts(tx, tenant, rec, amount!);
       return "WON" as const;
     });
     if (claim === "RESERVED") throw new RecommendationError("segregation of duties: you are approving this cycle, so someone else must decide its hedge recommendations");

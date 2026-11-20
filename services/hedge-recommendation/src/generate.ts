@@ -1,7 +1,9 @@
 // Turn a finished run's net exposure into recommendations (decision 0011 items 2 to 8, 12, 17).
 import { randomUUID } from "node:crypto";
 import { asOfDate, type CycleId, type ProgramId, type TenantId } from "@shared/kernel";
-import { D, addTenor, amountThresholdNeed, businessDaysBefore, calendarGaps, finishRecommendation, fmt, noCalendar, pairKey, ratioAdjustmentNeed, rollWithSpan, splitAmount, toBusinessCalendar, type BusinessCalendar } from "./calc.ts";
+import { lockCycleDecisions } from "./approval.ts";
+import { D, addDays, addTenor, amountThresholdNeed, businessDaysBefore, calendarGaps, closedCurrencies, combineRoll, nextJointBusinessDay, finishRecommendation, fmt, noCalendar, pairKey, planRoll, ratioAdjustmentNeed, rollWithSpan, splitAmount, toBusinessCalendar, type BusinessCalendar, type MaturingLeg } from "./calc.ts";
+import type { PartRole } from "../contract/index.ts";
 import { firstTime } from "./events.ts";
 import { q, type Db } from "./db.ts";
 import { announce } from "./outbox.ts";
@@ -55,11 +57,28 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
     const loaded = new Map((await c.masterData.getCalendars(tenant, [...new Set(groups.flatMap((g) => [g.currency1, g.currency2]))], today)).map((x) => [x.currency, toBusinessCalendar(x)]));
     const calendarOf = (ccy: string): BusinessCalendar => loaded.get(ccy) ?? noCalendar(ccy);
 
+    // The roll (decision 0021): each group's open hedge legs with their value dates and holding entity. The dates entered for the cycle are read below, under the cycle's lock.
+    const rolling = policy.rollType === "ADJUST_SWAP";
+    const legsOf = new Map<number, MaturingLeg[]>();
+    if (rolling) {
+      for (const h of await c.analysis.hedgeRows(tenant, event.runId)) {
+        if (h.groupNo === null || h.valueDate === null || h.exposureAmount === null) continue;
+        legsOf.set(h.groupNo, [...(legsOf.get(h.groupNo) ?? []), { valueDate: h.valueDate, entityCode: h.entityCode, exposureAmount: h.exposureAmount }]);
+      }
+    }
+
     return db.transaction().execute(async (tx) => {
       if (!(await firstTime(tx, tenant, event.eventId))) return "IGNORED";
+      // The dates and the approval of the exposure take this lock, so these recommendations are made from dates that cannot change before the approval looks at them (review of PR 14).
+      await lockCycleDecisions(tx, tenant, event.cycleId);
+      // The dates this run finished with: the ones now in force, unless they were edited after the run finished, in which case the ones it finished with (review of PR 14).
+      const bound = rolling ? await q(tx).selectFrom("roll_run_bindings").selectAll().where("tenant_id", "=", tenant).where("cycle_id", "=", event.cycleId).where("run_id", "=", event.runId).executeTakeFirst() : undefined;
+      const current = rolling ? await q(tx).selectFrom("roll_parameters").selectAll().where("tenant_id", "=", tenant).where("cycle_id", "=", event.cycleId).executeTakeFirst() : undefined;
+      const rollDates = bound ? (bound.near_date === null ? undefined : { near_date: bound.near_date, far_date: bound.far_date, offset_days: bound.offset_days, revision: bound.revision }) : current;
+      const offsetDays = rollDates?.offset_days ?? policy.rollOffsetDays;
       await q(tx).updateTable("recommendations").set({ status: "SUPERSEDED" }).where("tenant_id", "=", tenant).where("cycle_id", "=", event.cycleId).where("status", "in", ["OPEN", "NONE"]).execute();
       const rows = [];
-      const partRows: { tenant_id: string; recommendation_id: string; program_id: string; part_no: number; amount: string }[] = [];
+      const partRows: { tenant_id: string; recommendation_id: string; program_id: string; part_no: number; amount: string; trading_entity_code: string | null; role: PartRole; direction: "BUY" | "SELL" | null; value_date: string | null; fixing_date: string | null }[] = [];
       for (const g of groups) {
         const other = g.exposureCurrency === g.currency1 ? g.currency2 : g.currency1;
         const ratio = ratioFor.get(pairKey(g.currencyPair)) ?? policy.defaultRatio;
@@ -81,24 +100,59 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
         const out = finishRecommendation(need, { rounding, minExposure, rateMissing: (minDisplay.gt(0) || maxDisplay !== null || thresholdDisplay !== null) && !rate });
         // The trade is booked by the group's entity when the netting level has one; otherwise by the policy's default trading entity (decision 0011 item 9).
         const tradingEntity = g.entityCode ?? policy.tradingEntityCode;
-        const noEntity = out.action === "HEDGE" && tradingEntity === null;
-        const action = noEntity ? "NONE" : out.action;
-        const instrument = action === "HEDGE" ? (ndf.has(g.exposureCurrency) ? "NDF" : "FORWARD") : null;
         const cals = [calendarOf(g.currency1), calendarOf(g.currency2)];
-        const rolled = action === "HEDGE" ? rollWithSpan(addTenor(run!.asOf, policy.tenor), cals) : null;
-        const valueDate = rolled?.date ?? null;
+        const instrumentFor = ndf.has(g.exposureCurrency) ? "NDF" : "FORWARD";
+        const tenorDate = rollWithSpan(addTenor(run!.asOf, policy.tenor), cals);
         const recommendationId = randomUUID();
-        const split = action === "HEDGE" && out.amount !== null ? splitAmount(out.amount, maxExposure, policy.splitMethod, new D(rounding), minExposure === null ? null : new D(minExposure)) : null;
-        if (split) split.parts.forEach((part, i) => partRows.push({ tenant_id: tenant, recommendation_id: recommendationId, program_id: event.programId, part_no: i + 1, amount: fmt(part) }));
+
+        // The roll (decision 0021). Its far date is the one entered for the cycle, else the policy's tenor date for this group; the window must end before it. Without usable
+        // dates a rolling program recommends nothing for the group.
+        const farDate = rollDates?.far_date ? { date: rollDates.far_date, through: rollDates.far_date } : tenorDate;
+        const rollUsable = rollDates !== undefined && farDate.date > addDays(rollDates.near_date, offsetDays);
+        const datesMissing = rolling && !rollUsable;
+        // An entered far date is used as entered, never moved for the user: if it is closed for a currency of the pair, the group waits for a new one (review of PR 14).
+        const closed = rollUsable && rollDates!.far_date ? closedCurrencies(farDate.date, cals) : [];
+        const rollIssue = closed.length > 0 ? { date: farDate.date, closedCurrencies: closed, suggestedDate: nextJointBusinessDay(farDate.date, cals) } : null;
+        const roll = rollUsable && rollIssue === null ? planRoll(legsOf.get(g.groupNo) ?? [], rollDates!.near_date, offsetDays) : null;
+        const adjustment = out.action === "HEDGE" ? { direction: out.direction!, amount: out.amount! } : null;
+        const fixingOf = (date: string): string | null => (instrumentFor === "NDF" ? businessDaysBefore(date, 2, cals) : null);
+
+        // The trades, in the order they are numbered: close-outs by value date, then the roll, then the adjustment (split if it is above the maximum).
+        const trades: { role: PartRole; tradingEntity: string | null; amount: InstanceType<typeof D>; direction: "BUY" | "SELL" | null; valueDate: string | null; fixingDate: string | null }[] = [];
+        let direction = out.direction, amountOut = out.amount;
+        let split: ReturnType<typeof splitAmount> | null = null;
+        if (roll) {
+          for (const x of roll.closeOuts) trades.push({ role: "CLOSE_OUT", tradingEntity: x.entityCode, amount: x.amount, direction: x.direction, valueDate: x.valueDate, fixingDate: fixingOf(x.valueDate) });
+          if (policy.rollAdjustment === "COMBINED") {
+            const far = combineRoll(roll.maturing, adjustment);
+            if (far) trades.push({ role: "COMBINED", tradingEntity: tradingEntity, amount: far.amount, direction: null, valueDate: null, fixingDate: null });
+            direction = far?.direction ?? null; amountOut = far?.amount ?? null;
+          } else if (roll.roll) {
+            trades.push({ role: "ROLL", tradingEntity: tradingEntity, amount: roll.roll.amount, direction: roll.roll.direction, valueDate: farDate.date, fixingDate: fixingOf(farDate.date) });
+          }
+        }
+        if (adjustment && (!roll || policy.rollAdjustment === "SEPARATE")) {
+          split = splitAmount(adjustment.amount, maxExposure, policy.splitMethod, new D(rounding), minExposure === null ? null : new D(minExposure));
+          for (const part of split.parts) trades.push({ role: "ADJUSTMENT", tradingEntity: tradingEntity, amount: part, direction: null, valueDate: null, fixingDate: null });
+        }
+        // A close-out is booked by the entity holding the hedge; the far trades need the group's own or the policy's default entity.
+        const noEntity = tradingEntity === null && trades.some((x) => x.role !== "CLOSE_OUT");
+        const action = datesMissing || rollIssue !== null || noEntity || trades.length === 0 ? "NONE" : "HEDGE";
+        const reason = datesMissing ? "ROLL_DATES_NOT_SET" : rollIssue !== null ? "FAR_DATE_CLOSED" : noEntity ? "NO_TRADING_ENTITY" : adjustment === null || (roll && policy.rollAdjustment === "COMBINED" && amountOut === null) ? out.reason : null;
+        const instrument = action === "HEDGE" ? instrumentFor : null;
+        const valueDate = action !== "HEDGE" ? null : roll ? farDate.date : tenorDate.date;
+        if (action === "HEDGE") trades.forEach((x, i) => partRows.push({ tenant_id: tenant, recommendation_id: recommendationId, program_id: event.programId, part_no: i + 1, amount: fmt(x.amount), trading_entity_code: x.role === "CLOSE_OUT" ? x.tradingEntity : null, role: x.role, direction: x.direction, value_date: x.valueDate, fixing_date: x.fixingDate }));
         rows.push({
           tenant_id: tenant, recommendation_id: recommendationId, program_id: event.programId, cycle_id: event.cycleId, run_id: event.runId, strategy: policy.strategy,
           group_no: g.groupNo, netting_level: g.nettingLevel, region: g.region, entity_code: g.entityCode, currency_pair: g.currencyPair, exposure_currency: g.exposureCurrency, other_currency: other,
           gross_exposure: g.gross.exposureAmount, hedged_amount: hedged, ratio: byThreshold ? null : ratio, threshold_exposure_amount: byThreshold && thresholdExact !== null ? fmt(thresholdExact) : null, target_hedge: fmt(out.target), needed_amount: fmt(out.needed), rounding, min_exposure_amount: minExposure,
-          trading_entity_code: tradingEntity, action, reason: noEntity ? "NO_TRADING_ENTITY" : out.reason, direction: noEntity ? null : out.direction,
-          amount: out.amount === null || noEntity ? null : fmt(out.amount), instrument,
-          value_date: valueDate, fixing_date: instrument === "NDF" ? businessDaysBefore(valueDate!, 2, cals) : null,
-          calendar_gaps: JSON.stringify(rolled === null ? [] : calendarGaps(cals, rolled.through)),
-          max_exposure_amount: split && maxExposure ? fmt(maxExposure) : null, split_method: split && maxExposure ? policy.splitMethod : null, split_note: split?.note ?? null,
+          trading_entity_code: tradingEntity, action, reason, direction: action !== "HEDGE" ? null : direction, amount: action !== "HEDGE" || amountOut === null ? null : fmt(amountOut), instrument,
+          value_date: valueDate, fixing_date: instrument === "NDF" && valueDate !== null ? businessDaysBefore(valueDate, 2, cals) : null,
+          calendar_gaps: JSON.stringify(action !== "HEDGE" ? [] : calendarGaps(cals, roll ? farDate.through : tenorDate.through)),
+          roll_type: rollUsable ? "ADJUST_SWAP" : null, roll_adjustment: rollUsable ? policy.rollAdjustment : null, roll_near_date: rollUsable ? rollDates!.near_date : null,
+          roll_far_date: rollUsable ? farDate.date : null, roll_offset_days: rollUsable ? offsetDays : null,
+          roll_revision: rolling ? rollDates?.revision ?? null : null, roll_issue: rollIssue === null ? null : JSON.stringify(rollIssue),
+          max_exposure_amount: action === "HEDGE" && split && maxExposure ? fmt(maxExposure) : null, split_method: action === "HEDGE" && split && maxExposure ? policy.splitMethod : null, split_note: action === "HEDGE" ? split?.note ?? null : null,
           status: action === "HEDGE" ? "OPEN" : "NONE", created_at: clock(),
         });
       }
