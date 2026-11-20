@@ -810,3 +810,60 @@ e2e("deciders: accepting, overriding and a decision still waiting on FX Trade co
   assert.deepEqual(await app.hedgeRecommendation.questions.deciders(c.t, c.cycle), [await label(c.t)]);
   assert.deepEqual(await app.hedgeRecommendation.questions.deciders(c.t, b.cycle), [], "another tenant's cycle ID finds nothing");
 });
+
+e2e("approval handshake across the real services: a reservation stops its approver winning a decision; a decision stops the reservation; a stale reservation is cleared when the cycle is approved", async () => {
+  const { t, cycle, recs } = await finishedCycle(defaults, "ENTITY", false, true);
+  const ops = (await app.identity.commands.createPlatformUser({ issuer: "platform", externalSubject: randomUUID() })) as string;
+  const approver = async (): Promise<Actor> => ({ kind: "user", userId: (await app.identity.commands.addUser(t, { issuer: "idp", externalSubject: randomUUID(), roles: ["TREASURY_APPROVER"] }, ops)) as never });
+  const [a, b] = [await approver(), await approver()];
+  const name = (x: Actor) => `user:${(x as { userId: string }).userId}`;
+  const hr = app.hedgeRecommendation;
+  const rec = recs.find((r) => r.action === "HEDGE")!;
+  await app.exposureManagement.commands.approveExposure({ tenantId: t, cycleId: cycle as string, actor: a });
+  await drain(app);
+
+  // Reservation first: a's accept is refused and the recommendation stays open; releasing it lets a decide.
+  const hold = await hr.commands.reserveApproval(t, cycle, name(a));
+  assert.equal(hold.held, true);
+  assert.deepEqual(await hr.questions.approvalHolds(t, cycle), [name(a)]);
+  await assert.rejects(hr.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: a, action: "ACCEPT" }), /you are approving this cycle, so someone else must decide/);
+  assert.equal((await hr.questions.getRecommendation(t, rec.recommendationId))!.status, "OPEN");
+  await hr.commands.releaseApproval(t, (hold as { holdId: string }).holdId);
+  await hr.commands.releaseApproval(t, (hold as { holdId: string }).holdId); // releasing twice is harmless
+  assert.deepEqual(await hr.questions.approvalHolds(t, cycle), []);
+
+  // Decision first: a wins the accept (so it counts at once, even before its pre-trade is confirmed elsewhere), and then cannot reserve or approve.
+  await hr.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: a, action: "ACCEPT" });
+  assert.deepEqual(await hr.commands.reserveApproval(t, cycle, name(a)), { held: false });
+  await assert.rejects(app.exposureManagement.commands.approveCycle({ tenantId: t, cycleId: cycle as string, actor: a }), /accepted or overrode/);
+  assert.deepEqual(await hr.questions.approvalHolds(t, cycle), [], "the refused approval left nothing reserved");
+
+  // b is not a decider, so b can reserve and approve. A reservation left behind by a crash is cleared once the cycle is approved.
+  const stale = await hr.commands.reserveApproval(t, cycle, name(b));
+  assert.equal(stale.held, true);
+  await app.exposureManagement.commands.approveCycle({ tenantId: t, cycleId: cycle as string, actor: b });
+  assert.deepEqual(await hr.questions.approvalHolds(t, cycle), [name(b)], "the stale reservation is still there until the cycle's approval reaches Hedge Recommendation");
+  await drain(app);
+  assert.deepEqual(await hr.questions.approvalHolds(t, cycle), []);
+});
+
+e2e("approval handshake: an accept and a reservation by the same person, submitted together, are never both won", async () => {
+  const outcomes: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    const { t, cycle, recs } = await finishedCycle(defaults, "ENTITY", false, true);
+    const ops = (await app.identity.commands.createPlatformUser({ issuer: "platform", externalSubject: randomUUID() })) as string;
+    const a: Actor = { kind: "user", userId: (await app.identity.commands.addUser(t, { issuer: "idp", externalSubject: randomUUID(), roles: ["TREASURY_APPROVER"] }, ops)) as never };
+    await app.exposureManagement.commands.approveExposure({ tenantId: t, cycleId: cycle as string, actor: a });
+    await drain(app);
+    const rec = recs.find((r) => r.action === "HEDGE")!;
+    const hr = app.hedgeRecommendation;
+    const [decision, reservation] = await Promise.all([
+      hr.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: a, action: "ACCEPT" }).then(() => true, () => false),
+      hr.commands.reserveApproval(t, cycle, `user:${(a as { userId: string }).userId}`).then((r) => r.held),
+    ]);
+    assert.equal(decision && reservation, false, "one person won both");
+    assert.equal(decision || reservation, true, "and one of them did win");
+    outcomes.push(decision ? "decision" : "reservation");
+  }
+  assert.equal(outcomes.length, 3);
+});

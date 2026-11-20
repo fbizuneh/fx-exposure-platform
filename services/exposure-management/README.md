@@ -28,7 +28,7 @@ Events carry identifiers only.
 - Run started and run finished, each with a run ID (Exposure Analysis)
 - Program enabled and disabled (Identity)
 - Access decisions (Identity's questions), before every command
-- Who accepted or overrode a hedge on a cycle (Hedge Recommendation's question), before Approve Cycle
+- Reserve and release of an approval (Hedge Recommendation, handed in by app/), around Approve Cycle when segregation of duties is on
 
 ## Schema
 `exposure_management`. Its tables are defined by this service's migrations.

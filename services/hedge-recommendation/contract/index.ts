@@ -82,6 +82,8 @@ export interface HedgeRecommendationQuestions {
   getRecommendation(tenantId: TenantId, recommendationId: string): Promise<Recommendation | null>;
   /** Who accepted or overrode a recommendation of the cycle, as actor labels ("user:<id>"), each once. A decision still waiting on its pre-trade counts. Dismissals do not. */
   deciders(tenantId: TenantId, cycleId: CycleId): Promise<readonly string[]>;
+  /** Who currently has an Approve Cycle in flight on the cycle under segregation of duties (decision 0013), as actor labels, each once. Cleared when the cycle is approved, skipped or deleted. */
+  approvalHolds(tenantId: TenantId, cycleId: CycleId): Promise<readonly string[]>;
 }
 
 interface Announcement {

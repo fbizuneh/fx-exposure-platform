@@ -15,6 +15,7 @@ export interface HedgeRecommendationDatabase {
     status: string; decided_amount: string | null; decided_by: string | null; decided_at: Date | null; decision_note: string | null; pre_trade_id: string | null;
     follow_up: Generated<string>; created_at: Date;
   };
+  approval_holds: { tenant_id: string; hold_id: string; cycle_id: string; approver: string; held_at: Date };
   processed_events: { tenant_id: string; event_id: string };
   outbox: { event_id: string; tenant_id: string; type: string; payload: string; created_at: Generated<Date>; seq: Generated<string>; published_at: Date | null };
 }

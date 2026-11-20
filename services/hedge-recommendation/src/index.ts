@@ -1,4 +1,5 @@
 // Hedge Recommendation's entry point for app/ to wire. Other services never import this; they import contract/.
+import { approvalCommands } from "./approval.ts";
 import { connect, type Db } from "./db.ts";
 import { decideCommands } from "./decide.ts";
 import { generateCommands } from "./generate.ts";
@@ -11,7 +12,7 @@ export function createHedgeRecommendation(db: Db, collaborators: Collaborators, 
   const now = options.now ?? (() => new Date());
   return {
     questions: hedgeRecommendationQuestions(db),
-    commands: { ...generateCommands(db, collaborators, now), ...decideCommands(db, collaborators, now), ...policyCommands(db, collaborators, now) },
+    commands: { ...generateCommands(db, collaborators, now), ...decideCommands(db, collaborators, now), ...approvalCommands(db, now), ...policyCommands(db, collaborators, now) },
     outbox: { pending: (limit?: number) => pendingEvents(db, limit), markPublished: (ids: readonly string[]) => markPublished(db, ids) },
   };
 }

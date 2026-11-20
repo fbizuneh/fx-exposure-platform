@@ -54,6 +54,10 @@ export function hedgeRecommendationQuestions(db: Db): HedgeRecommendationQuestio
         .where("status", "in", ["ACCEPTED", "OVERRIDDEN", "DECIDING"]).where("decided_by", "is not", null).orderBy("decided_by").execute();
       return rows.map((r) => r.decided_by!);
     },
+    async approvalHolds(tenant, cycle) {
+      const rows = await q(db).selectFrom("approval_holds").select("approver").distinct().where("tenant_id", "=", tenant).where("cycle_id", "=", cycle).orderBy("approver").execute();
+      return rows.map((r) => r.approver);
+    },
     async getRecommendation(tenant, id) {
       const r = await q(db).selectFrom("recommendations").selectAll().where("tenant_id", "=", tenant).where("recommendation_id", "=", id).executeTakeFirst();
       return r ? toRecommendation(r) : null;

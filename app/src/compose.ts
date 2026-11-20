@@ -31,8 +31,11 @@ export function composeApp(connectionString: string, now: () => Date = () => new
   const masterData = createMasterData(dbs.masterData);
   const fxRate = createFxRate(dbs.fxRate, { now });
   const dataSource = createDataSource(dbs.dataSource, { masterData: masterData.questions, now });
-  // Exposure Management asks Hedge Recommendation who decided hedges on a cycle (segregation of duties); Hedge Recommendation is built after it, so the question is passed as a function.
-  const decisions: DecisionsPort = { deciders: (tenant, cycle) => hedgeRecommendation.questions.deciders(tenant, cycle) };
+  // Approve Cycle under segregation of duties reserves itself in Hedge Recommendation (decision 0013); Hedge Recommendation is built after Exposure Management, so the calls are passed as functions.
+  const decisions: DecisionsPort = {
+    reserveApproval: (tenant, cycle, approver) => hedgeRecommendation.commands.reserveApproval(tenant, cycle, approver),
+    releaseApproval: (tenant, holdId) => hedgeRecommendation.commands.releaseApproval(tenant, holdId),
+  };
   const exposureManagement = createExposureManagement(dbs.exposureManagement, { access: identity.questions, decisions, now });
   const fxTrade = createFxTrade(dbs.fxTrade, { access: identity.questions, masterData: masterData.questions, management: exposureManagement.questions }, { now });
   const exposureAnalysis = createExposureAnalysis(dbs.exposureAnalysis, {

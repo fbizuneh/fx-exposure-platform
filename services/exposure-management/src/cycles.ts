@@ -8,7 +8,7 @@ import type { DecisionsPort } from "./ports.ts";
 import { q, type Db, type Queryable, type Tx } from "./db.ts";
 import { recordChange } from "./change-record.ts";
 import { announce } from "./outbox.ts";
-import { segregationOn, settingsOn } from "./queries.ts";
+import { lockTenantPolicy, segregationOn, settingsOn } from "./queries.ts";
 import { realDate } from "./rules.ts";
 import { randomUUID } from "./outbox.ts";
 
@@ -131,22 +131,6 @@ export function cycleCommands(db: Db, access: IdentityPort, decisions: Decisions
     });
   }
 
-  /**
-   * Segregation of duties (decision 0013), when the tenant has it on. The starter of a cycle (or whoever reran it) cannot approve its exposure,
-   * and whoever accepted or overrode a hedge on it cannot approve the cycle. Read before the approval's transaction, so no other service is
-   * called while the cycle is locked; the approval itself refuses first for any other reason. Returns the reason to refuse, or null.
-   */
-  async function dutyConflict(gate: "EXPOSURE" | "CYCLE", input: { tenantId: TenantId; cycleId: string; actor: Actor }): Promise<string | null> {
-    if (!(await segregationOn(db, input.tenantId))) return null;
-    const me = who(input.actor);
-    if (gate === "EXPOSURE") {
-      const starters = await q(db).selectFrom("cycle_history").select("by_who").where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).where("kind", "in", ["INITIATED", "RERUN"]).execute();
-      return starters.some((s) => s.by_who === me) ? "segregation of duties: you started or reran this cycle, so someone else must approve its exposure" : null;
-    }
-    const deciders = await decisions.deciders(input.tenantId, input.cycleId as CycleId);
-    return deciders.includes(me) ? "segregation of duties: you accepted or overrode a hedge on this cycle, so someone else must approve the cycle" : null;
-  }
-
   /** A refusal for segregation of duties is itself written to the audit trail, in its own transaction since the approval's was not made. */
   async function refuseDuty(gate: "EXPOSURE" | "CYCLE", input: { tenantId: TenantId; cycleId: string; actor: Actor }, program: ReturnType<typeof toProgramId>, why: string): Promise<never> {
     await db.transaction().execute((tx) => recordChange(tx, {
@@ -156,14 +140,20 @@ export function cycleCommands(db: Db, access: IdentityPort, decisions: Decisions
     throw new CycleRefused(why);
   }
 
+  const EXPOSURE_WHY = "segregation of duties: you started or reran this cycle, so someone else must approve its exposure";
+  const CYCLE_WHY = "segregation of duties: you accepted or overrode a hedge on this cycle, so someone else must approve the cycle";
+
   /**
    * Approve Exposure: locks the exact run that has just completed. From here the cycle cannot be recalculated, and recommendations made
    * from this run can be decided; approving the cycle (a separate, later gate) is what releases any pre-trades.
+   *
+   * Segregation of duties is decided inside this one transaction, after the cycle row is locked: the history of who started or reran the cycle
+   * is read under that lock, so a rerun cannot slip in between the check and the approval, and the tenant policy is read under its shared lock,
+   * so a change to the policy is either wholly before or wholly after this approval. State refusals come first.
    */
   async function approveExposure(input: { tenantId: TenantId; cycleId: string; actor: Actor }): Promise<void> {
     const program = await find(input.tenantId, input.cycleId);
     await require_(access, input.tenantId, input.actor, "exposure:approve", program);
-    const conflict = await dutyConflict("EXPOSURE", input);
     const refused = await db.transaction().execute(async (tx) => {
       const c = await lock(tx, input.tenantId, input.cycleId);
       if (!c) throw new CycleRefused("cycle not found");
@@ -171,35 +161,59 @@ export function cycleCommands(db: Db, access: IdentityPort, decisions: Decisions
       if (c.outcome !== null) throw new CycleRefused(`the cycle was ${c.outcome.toLowerCase()}`);
       if (c.exposure_approved_at !== null) throw new CycleRefused("the exposure is already approved");
       if (c.stage !== "COMPLETED" || c.current_run_id === null) throw new CycleRefused("the exposure can be approved once its run has completed");
-      if (conflict !== null) return true;
+      await lockTenantPolicy(tx, input.tenantId, "shared");
+      if (await segregationOn(tx, input.tenantId)) {
+        const starters = await q(tx).selectFrom("cycle_history").select("by_who").where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).where("kind", "in", ["INITIATED", "RERUN"]).execute();
+        if (starters.some((s) => s.by_who === who(input.actor))) return true;
+      }
       await q(tx).updateTable("cycles").set({ exposure_approved_at: clock(), exposure_approved_by: who(input.actor), exposure_approved_run_id: c.current_run_id }).where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).execute();
       await note(tx, input.tenantId, input.cycleId, "EXPOSURE_APPROVED", who(input.actor), `run ${c.current_run_id}`);
       await announce(tx, { type: "exposure-management.exposure-approved", tenantId: input.tenantId, cycleId: toCycleId(input.cycleId), programId: toProgramId(c.program_id), runId: c.current_run_id });
       await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(c.program_id), actor: who(input.actor), action: "exposure.approved", targetType: "cycle", targetId: input.cycleId, fields: [] });
       return false;
     });
-    if (refused) await refuseDuty("EXPOSURE", input, program, conflict!);
+    if (refused) await refuseDuty("EXPOSURE", input, program, EXPOSURE_WHY);
   }
 
+  /**
+   * Approve Cycle. With segregation of duties off, one transaction. With it on, the decision about who accepted or overrode a hedge lives in
+   * Hedge Recommendation's database, so no single transaction can see both: the approval first reserves itself there (which atomically checks the
+   * approver is not already a decider and stops them becoming one), then commits here, then lets the reservation go. A reservation that is not
+   * released (a crash, or Hedge Recommendation unreachable at that moment) only keeps its holder from winning hedge decisions on this cycle; it is
+   * cleared when the cycle is approved, skipped or deleted, and a retried approval makes its own, so retrying is safe.
+   */
   async function approveCycle(input: { tenantId: TenantId; cycleId: string; actor: Actor }): Promise<void> {
     const program = await find(input.tenantId, input.cycleId);
     await require_(access, input.tenantId, input.actor, "cycle:approve", program);
-    const conflict = await dutyConflict("CYCLE", input);
-    const refused = await db.transaction().execute(async (tx) => {
+    const approve = async (tx: Tx, withPolicy: boolean): Promise<"DONE" | "RESERVE"> => {
       const c = await lock(tx, input.tenantId, input.cycleId);
       if (!c) throw new CycleRefused("cycle not found");
       if (c.approved_at !== null) throw new CycleRefused("the cycle is already approved");
       if (c.outcome !== null) throw new CycleRefused(`the cycle was ${c.outcome.toLowerCase()}`);
       if (c.stage !== "COMPLETED") throw new CycleRefused("only a completed cycle can be approved");
       if (c.exposure_approved_at === null) throw new CycleRefused("approve the exposure before approving the cycle");
-      if (conflict !== null) return true;
+      if (withPolicy) {
+        await lockTenantPolicy(tx, input.tenantId, "shared");
+        if (await segregationOn(tx, input.tenantId)) return "RESERVE";
+      }
       await q(tx).updateTable("cycles").set({ approved_at: clock(), approved_by: who(input.actor) }).where("tenant_id", "=", input.tenantId).where("cycle_id", "=", input.cycleId).execute();
       await note(tx, input.tenantId, input.cycleId, "APPROVED", who(input.actor));
       await announce(tx, { type: "exposure-management.cycle-approved", tenantId: input.tenantId, cycleId: toCycleId(input.cycleId), programId: toProgramId(c.program_id) });
       await recordChange(tx, { tenantId: input.tenantId, programId: toProgramId(c.program_id), actor: who(input.actor), action: "cycle.approved", targetType: "cycle", targetId: input.cycleId, fields: [] });
-      return false;
-    });
-    if (refused) await refuseDuty("CYCLE", input, program, conflict!);
+      return "DONE";
+    };
+
+    if ((await db.transaction().execute((tx) => approve(tx, true))) === "DONE") return;
+    const hold = await decisions.reserveApproval(input.tenantId, input.cycleId as CycleId, who(input.actor));
+    if (!hold.held) return refuseDuty("CYCLE", input, program, CYCLE_WHY);
+    try {
+      // The reservation was made while the policy was on. If it has been switched off since, approving is allowed anyway, so the cycle lock and
+      // state checks are all that is re-read here.
+      await db.transaction().execute((tx) => approve(tx, false));
+    } finally {
+      // A failure to release must not hide the outcome of the approval; the reservation is cleared when the cycle closes (see above).
+      await decisions.releaseApproval(input.tenantId, hold.holdId).catch(() => undefined);
+    }
   }
 
   return {

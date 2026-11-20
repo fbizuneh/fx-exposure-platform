@@ -3,11 +3,13 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { sql } from "kysely";
 import { asOfDate, cycleId, programId, tenantId, type CycleId, type TenantId } from "@shared/kernel";
 import type { Actor, IdentityQuestions, Permission, PlatformUserId, UserId } from "@services/identity/contract";
 import { migrate } from "../../../scripts/migrate.mjs";
 import { AccessDenied, connect, createExposureManagement, CycleRefused, ProgramRefused, type Db, type NewProgram } from "./index.ts";
 import { q } from "./db.ts";
+import { lockTenantPolicy } from "./queries.ts";
 
 const url = process.env.TEST_DATABASE_URL;
 const enabled = url !== undefined && /\/[^/?]*_test(\?|$)/.test(url);
@@ -34,8 +36,29 @@ const user = (permissions: Permission[], programs: string[] | null = null): Acto
   grants.set(id, { permissions: new Set(permissions), programs: programs === null ? null : new Set(programs) });
   return { kind: "user", userId: id };
 };
-// Who decided hedges on a cycle, as Hedge Recommendation would answer.
+// Hedge Recommendation as the handshake sees it: who has decided on a cycle, and the reservations in flight. `claim` is what a hedge decision does there.
 const deciders = new Map<string, string[]>();
+const holds = new Map<string, { key: string; approver: string }>();
+const hooks: { afterReserve?: () => Promise<void>; failRelease?: boolean } = {};
+const decisions = {
+  async reserveApproval(t: TenantId, c: CycleId, approver: string) {
+    const key = `${t}:${c}`;
+    if ((deciders.get(key) ?? []).includes(approver)) return { held: false } as const;
+    const holdId = randomUUID();
+    holds.set(holdId, { key, approver });
+    await hooks.afterReserve?.();
+    return { held: true, holdId } as const;
+  },
+  async releaseApproval(_t: TenantId, holdId: string) {
+    if (hooks.failRelease) throw new Error("Hedge Recommendation unreachable");
+    holds.delete(holdId);
+  },
+};
+const claim = (t: TenantId, c: string, who: string): boolean => {
+  if ([...holds.values()].some((h) => h.key === `${t}:${c}` && h.approver === who)) return false; // refused: you are approving this cycle
+  deciders.set(`${t}:${c}`, [...(deciders.get(`${t}:${c}`) ?? []), who]);
+  return true;
+};
 const admin: Actor = { kind: "platform", platformUserId: "ops-1" as PlatformUserId };
 
 let db: Db;
@@ -46,7 +69,7 @@ before(async () => {
   db = connect(url!);
   await db.schema.dropSchema("exposure_management").ifExists().cascade().execute();
   await migrate(url!);
-  em = createExposureManagement(db, { access, decisions: { deciders: async (t, c) => deciders.get(`${t}:${c}`) ?? [] }, now: () => clock });
+  em = createExposureManagement(db, { access, decisions, now: () => clock });
 });
 after(async () => {
   if (enabled) await db.destroy();
@@ -384,4 +407,182 @@ dbTest("segregation of duties: on by default; the starter or rerunner cannot app
   // One tenant's switch does not touch another's.
   const u = await ready("BS");
   assert.deepEqual(await em.questions.tenantSettings(u), { segregationOfDuties: true });
+});
+
+// --- Concurrency of segregation of duties (decision 0013): each interleaving is forced, not hoped for. ---
+
+const label = (a: Actor) => `user:${(a as { userId: string }).userId}`;
+/** Waits until at least `n` database sessions are blocked on a lock. */
+async function waitForBlocked(n: number): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    const r = await sql<{ n: number }>`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`.execute(db);
+    if (r.rows[0]!.n >= n) return;
+    await new Promise((res) => setTimeout(res, 25));
+  }
+  throw new Error(`fewer than ${n} sessions blocked on a lock`);
+}
+const settle = <T>(p: Promise<T>) => p.then((v) => ({ ok: true as const, v }), (e: unknown) => ({ ok: false as const, e }));
+
+dbTest("segregation: Approve Exposure judges who started or reran the cycle as it stands once it has the cycle, not as it stood when it began", async () => {
+  const t = await ready("BS");
+  const x = user(["cycle:read", "cycle:initiate", "exposure:approve"]);
+  const { id } = await completed(t); // started by someone else; x is not in the history yet
+  let approval!: Promise<ReturnType<typeof settle> extends Promise<infer R> ? R : never>;
+  await db.transaction().execute(async (tx) => {
+    await q(tx).selectFrom("cycles").select("cycle_id").where("tenant_id", "=", t).where("cycle_id", "=", id).forUpdate().execute(); // the cycle is busy
+    approval = settle(em.commands.approveExposure({ tenantId: t, cycleId: id, actor: x }));
+    await waitForBlocked(1);
+    // While x waits for the cycle, x's rerun lands and its run completes.
+    await q(tx).insertInto("cycle_history").values({ tenant_id: t, cycle_id: id, seq: 100, kind: "RERUN", by_who: label(x), note: "rerun" }).execute();
+  });
+  const r = await approval;
+  assert.equal(r.ok, false, "a rerunner cannot approve the resulting exposure");
+  assert.match(String((r as { e: Error }).e.message), /started or reran/);
+  assert.equal((await em.questions.getCycle(t, id))!.exposureApprovedAt, null);
+});
+
+dbTest("segregation: an approval is serialized with a change of the tenant policy, in either order", async () => {
+  const t = await ready("BS");
+  const s = user(["cycle:read", "cycle:initiate", "exposure:approve", "cycle:approve", "authorization:manage"]); // starts, and could approve
+  const first = await em.commands.startCycle({ tenantId: t, programId: "BS", asOf: "2026-03-05", actor: s });
+  const r1 = runs(t, first); await em.commands.onRunStarted(r1); await em.commands.onRunFinished(r1);
+
+  // Policy change first: it is on (the default), a change to off is in flight and not yet committed; the approval waits, then sees off.
+  let a!: ReturnType<typeof settle>;
+  await db.transaction().execute(async (tx) => {
+    await lockTenantPolicy(tx, t, "exclusive");
+    a = settle(em.commands.approveExposure({ tenantId: t, cycleId: first, actor: s }));
+    await waitForBlocked(1);
+    await q(tx).insertInto("tenant_settings").values({ tenant_id: t, segregation_of_duties: false, updated_by: "test", updated_at: clock }).execute();
+  });
+  assert.equal((await a).ok, true, "the approval used the policy as changed, which is off");
+  await em.commands.approveCycle({ tenantId: t, cycleId: first, actor: s });
+
+  // Approval first in line, policy change second: the change waits for the approval, which saw off.
+  const second = await em.commands.startCycle({ tenantId: t, programId: "BS", asOf: "2026-03-06", actor: s });
+  const r2 = runs(t, second); await em.commands.onRunStarted(r2); await em.commands.onRunFinished(r2);
+  let b!: ReturnType<typeof settle>;
+  await db.transaction().execute(async (tx) => {
+    await lockTenantPolicy(tx, t, "exclusive");
+    await q(tx).updateTable("tenant_settings").set({ segregation_of_duties: true }).where("tenant_id", "=", t).execute();
+    b = settle(em.commands.approveExposure({ tenantId: t, cycleId: second, actor: s }));
+    await waitForBlocked(1);
+  });
+  const rb = await b;
+  assert.equal(rb.ok, false, "the approval used the policy as changed, which is on");
+  assert.match(String((rb as { e: Error }).e.message), /started or reran/);
+});
+
+dbTest("segregation: each actual change of the tenant policy is recorded once, however many arrive together; no-ops leave nothing behind", async () => {
+  const t = await ready("BS");
+  const o1 = user(["authorization:manage"]); const o2 = user(["authorization:manage"]);
+  const row = () => q(db).selectFrom("tenant_settings").selectAll().where("tenant_id", "=", t).executeTakeFirst();
+  const recorded = async () => (await changes(t)).filter((c) => c.startsWith("tenant.")).length;
+
+  // Switching on when it is already on by default changes nothing: no row, no record.
+  assert.equal(await em.commands.setSegregationOfDuties({ tenantId: t, enabled: true, actor: o1 }), false);
+  assert.equal(await row(), undefined);
+  assert.equal(await recorded(), 0);
+
+  // Identical changes arriving together from the implicit default: one wins, once.
+  const together = async (enabled: boolean, actors: Actor[]) => {
+    let all!: Promise<boolean[]>;
+    await db.transaction().execute(async (tx) => {
+      await lockTenantPolicy(tx, t, "exclusive");
+      all = Promise.all(actors.map((actor) => em.commands.setSegregationOfDuties({ tenantId: t, enabled, actor })));
+      await waitForBlocked(actors.length);
+    });
+    return all;
+  };
+  const off = await together(false, [o1, o2, o1, o2]);
+  assert.equal(off.filter(Boolean).length, 1);
+  assert.equal(await recorded(), 1);
+  const after1 = await row();
+  assert.equal(after1!.segregation_of_duties, false);
+
+  // A no-op changes neither the row nor the trail.
+  assert.equal(await em.commands.setSegregationOfDuties({ tenantId: t, enabled: false, actor: o2 }), false);
+  const after2 = await row();
+  assert.deepEqual([after2!.updated_by, after2!.updated_at], [after1!.updated_by, after1!.updated_at]);
+  assert.equal(await recorded(), 1);
+
+  // Opposing changes arriving together: whatever order they take, every change that actually happened is recorded once, and the last one stands.
+  const results = await together(true, [o1]).then(async (on) => [on[0]!, ...(await together(false, [o2]))]);
+  assert.deepEqual(results, [true, true]);
+  let opposing!: Promise<boolean[]>;
+  await db.transaction().execute(async (tx) => {
+    await lockTenantPolicy(tx, t, "exclusive");
+    opposing = Promise.all([true, false, true, false].map((enabled, i) => em.commands.setSegregationOfDuties({ tenantId: t, enabled, actor: i % 2 ? o2 : o1 })));
+    await waitForBlocked(4);
+  });
+  const done = await opposing;
+  const transitions = done.filter(Boolean).length;
+  assert.equal(await recorded(), 1 + 2 + transitions, "one record per actual change");
+  assert.ok(transitions >= 1);
+});
+
+dbTest("segregation: Approve Cycle reserves itself first, so a decision and the approval cannot both be won by one person, in either order", async () => {
+  const t = await ready("BS");
+  const p = approver(); const q2 = approver();
+  const reasons = (e: unknown) => String((e as Error).message);
+
+  // The approval is first: while it is in flight, its approver's decision is refused and another person's is not; the approval then succeeds.
+  const { id } = await completed(t);
+  await em.commands.approveExposure({ tenantId: t, cycleId: id, actor: q2 });
+  const mine: boolean[] = [];
+  hooks.afterReserve = async () => { mine.push(claim(t, id, label(p)), claim(t, id, label(q2))); };
+  try { await em.commands.approveCycle({ tenantId: t, cycleId: id, actor: p }); } finally { hooks.afterReserve = undefined; }
+  assert.deepEqual(mine, [false, true], "the approver was refused, someone else was not");
+  assert.equal((await em.questions.getCycle(t, id))!.approvedBy, label(p));
+  assert.equal(holds.size, 0, "the reservation was released");
+
+  // The decision is first: the reservation is refused, the refusal is audited, nothing is left reserved.
+  const t2 = await ready("BS");
+  const { id: id2 } = await completed(t2);
+  await em.commands.approveExposure({ tenantId: t2, cycleId: id2, actor: q2 });
+  assert.equal(claim(t2, id2, label(p)), true);
+  await assert.rejects(em.commands.approveCycle({ tenantId: t2, cycleId: id2, actor: p }), /accepted or overrode/);
+  assert.equal(holds.size, 0);
+  assert.deepEqual((await changes(t2)).filter((c) => c.includes("refused")), ["cycle.approval-refused-by-segregation-of-duties cycle"]);
+  assert.equal((await em.questions.getCycle(t2, id2))!.approvedAt, null);
+  void reasons;
+});
+
+dbTest("segregation: a failed or repeated Approve Cycle leaves nothing reserved, and a release that fails does not hide the approval", async () => {
+  const t = await ready("BS");
+  const p = approver(); const other = approver();
+  const { id } = await completed(t);
+  await em.commands.approveExposure({ tenantId: t, cycleId: id, actor: other });
+
+  // The approval fails after reserving (someone else approved in the meantime): the reservation is released and the error is the real reason.
+  hooks.afterReserve = async () => { hooks.afterReserve = undefined; await em.commands.approveCycle({ tenantId: t, cycleId: id, actor: other }); };
+  try { await assert.rejects(em.commands.approveCycle({ tenantId: t, cycleId: id, actor: p }), /already approved/); } finally { hooks.afterReserve = undefined; }
+  assert.equal(holds.size, 0);
+  assert.equal((await em.questions.getCycle(t, id))!.approvedBy, label(other));
+
+  // Repeating an approval that already stands is refused for that reason, reserves nothing, and changes nothing.
+  await assert.rejects(em.commands.approveCycle({ tenantId: t, cycleId: id, actor: p }), /already approved/);
+  assert.equal(holds.size, 0);
+  assert.equal((await changes(t)).filter((c) => c === "cycle.approved cycle").length, 1);
+
+  // A release that fails: the approval still reports success; the reservation is left for Hedge Recommendation to clear when the cycle closes.
+  const t2 = await ready("BS");
+  const { id: id2 } = await completed(t2);
+  await em.commands.approveExposure({ tenantId: t2, cycleId: id2, actor: other });
+  hooks.failRelease = true;
+  try { await em.commands.approveCycle({ tenantId: t2, cycleId: id2, actor: p }); } finally { hooks.failRelease = false; }
+  assert.equal((await em.questions.getCycle(t2, id2))!.approvedBy, label(p));
+  assert.equal(holds.size, 1);
+  holds.clear();
+
+  // If the policy is switched off while the approval is in flight, the approval is allowed.
+  const t3 = await ready("BS");
+  const { id: id3 } = await completed(t3);
+  await em.commands.approveExposure({ tenantId: t3, cycleId: id3, actor: other });
+  deciders.set(`${t3}:${id3}`, []);
+  const owner = user(["authorization:manage"]);
+  hooks.afterReserve = async () => { hooks.afterReserve = undefined; await em.commands.setSegregationOfDuties({ tenantId: t3, enabled: false, actor: owner }); };
+  try { await em.commands.approveCycle({ tenantId: t3, cycleId: id3, actor: p }); } finally { hooks.afterReserve = undefined; }
+  assert.ok((await em.questions.getCycle(t3, id3))!.approvedAt);
+  assert.equal(holds.size, 0);
 });
