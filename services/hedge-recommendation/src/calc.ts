@@ -46,19 +46,19 @@ export interface ThresholdNeeded {
   /** Gross exposure plus outstanding hedges in the exposure currency, signed: positive is long. */
   readonly netExposure: string;
   readonly hedgedAmount: string;
-  /** The threshold in the exposure currency; null when the rate to convert it is missing. */
+  /** The threshold in the exposure currency, not rounded (rounding it for display must not change a decision); null when the rate to convert it is missing. */
   readonly thresholdExposure: string | null;
 }
 /**
- * Amount threshold (decision 0020): when the net exposure is larger than the threshold (either way), hedge all of it, which brings the net to zero; otherwise nothing.
- * A net exactly at the threshold is within it. The threshold cannot be compared without its rate.
+ * Amount threshold (decision 0020): when the net exposure is at or above the threshold (either way), hedge all of it, which brings the net to zero; only a net
+ * strictly below the threshold is within it. The threshold cannot be compared without its rate.
  */
 export function amountThresholdNeed(n: ThresholdNeeded): Need {
   const net = new D(n.netExposure);
   const hedged = new D(n.hedgedAmount);
   const none = (reason: NoActionReason): Need => ({ target: hedged, needed: new D(0), reason });
   if (n.thresholdExposure === null) return none("NO_RATE");
-  if (net.abs().lte(n.thresholdExposure)) return none("WITHIN_THRESHOLD");
+  if (net.abs().lt(n.thresholdExposure)) return none("WITHIN_THRESHOLD");
   const needed = net.negated();
   return { target: hedged.plus(needed), needed, reason: null };
 }

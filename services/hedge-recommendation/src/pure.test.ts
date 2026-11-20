@@ -210,13 +210,21 @@ test("amount threshold: a net exposure larger than the threshold is hedged in fu
   assert.deepEqual([part.amount!.toString(), part.target.toString()], ["400000", "-1000000"], "the target is what is already hedged plus the whole net");
 });
 
-test("amount threshold: at the threshold or below it nothing is recommended, and the threshold cannot be compared without its rate", () => {
-  assert.equal(amountThreshold({ netExposure: "250000" }).reason, "WITHIN_THRESHOLD", "equal is within");
-  assert.equal(amountThreshold({ netExposure: "-250000" }).reason, "WITHIN_THRESHOLD");
-  assert.equal(amountThreshold({ netExposure: "250000.01" }).action, "HEDGE");
+test("amount threshold: at the threshold or above it is hedged either way, only a net strictly below is within it, and the threshold cannot be compared without its rate", () => {
+  for (const net of ["250000", "-250000", "250000.01", "-250000.01"]) assert.equal(amountThreshold({ netExposure: net }).action, "HEDGE", net);
+  assert.deepEqual([amountThreshold({ netExposure: "250000" }).direction, amountThreshold({ netExposure: "-250000" }).direction], ["SELL", "BUY"]);
+  for (const net of ["249999.99", "-249999.99", "0"]) assert.equal(amountThreshold({ netExposure: net }).reason, "WITHIN_THRESHOLD", net);
   const within = amountThreshold({ netExposure: "100000", hedgedAmount: "-50" });
   assert.deepEqual([within.action, within.needed.toString(), within.target.toString()], ["NONE", "0", "-50"]);
   assert.equal(amountThreshold({ thresholdExposure: null }).reason, "NO_RATE");
+});
+
+test("amount threshold: the threshold is compared as converted, not as rounded for display", () => {
+  // 100,000.00004 would show as 100,000.0000; a net of exactly 100,000 is below the real threshold and must not be hedged.
+  assert.equal(amountThreshold({ netExposure: "100000", thresholdExposure: "100000.00004" }).reason, "WITHIN_THRESHOLD");
+  assert.equal(amountThreshold({ netExposure: "-100000", thresholdExposure: "100000.00004" }).reason, "WITHIN_THRESHOLD");
+  // 99,999.99996 would show as 100,000.0000; a net of exactly 100,000 is above the real threshold and must be hedged.
+  assert.equal(amountThreshold({ netExposure: "100000", thresholdExposure: "99999.99996" }).action, "HEDGE");
 });
 
 test("rounding and the minimum are the same rules for every strategy", () => {

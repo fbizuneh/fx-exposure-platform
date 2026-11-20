@@ -101,6 +101,8 @@ export function policyCommands(db: Db, c: Collaborators, clock: () => Date) {
     const p = input.policy;
     const key = { tenant_id: input.tenantId, program_id: input.programId };
     await db.transaction().execute(async (tx) => {
+      // A concurrent save of the same policy waits here, so "before" is a whole policy and not a mixture of two.
+      await q(tx).selectFrom("policies").select("program_id").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).forUpdate().execute();
       const before = await readPolicy(tx, input.tenantId, input.programId);
       await q(tx).deleteFrom("ratio_overrides").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();
       await q(tx).deleteFrom("rounding_overrides").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();

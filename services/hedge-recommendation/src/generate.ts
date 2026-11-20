@@ -72,10 +72,11 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
         const maxExposure = maxDisplay !== null && rate ? new D(fmt(new D(maxDisplay).div(rate))) : null;
         // The amount threshold (decision 0020): the level's own when it has one, else the program's, turned into the exposure currency.
         const thresholdDisplay = byThreshold ? thresholdByLevel.get(g.nettingLevel) ?? policy.amountThresholdDisplay : null;
-        const thresholdExposure = thresholdDisplay !== null && rate ? fmt(new D(thresholdDisplay).div(rate)) : null;
+        // The comparison uses the converted threshold as it is; rounding to four places is for what is stored and shown, and must not move a net across the threshold.
+        const thresholdExact = thresholdDisplay !== null && rate ? new D(thresholdDisplay).div(rate) : null;
         // What the strategy wants, then the rules every strategy shares: rounding, the minimum and (below) the split.
         const need = byThreshold
-          ? amountThresholdNeed({ netExposure: g.net.exposureAmount, hedgedAmount: hedged, thresholdExposure })
+          ? amountThresholdNeed({ netExposure: g.net.exposureAmount, hedgedAmount: hedged, thresholdExposure: thresholdExact === null ? null : thresholdExact.toFixed() })
           : ratioAdjustmentNeed({ grossExposure: g.gross.exposureAmount, hedgedAmount: hedged, ratio });
         const out = finishRecommendation(need, { rounding, minExposure, rateMissing: (minDisplay.gt(0) || maxDisplay !== null || thresholdDisplay !== null) && !rate });
         // The trade is booked by the group's entity when the netting level has one; otherwise by the policy's default trading entity (decision 0011 item 9).
@@ -92,7 +93,7 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
         rows.push({
           tenant_id: tenant, recommendation_id: recommendationId, program_id: event.programId, cycle_id: event.cycleId, run_id: event.runId, strategy: policy.strategy,
           group_no: g.groupNo, netting_level: g.nettingLevel, region: g.region, entity_code: g.entityCode, currency_pair: g.currencyPair, exposure_currency: g.exposureCurrency, other_currency: other,
-          gross_exposure: g.gross.exposureAmount, hedged_amount: hedged, ratio: byThreshold ? null : ratio, threshold_exposure_amount: byThreshold ? thresholdExposure : null, target_hedge: fmt(out.target), needed_amount: fmt(out.needed), rounding, min_exposure_amount: minExposure,
+          gross_exposure: g.gross.exposureAmount, hedged_amount: hedged, ratio: byThreshold ? null : ratio, threshold_exposure_amount: byThreshold && thresholdExact !== null ? fmt(thresholdExact) : null, target_hedge: fmt(out.target), needed_amount: fmt(out.needed), rounding, min_exposure_amount: minExposure,
           trading_entity_code: tradingEntity, action, reason: noEntity ? "NO_TRADING_ENTITY" : out.reason, direction: noEntity ? null : out.direction,
           amount: out.amount === null || noEntity ? null : fmt(out.amount), instrument,
           value_date: valueDate, fixing_date: instrument === "NDF" ? businessDaysBefore(valueDate!, 2, cals) : null,

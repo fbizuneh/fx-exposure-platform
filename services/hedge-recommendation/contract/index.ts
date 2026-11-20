@@ -28,7 +28,7 @@ export interface HedgePolicy {
   readonly splitMethod: SplitMethod;
   /** The strategy the program uses (decision 0020). The ratio settings apply to hedge-ratio-adjustment only, the threshold settings to amount-threshold only. */
   readonly strategy: Strategy;
-  /** The amount threshold in the display currency: the net exposure must be larger than it for a hedge to be recommended. Required for the amount-threshold strategy. */
+  /** The amount threshold in the display currency: the net exposure must be at or above it for a hedge to be recommended. Required for the amount-threshold strategy. */
   readonly amountThresholdDisplay: string | null;
   /** A different threshold for the groups of a netting level; it replaces the program's threshold for them. */
   readonly amountThresholdOverrides: readonly { readonly nettingLevel: string; readonly amountThresholdDisplay: string }[];
@@ -44,7 +44,7 @@ export type NoActionReason = "WITHIN_TARGET" | "WITHIN_THRESHOLD" | "ROUNDS_TO_Z
 /** What to tell the user for each reason a group has no actionable recommendation. */
 export const NO_ACTION_MESSAGES: Readonly<Record<NoActionReason, string>> = {
   WITHIN_TARGET: "Already hedged to the target ratio.",
-  WITHIN_THRESHOLD: "The net exposure is not larger than the amount threshold.",
+  WITHIN_THRESHOLD: "The net exposure is below the amount threshold.",
   ROUNDS_TO_ZERO: "The amount needed is smaller than the rounding step.",
   BELOW_MINIMUM: "The rounded amount is below the minimum hedge amount.",
   NO_RATE: "The spot rate needed to convert the minimum or maximum hedge amount, or the amount threshold, is missing.",

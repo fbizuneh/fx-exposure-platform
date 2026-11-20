@@ -30,7 +30,7 @@ Events carry identifiers only.
 
 ## Strategy
 `hedge-ratio-adjustment` (decision 0011): target hedge = ratio x gross exposure; recommend the gap to what is already hedged, rounded down to the step, if it reaches the minimum (converted to the exposure currency). More strategies are added beside it.
-`amount-threshold` (decision 0020): when the net exposure (gross plus hedges) is larger than the threshold (display currency, converted at spot; the level's own replaces the program's), the whole net is recommended; the strategy only decides the amount wanted. Rounding, the minimum and the split are shared by every strategy (`finishRecommendation`, `splitAmount`).
+`amount-threshold` (decision 0020): when the net exposure (gross plus hedges) is at or above the threshold (display currency, converted at spot and compared unrounded; the level's own replaces the program's), the whole net is recommended; the strategy only decides the amount wanted. Rounding, the minimum and the split are shared by every strategy (`finishRecommendation`, `splitAmount`).
 
 ## Rules worth knowing
 - A recommendation above the maximum is split into parts, evenly or as the maximum plus a remainder; accepting it makes one pre-trade per part, together (decision 0016).

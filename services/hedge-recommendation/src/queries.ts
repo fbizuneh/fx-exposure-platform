@@ -13,7 +13,16 @@ const ratio = (v: string): string => (v.includes(".") ? v.replace(/0+$/, "").rep
 
 export const DEFAULTS = { defaultRatio: "1", minHedgeDisplay: "0", roundingDefault: "1000", tenor: "1M", splitMethod: "EVEN", strategy: "hedge-ratio-adjustment" } as const;
 
+/**
+ * The policy with its overrides, read from one snapshot. A save replaces the policy and its overrides in one transaction, so separate statements that each took
+ * their own snapshot could return the old policy with the new overrides (decision 0020). Given a transaction, its own snapshot is used.
+ */
 export async function readPolicy(db: Queryable, tenant: TenantId, program: ProgramId): Promise<HedgePolicy> {
+  if (db.isTransaction) return readPolicyRows(db, tenant, program);
+  return db.transaction().setIsolationLevel("repeatable read").execute((tx) => readPolicyRows(tx, tenant, program));
+}
+
+async function readPolicyRows(db: Queryable, tenant: TenantId, program: ProgramId): Promise<HedgePolicy> {
   const row = await q(db).selectFrom("policies").selectAll().where("tenant_id", "=", tenant).where("program_id", "=", program).executeTakeFirst();
   const ratios = await q(db).selectFrom("ratio_overrides").selectAll().where("tenant_id", "=", tenant).where("program_id", "=", program).orderBy("currency_pair").execute();
   const roundings = await q(db).selectFrom("rounding_overrides").selectAll().where("tenant_id", "=", tenant).where("program_id", "=", program).orderBy("currency").execute();
