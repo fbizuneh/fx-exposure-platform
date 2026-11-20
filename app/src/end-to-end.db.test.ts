@@ -1005,6 +1005,28 @@ e2e("a split decision that never got its pre-trades: approval confirms it when F
   assert.deepEqual(await drafts(b.t, b.cycle, b.rec.recommendationId), []);
 });
 
+e2e("a pre-trade cancelled after FX Trade made it but before the recommendation linked it stays cancelled once the link is made", async () => {
+  const run = async (cancelCount: number) => {
+    const x = await finishedCycle(split({ splitMethod: "THRESHOLD_REMAINDER" }));
+    const rec = us01(x.recs);
+    const { hr, done } = withFxTrade(async (input) => {
+      const made = await real(input);
+      // The pause: the drafts exist, the recommendation has not linked them. Cancel some and deliver the events now; they find no linked part.
+      for (const p of (await drafts(x.t, x.cycle, rec.recommendationId)).slice(0, cancelCount)) await app.fxTrade.commands.cancelPreTrade({ tenantId: x.t, preTradeId: p.preTradeId, actor: x.admin });
+      await drain(app);
+      const early = (await app.hedgeRecommendation.questions.getRecommendation(x.t, rec.recommendationId))!;
+      assert.ok(early.parts.every((p) => p.preTradeId === null), "nothing linked yet, so the events changed nothing");
+      return made;
+    });
+    try { await hr.commands.decide({ tenantId: x.t, recommendationId: rec.recommendationId, actor: x.admin, action: "ACCEPT" }); } finally { await done(); }
+    await drain(app);
+    const r = (await app.hedgeRecommendation.questions.getRecommendation(x.t, rec.recommendationId))!;
+    return [r.status, r.followUp, r.parts.map((p) => p.followUp)];
+  };
+  assert.deepEqual(await run(1), ["ACCEPTED", "OPEN", ["CANCELLED", "OPEN", "OPEN", "OPEN"]]);
+  assert.deepEqual(await run(4), ["ACCEPTED", "CANCELLED", ["CANCELLED", "CANCELLED", "CANCELLED", "CANCELLED"]]);
+});
+
 e2e("deciders: accepting, overriding and a decision still waiting on FX Trade count; a refused claim and a dismissal do not", async () => {
   const label = async (t: TenantId) => (await trailOf(t)).find((r) => r.action === "program.defined")!.actor;
   const hedge = (recs: readonly { action: string; recommendationId: string }[]) => recs.find((r) => r.action === "HEDGE")!.recommendationId;

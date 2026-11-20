@@ -64,6 +64,9 @@ export function decideCommands(db: Db, c: Collaborators, clock: () => Date) {
       // The decision stands once its pre-trades exist, so this is where it is written to the trail: in the transaction that confirms it, once, by whoever won the claim.
       await recordChange(tx, { tenantId: tenant, programId: rec.program_id as never, actor: rec.decided_by!, action: rec.decision_kind === "OVERRIDE" ? "recommendation.overridden" : "recommendation.accepted", targetType: "recommendation", targetId: id, fields: rec.decision_kind === "OVERRIDE" ? ["amount"] : [] });
     });
+    // FX Trade may have changed a draft (cancelled it) after creating it and before the links above were durable; its event then found no part to update.
+    // So once the links are in, bring each part up to FX Trade's current state. This reads FX Trade; it does not span the two services in a transaction.
+    for (const preTradeId of preTrades.values()) await refreshFollowUp(tenant, preTradeId);
     return reread(tenant, id);
   }
 

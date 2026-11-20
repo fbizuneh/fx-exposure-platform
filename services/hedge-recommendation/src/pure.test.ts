@@ -172,6 +172,13 @@ test("split: a rounding step coarser than the pieces never makes a zero part, an
   assert.equal(many.parts.reduce((a, b) => a.plus(b), new D(0)).toString(), "51000");
   assert.ok(many.parts.every((x) => x.gt(0) && x.mod(1000).isZero()));
   assert.match(many.note!, /50 parts, the most allowed/);
+  // An enormous ratio is counted before it is built: 100 billion pieces of 0.01 would not fit in memory, and must not be attempted.
+  for (const method of ["THRESHOLD_REMAINDER", "EVEN"] as const) {
+    const huge = split("1000000000.07", "0.01", method, "0.01");
+    assert.ok(huge.parts.length <= 50 && huge.parts.every((x) => x.gt(0)));
+    assert.equal(huge.parts.reduce((s, x) => s.plus(x), new D(0)).toString(), "1000000000.07");
+    assert.match(huge.note!, /50 parts, the most allowed/);
+  }
 });
 test("split: whatever the inputs, parts are positive, add up exactly, are at most 50, and any part above the maximum has a note", () => {
   const methods = ["EVEN", "THRESHOLD_REMAINDER"] as const;

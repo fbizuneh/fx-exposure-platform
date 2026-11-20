@@ -96,17 +96,17 @@ export function splitAmount(total: Num, maximum: Num | null, method: SplitMethod
     } else {
       const full = total.div(piece).floor().toNumber();
       const rest = total.minus(piece.times(full));
-      parts = Array.from({ length: full }, () => piece);
-      if (!rest.isZero()) {
-        if (minimum !== null && rest.lt(minimum) && full >= 1) {
+      const merge = !rest.isZero() && minimum !== null && rest.lt(minimum) && full >= 1;
+      const count = full + (rest.isZero() || merge ? 0 : 1); // counted first, so an enormous ratio never builds the uncapped list
+      if (count > cap) {
+        parts = even(cap);
+        notes.push(capNote(cap));
+      } else {
+        parts = Array.from({ length: full }, () => piece);
+        if (merge) {
           parts[full - 1] = piece.plus(rest);
           notes.push("The last part was below the minimum hedge amount, so it was added to the part before it.");
-        } else parts.push(rest);
-      }
-      if (parts.length > cap) {
-        parts = even(cap);
-        notes.length = 0;
-        notes.push(capNote(cap));
+        } else if (!rest.isZero()) parts.push(rest);
       }
     }
   }
