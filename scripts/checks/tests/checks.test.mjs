@@ -114,3 +114,17 @@ test("tenant-program: tables need tenant_id unless exempt; program-scoped tables
   assert.deepEqual(run("tenant-program", mig(`-- program-scoped\nCREATE TABLE IF NOT EXISTS alpha.p (\n  tenant_id uuid NOT NULL,\n  program_id text NOT NULL,\n  amt numeric(18, 4)\n);\n`)), []);
   assert.match(run("tenant-program", mig(`-- tenant-exempt:\nCREATE TABLE alpha.t (id uuid);\n`))[0], /no tenant_id/);
 });
+
+test("tenant-program: a foreign key between two program-scoped tables must include program_id (decision 0018)", () => {
+  const parent = `-- program-scoped\nCREATE TABLE alpha.runs (\n  tenant_id uuid NOT NULL,\n  run_id uuid NOT NULL,\n  program_id text NOT NULL,\n  PRIMARY KEY (tenant_id, run_id),\n  UNIQUE (tenant_id, run_id, program_id)\n);\n`;
+  const child = (fk) => `-- program-scoped\nCREATE TABLE alpha.rows (\n  tenant_id uuid NOT NULL,\n  run_id uuid NOT NULL,\n  program_id text NOT NULL,\n  ${fk}\n);\n`;
+  const mig = (...sql) => repo(Object.fromEntries(sql.map((s, i) => [`services/alpha/migrations/00${i + 1}.sql`, s])));
+  assert.match(run("tenant-program", mig(parent + child("FOREIGN KEY (tenant_id, run_id) REFERENCES alpha.runs (tenant_id, run_id)")))[0], /leaves out program_id/);
+  assert.deepEqual(run("tenant-program", mig(parent + child("FOREIGN KEY (tenant_id, run_id, program_id) REFERENCES alpha.runs (tenant_id, run_id, program_id)"))), []);
+  // A key added later is judged too; a key dropped later is not; one dropped and added again is judged as added.
+  assert.match(run("tenant-program", mig(parent + child("x int"), `ALTER TABLE alpha.rows ADD FOREIGN KEY (tenant_id, run_id) REFERENCES alpha.runs (tenant_id, run_id);\n`))[0], /leaves out program_id/);
+  assert.deepEqual(run("tenant-program", mig(parent + child("FOREIGN KEY (tenant_id, run_id) REFERENCES alpha.runs (tenant_id, run_id)"), `ALTER TABLE alpha.rows DROP CONSTRAINT rows_tenant_id_run_id_fkey;\nALTER TABLE alpha.rows ADD FOREIGN KEY (tenant_id, run_id, program_id) REFERENCES alpha.runs (tenant_id, run_id, program_id);\n`)), []);
+  assert.match(run("tenant-program", mig(parent + child("FOREIGN KEY (tenant_id, run_id) REFERENCES alpha.runs (tenant_id, run_id)"), `ALTER TABLE alpha.rows DROP CONSTRAINT rows_tenant_id_run_id_fkey;\nALTER TABLE alpha.rows ADD FOREIGN KEY (tenant_id, run_id) REFERENCES alpha.runs (tenant_id, run_id);\n`))[0], /leaves out program_id/);
+  // A child with no program_id of its own (or a parent with none) is not subject to it.
+  assert.deepEqual(run("tenant-program", mig(parent + `CREATE TABLE alpha.notes (\n  tenant_id uuid NOT NULL,\n  run_id uuid NOT NULL,\n  FOREIGN KEY (tenant_id, run_id) REFERENCES alpha.runs (tenant_id, run_id)\n);\n`)), []);
+});

@@ -15,6 +15,7 @@ Each is defined in contract/.
 
 ## Announces
 - Pre-trade ready to send
+- Pre-trade fill changed (an amended executed trade left its pre-trade: no program, an unknown one, or another; decision 0018)
 - Pre-trade cancelled (by a user, or when its cycle is closed before approval; once per pre-trade)
 - Executed trade received (a new trade, a new version, or a match made by a user)
 Events carry identifiers only.

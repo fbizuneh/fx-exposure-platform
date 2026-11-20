@@ -143,12 +143,18 @@ export function importCommands(db: Db, c: Collaborators) {
       const batchId = randomUUID();
       let stored = 0, unchanged = 0, matched = 0, unmatched = 0;
       const touched = new Set<string>();
+      const left = new Set<string>(); // pre-trades an amended trade left
       for (const t of storable) {
         const current = await q(tx).selectFrom("executed_trades").selectAll().where("tenant_id", "=", tenant).where("platform", "=", t.platform).where("trade_id", "=", t.tradeId).where("is_current", "=", true).forUpdate().executeTakeFirst();
         if (current && current.content_hash === contentOf(t, current.cancelled) && !current.cancelled) { unchanged++; continue; }
         let link;
-        if (current && current.pre_trade_id) {
-          link = { preTradeId: current.pre_trade_id, status: "MATCHED" as const, note: null, candidates: [] }; // an amendment keeps its pre-trade
+        if (current && current.pre_trade_id && t.programId !== null && t.programId === current.program_id) {
+          link = { preTradeId: current.pre_trade_id, status: "MATCHED" as const, note: null, candidates: [] }; // an amendment in the same program keeps its pre-trade
+        } else if (current && current.pre_trade_id) {
+          // The amendment has no program, an unknown one, or another one than its pre-trade's (decisions 0009 and 0018): it is stored unmatched, never dropped, and
+          // the pre-trade it leaves has its fill, status and follow-up recomputed. A user can match it again.
+          link = { preTradeId: null, status: "UNMATCHED" as const, note: `The program changed from ${current.program_id ?? "none"} to ${t.programId ?? "none"}, so the trade left its pre-trade and is unmatched.`, candidates: [] };
+          left.add(current.pre_trade_id);
         } else {
           const open = t.programId === null ? [] : await openPreTrades(tx, tenant, t.programId);
           const byRef = t.programId !== null && t.preTradeReference !== null ? (await openPreTrades(tx, tenant, t.programId, t.preTradeReference))[0] ?? null : null;
@@ -159,7 +165,11 @@ export function importCommands(db: Db, c: Collaborators) {
         stored++;
         if (link.status === "MATCHED") { matched++; touched.add(link.preTradeId!); } else unmatched++;
       }
-      for (const id of touched) await recomputeStatus(tx, tenant, id);
+      for (const id of new Set([...touched, ...left])) await recomputeStatus(tx, tenant, id);
+      for (const id of left) {
+        const pre = await q(tx).selectFrom("pre_trades").select("program_id").where("tenant_id", "=", tenant).where("pre_trade_id", "=", id).executeTakeFirstOrThrow();
+        await announce(tx, { type: "fx-trade.pre-trade-fill-changed", tenantId: tenant, preTradeId: id, programId: toProgramId(pre.program_id) });
+      }
 
       await q(tx).insertInto("trade_batches").values({ tenant_id: tenant, batch_id: batchId, content_hash: hash, received: input.rows.length, stored, unchanged, blocked: issues.length, created_by: input.by }).execute();
       for (const i of issues) {

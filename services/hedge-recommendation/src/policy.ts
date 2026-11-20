@@ -86,10 +86,11 @@ export function policyCommands(db: Db, c: Collaborators, clock: () => Date) {
     const key = { tenant_id: input.tenantId, program_id: input.programId };
     await db.transaction().execute(async (tx) => {
       const before = await readPolicy(tx, input.tenantId, input.programId);
-      await q(tx).deleteFrom("policies").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();
       await q(tx).deleteFrom("ratio_overrides").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();
       await q(tx).deleteFrom("rounding_overrides").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();
       await q(tx).deleteFrom("max_hedge_overrides").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();
+      // The policy goes last: its overrides refer to it (decision 0018).
+      await q(tx).deleteFrom("policies").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();
       await q(tx).insertInto("policies").values({
         ...key, default_ratio: p.defaultRatio, min_hedge_display: p.minHedgeDisplay, rounding_default: p.roundingDefault, tenor: p.tenor,
         trading_entity_code: p.tradingEntityCode, max_hedge_display: p.maxHedgeDisplay ?? null, split_method: p.splitMethod ?? "EVEN", updated_by: who(input.actor), updated_at: clock(),

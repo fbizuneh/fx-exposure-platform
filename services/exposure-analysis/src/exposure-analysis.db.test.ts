@@ -386,3 +386,15 @@ dbTest("a program's pair mapping in Master Data sets the exposure currency; the 
   const aligned = setup({ balances: [bal("US01", "4000", "EUR", "1000")], trades, mappings: { BS: [{ pair: [...pair.split("-")].sort().join("-"), exposureCurrency: "GBP" }] } }, "REGION_BY_ENTITY");
   assert.deepEqual((await exposure(aligned, "net")).filter((l) => l.startsWith(pair)), [`${pair}:GBP`], "both hedges land in one row");
 });
+
+dbTest("everything under a run carries the run's program: the database refuses a row under another program (decision 0018)", async () => {
+  const { t, c, event } = setup();
+  assert.equal(await ea.commands.onCycleInitiated(event()), "FINISHED");
+  for (const table of ["baseline_rows", "exposure_groups", "group_members", "rates_used", "net_groups"] as const) {
+    const n = Number((await q(db).selectFrom(table).select((e) => e.fn.countAll().as("n")).where("tenant_id", "=", t).executeTakeFirstOrThrow()).n);
+    assert.ok(n > 0, `${table} has rows to try`);
+    await assert.rejects(q(db).updateTable(table).set({ program_id: "OTHER" }).where("tenant_id", "=", t).execute(), { code: "23503" }, `${table}: another program is refused`);
+  }
+  // The run's own program is what every one of them has, and the run cannot be moved from under them.
+  await assert.rejects(q(db).updateTable("runs").set({ program_id: "OTHER" }).where("tenant_id", "=", t).execute(), { code: "23503" });
+});
