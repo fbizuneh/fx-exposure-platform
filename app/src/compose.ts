@@ -4,7 +4,7 @@ import type { Actor } from "@services/identity/contract";
 import { connect as connectAudit, createAudit } from "../../services/audit/src/index.ts";
 import { connect as connectDataSource, createDataSource } from "../../services/data-source/src/index.ts";
 import { connect as connectExposureAnalysis, createExposureAnalysis } from "../../services/exposure-analysis/src/index.ts";
-import { connect as connectExposureManagement, createExposureManagement } from "../../services/exposure-management/src/index.ts";
+import { connect as connectExposureManagement, createExposureManagement, type DecisionsPort } from "../../services/exposure-management/src/index.ts";
 import { connect as connectFxRate, createFxRate } from "../../services/fx-rate/src/index.ts";
 import { connect as connectFxTrade, createFxTrade } from "../../services/fx-trade/src/index.ts";
 import { connect as connectHedgeRecommendation, createHedgeRecommendation } from "../../services/hedge-recommendation/src/index.ts";
@@ -31,7 +31,9 @@ export function composeApp(connectionString: string, now: () => Date = () => new
   const masterData = createMasterData(dbs.masterData);
   const fxRate = createFxRate(dbs.fxRate, { now });
   const dataSource = createDataSource(dbs.dataSource, { masterData: masterData.questions, now });
-  const exposureManagement = createExposureManagement(dbs.exposureManagement, { access: identity.questions, now });
+  // Exposure Management asks Hedge Recommendation who decided hedges on a cycle (segregation of duties); Hedge Recommendation is built after it, so the question is passed as a function.
+  const decisions: DecisionsPort = { deciders: (tenant, cycle) => hedgeRecommendation.questions.deciders(tenant, cycle) };
+  const exposureManagement = createExposureManagement(dbs.exposureManagement, { access: identity.questions, decisions, now });
   const fxTrade = createFxTrade(dbs.fxTrade, { access: identity.questions, masterData: masterData.questions, management: exposureManagement.questions }, { now });
   const exposureAnalysis = createExposureAnalysis(dbs.exposureAnalysis, {
     management: exposureManagement.questions,

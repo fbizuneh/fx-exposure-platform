@@ -28,8 +28,15 @@ const summary = (r: CycleRow): CycleSummary => ({
   rerunCount: r.rerun_count, exposureApprovedAt: r.exposure_approved_at?.toISOString() ?? null, exposureApprovedBy: r.exposure_approved_by, exposureApprovedRunId: r.exposure_approved_run_id, approvedAt: r.approved_at?.toISOString() ?? null, approvedBy: r.approved_by, initiatedBy: r.initiated_by, initiatedAt: r.initiated_at.toISOString(),
 });
 
+export const segregationOn = async (db: Queryable, tenant: TenantId): Promise<boolean> =>
+  (await q(db).selectFrom("tenant_settings").select("segregation_of_duties").where("tenant_id", "=", tenant).executeTakeFirst())?.segregation_of_duties ?? true;
+
 export function exposureManagementQuestions(db: Db): ExposureManagementQuestions {
   return {
+    async tenantSettings(tenant) {
+      return { segregationOfDuties: await segregationOn(db, tenant) };
+    },
+
     async programCatalog(tenant) {
       const rows = await q(db).selectFrom("programs").select(["program_id", "name", "program_type", "enabled"]).where("tenant_id", "=", tenant).orderBy("program_id").execute();
       return rows.map((r) => ({ programId: programId(r.program_id), name: r.name, type: r.program_type, enabled: r.enabled }));

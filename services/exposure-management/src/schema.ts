@@ -5,6 +5,7 @@ type JsonIn = ColumnType<unknown, string, string>;
 type JsonOrNull = ColumnType<unknown, string | null, string | null>;
 
 export interface ExposureManagementDatabase {
+  tenant_settings: { tenant_id: string; segregation_of_duties: boolean; updated_by: string; updated_at: Generated<Date> };
   programs: {
     tenant_id: string;
     program_id: string;

@@ -34,6 +34,8 @@ const user = (permissions: Permission[], programs: string[] | null = null): Acto
   grants.set(id, { permissions: new Set(permissions), programs: programs === null ? null : new Set(programs) });
   return { kind: "user", userId: id };
 };
+// Who decided hedges on a cycle, as Hedge Recommendation would answer.
+const deciders = new Map<string, string[]>();
 const admin: Actor = { kind: "platform", platformUserId: "ops-1" as PlatformUserId };
 
 let db: Db;
@@ -44,7 +46,7 @@ before(async () => {
   db = connect(url!);
   await db.schema.dropSchema("exposure_management").ifExists().cascade().execute();
   await migrate(url!);
-  em = createExposureManagement(db, { access, now: () => clock });
+  em = createExposureManagement(db, { access, decisions: { deciders: async (t, c) => deciders.get(`${t}:${c}`) ?? [] }, now: () => clock });
 });
 after(async () => {
   if (enabled) await db.destroy();
@@ -325,4 +327,61 @@ dbTest("exposure currency overrides are saved with the settings, default to none
   await em.commands.changeSettings({ tenantId: t, programId: "BS", settings: { ...settings, exposureCurrencyOverrides: [{ pair: "EUR-GBP", exposureCurrency: "EUR" }] }, effectiveFrom: "2026-02-01", actor: admin });
   assert.deepEqual((await em.questions.programSettings(t, programId("BS"), asOfDate("2026-02-01")))?.exposureCurrencyOverrides, [{ pair: "EUR-GBP", exposureCurrency: "EUR" }]);
   await assert.rejects(em.commands.changeSettings({ tenantId: t, programId: "BS", settings: { ...settings, exposureCurrencyOverrides: [{ pair: "EUR-GBP", exposureCurrency: "JPY" }] }, effectiveFrom: "2026-03-01", actor: admin }), ProgramRefused);
+});
+
+dbTest("segregation of duties: on by default; the starter or rerunner cannot approve the exposure, a decider cannot approve the cycle, anyone else can; only a tenant admin switches it", async () => {
+  const t = await ready("BS");
+  const label = (a: Actor) => `user:${(a as { userId: string }).userId}`;
+  assert.deepEqual(await em.questions.tenantSettings(t), { segregationOfDuties: true }, "on until switched off");
+  const both = user(["cycle:read", "cycle:initiate", "exposure:approve", "cycle:approve"]); // starts and could approve
+  const other = approver();
+
+  const id = await em.commands.startCycle({ tenantId: t, programId: "BS", asOf: "2026-03-05", actor: both });
+  const run1 = runs(t, id);
+  await em.commands.onRunStarted(run1);
+  await em.commands.onRunFinished(run1);
+  await assert.rejects(em.commands.approveExposure({ tenantId: t, cycleId: id, actor: both }), /you started or reran this cycle, so someone else must approve its exposure/);
+  assert.equal((await em.questions.getCycle(t, id))!.exposureApprovedAt, null);
+  assert.deepEqual((await changes(t)).filter((c) => c.includes("refused")), ["exposure.approval-refused-by-segregation-of-duties cycle"], "a refusal is written to the audit trail");
+
+  // A rerun counts too: someone who reran the cycle cannot approve it either.
+  const rerunner = user(["cycle:read", "cycle:initiate", "exposure:approve"]);
+  await em.commands.rerunCycle({ tenantId: t, cycleId: id, actor: rerunner });
+  const run2 = runs(t, id);
+  await em.commands.onRunStarted(run2);
+  await em.commands.onRunFinished(run2);
+  await assert.rejects(em.commands.approveExposure({ tenantId: t, cycleId: id, actor: rerunner }), /started or reran/);
+  await em.commands.approveExposure({ tenantId: t, cycleId: id, actor: other });
+
+  // The cycle: whoever accepted or overrode a hedge cannot approve it; dismissals are not in the list Hedge Recommendation gives.
+  deciders.set(`${t}:${id}`, [label(both)]);
+  await assert.rejects(em.commands.approveCycle({ tenantId: t, cycleId: id, actor: both }), /you accepted or overrode a hedge on this cycle, so someone else must approve the cycle/);
+  assert.equal((await em.questions.getCycle(t, id))!.approvedAt, null);
+  await em.commands.approveCycle({ tenantId: t, cycleId: id, actor: other });
+  assert.equal((await em.questions.getCycle(t, id))!.approvedBy, label(other));
+
+  // Another reason to refuse comes first and is not written up as a segregation refusal.
+  const before = (await changes(t)).filter((c) => c.includes("refused")).length;
+  await assert.rejects(em.commands.approveCycle({ tenantId: t, cycleId: id, actor: both }), /already approved/);
+  assert.equal((await changes(t)).filter((c) => c.includes("refused")).length, before);
+
+  // Only someone who may manage authorization switches it; switching off lets one person do everything; a repeat records nothing.
+  await assert.rejects(em.commands.setSegregationOfDuties({ tenantId: t, enabled: false, actor: other }), AccessDenied);
+  const owner = user(["authorization:manage"]);
+  assert.equal(await em.commands.setSegregationOfDuties({ tenantId: t, enabled: false, actor: owner }), true);
+  assert.equal(await em.commands.setSegregationOfDuties({ tenantId: t, enabled: false, actor: owner }), false);
+  assert.deepEqual((await changes(t)).filter((c) => c.startsWith("tenant.")), ["tenant.segregation-of-duties-set tenant-setting"]);
+  const solo = user(["cycle:read", "cycle:initiate", "exposure:approve", "cycle:approve"]);
+  const id2 = await em.commands.startCycle({ tenantId: t, programId: "BS", asOf: "2026-03-06", actor: solo });
+  const run3 = runs(t, id2);
+  await em.commands.onRunStarted(run3);
+  await em.commands.onRunFinished(run3);
+  deciders.set(`${t}:${id2}`, [label(solo)]);
+  await em.commands.approveExposure({ tenantId: t, cycleId: id2, actor: solo });
+  await em.commands.approveCycle({ tenantId: t, cycleId: id2, actor: solo });
+  assert.ok((await em.questions.getCycle(t, id2))!.approvedAt);
+
+  // One tenant's switch does not touch another's.
+  const u = await ready("BS");
+  assert.deepEqual(await em.questions.tenantSettings(u), { segregationOfDuties: true });
 });

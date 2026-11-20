@@ -46,7 +46,7 @@ async function approveExposure(t: TenantId, cycle: string): Promise<void> {
   await app.exposureManagement.commands.approveExposure({ tenantId: t, cycleId: cycle, actor: admins.get(t)! });
   await drain(app);
 }
-async function tenantWithProgram(level = "ENTITY"): Promise<TenantId> {
+async function tenantWithProgram(level = "ENTITY", segregation = false): Promise<TenantId> {
   const t = await app.identity.commands.createTenant("Acme");
   const ops = (await app.identity.commands.createPlatformUser({ issuer: "platform", externalSubject: randomUUID() })) as string;
   await app.identity.commands.enableProgram(t, programId("BS"), ops);
@@ -56,6 +56,8 @@ async function tenantWithProgram(level = "ENTITY"): Promise<TenantId> {
     tenantId: t, programId: "BS", name: "Daily balance sheet", type: "BALANCE_SHEET", effectiveFrom: "2026-01-01", actor: admins.get(t)!,
     settings: { nettingLevel: level, bucketScheme: { kind: "MONTHS" }, schedule: { frequency: "DAILY", asOfOffsetDays: 1 } },
   });
+  // Segregation of duties is on for every tenant unless switched off; these tests run a whole cycle as one admin, so they switch it off (the tests for the rule switch it on).
+  if (!segregation) await app.exposureManagement.commands.setSegregationOfDuties({ tenantId: t, enabled: false, actor: admins.get(t)! });
   const md = (kind: "applyEntities" | "applyHierarchy" | "applyAccounts" | "applyCurrencies", rows: unknown[]) =>
     app.masterData.commands[kind]({ tenantId: t, sourceSystem: "erp", asOf: D0, mode: "SNAPSHOT", rows: rows as never, by: "test" });
   await md("applyEntities", [entity("G"), entity("AMER", { type: "REGION", parentCode: "G" }), entity("EMEA", { type: "REGION", parentCode: "G" }), legal("US01", "USD", "AMER"), legal("DE01", "EUR", "EMEA")]);
@@ -183,9 +185,9 @@ e2e("approval releases a recommended pre-trade; a simulated platform returns the
 });
 
 /** A tenant whose cycle for the 12th has finished its run, with the recommendations it produced. */
-async function finishedCycle(policy?: object, level = "ENTITY", approve = true) {
+async function finishedCycle(policy?: object, level = "ENTITY", approve = true, segregation = false) {
   clock.now = new Date("2026-11-11T23:00:00Z");
-  const t = await tenantWithProgram(level);
+  const t = await tenantWithProgram(level, segregation);
   const admin = admins.get(t)!;
   if (policy) await app.hedgeRecommendation.commands.setPolicy({ tenantId: t, programId: programId("BS"), actor: admin, policy: policy as never });
   await sendRates(t, "2026-11-11", "1.1");
@@ -634,7 +636,7 @@ e2e("every governed change reaches the audit trail with who did it, in order; pe
   const trail = await trailOf(t);
   const line = (r: (typeof trail)[number]) => `${r.action} ${r.targetType}${r.programId ? ` [${r.programId}]` : ""}`;
   assert.deepEqual(trail.map(line), [
-    "program.enabled program [BS]", "user.added user", "program.defined program [BS]", "hedge-policy.set hedge-policy [BS]",
+    "program.enabled program [BS]", "user.added user", "program.defined program [BS]", "tenant.segregation-of-duties-set tenant-setting", "hedge-policy.set hedge-policy [BS]",
     "cycle.started cycle [BS]", "exposure.approved cycle [BS]", "master-data.currency-changed change-set",
     "recommendation.accepted recommendation [BS]", "cycle.approved cycle [BS]", "pre-trade.sent pre-trade [BS]",
   ], "in order; the feed's currency load is not there, the person's is");
@@ -733,4 +735,78 @@ e2e("a reader limited to a program (Identity's restriction) sees only that progr
   assert.equal((await app.audit.questions.verify(t, free)).ok, true);
   assert.equal((await app.audit.questions.verify(t, admin)).ok, true);
   assert.ok(cycle);
+});
+
+e2e("segregation of duties across the real services: the starter cannot approve the exposure, a decider cannot approve the cycle, others can, refusals are audited, and a draft is still released only at cycle approval", async () => {
+  const { t, admin, cycle, recs } = await finishedCycle(defaults, "ENTITY", false, true); // admin started the cycle; the tenant has segregation of duties on
+  assert.deepEqual(await app.exposureManagement.questions.tenantSettings(t), { segregationOfDuties: true });
+  const ops = (await app.identity.commands.createPlatformUser({ issuer: "platform", externalSubject: randomUUID() })) as string;
+  const approver = async (): Promise<Actor> => ({ kind: "user", userId: (await app.identity.commands.addUser(t, { issuer: "idp", externalSubject: randomUUID(), roles: ["TREASURY_APPROVER"] }, ops)) as never });
+  const [a, b] = [await approver(), await approver()];
+
+  await assert.rejects(app.exposureManagement.commands.approveExposure({ tenantId: t, cycleId: cycle as string, actor: admin }), /you started or reran this cycle/);
+  assert.equal((await app.exposureManagement.questions.getCycle(t, cycle))!.exposureApprovedAt, null, "the refusal changed nothing");
+  await drain(app);
+  await app.exposureManagement.commands.approveExposure({ tenantId: t, cycleId: cycle as string, actor: a });
+  await drain(app);
+
+  const rec = recs.find((r) => r.action === "HEDGE")!;
+  await app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: a, action: "ACCEPT" });
+  await drain(app); // positions follow arrival at Audit, so deliver each step before the next to keep the trail in the order things happened
+  await assert.rejects(app.exposureManagement.commands.approveCycle({ tenantId: t, cycleId: cycle as string, actor: a }), /you accepted or overrode a hedge on this cycle/);
+  assert.equal((await app.exposureManagement.questions.getCycle(t, cycle))!.approvedAt, null);
+  assert.deepEqual((await app.fxTrade.commands.exportPreTrades({ tenantId: t, actor: admin })).preTradeIds, [], "the draft is not releasable while the cycle is unapproved");
+  await drain(app);
+  await app.exposureManagement.commands.approveCycle({ tenantId: t, cycleId: cycle as string, actor: b });
+  await drain(app);
+  assert.equal((await drafts(t, cycle, rec.recommendationId))[0]!.status, "READY");
+
+  const trail = (await trailOf(t)).map((r) => `${r.action} ${r.actor === `user:${(a as { userId: string }).userId}` ? "A" : r.actor === `user:${(b as { userId: string }).userId}` ? "B" : "admin"}`);
+  assert.deepEqual(trail.filter((l) => /refused|approved|accepted/.test(l)), [
+    "exposure.approval-refused-by-segregation-of-duties admin", "exposure.approved A", "recommendation.accepted A", "cycle.approval-refused-by-segregation-of-duties A", "cycle.approved B",
+  ]);
+});
+
+e2e("a tenant admin switches segregation of duties off, and a one-person team can then run a cycle start to end; switching it on again is audited too", async () => {
+  const { t, admin, cycle, recs } = await finishedCycle(defaults, "ENTITY", false, true);
+  const analyst: Actor = { kind: "user", userId: (await app.identity.commands.addUser(t, { issuer: "idp", externalSubject: randomUUID(), roles: ["TREASURY_ANALYST"] }, (await app.identity.commands.createPlatformUser({ issuer: "platform", externalSubject: randomUUID() })) as string)) as never };
+  await assert.rejects(app.exposureManagement.commands.setSegregationOfDuties({ tenantId: t, enabled: false, actor: analyst }), /not allowed \(authorization:manage\)/);
+  assert.equal(await app.exposureManagement.commands.setSegregationOfDuties({ tenantId: t, enabled: false, actor: admin }), true);
+  assert.equal(await app.exposureManagement.commands.setSegregationOfDuties({ tenantId: t, enabled: false, actor: admin }), false, "no change, no record");
+  assert.deepEqual(await app.exposureManagement.questions.tenantSettings(t), { segregationOfDuties: false });
+
+  const rec = recs.find((r) => r.action === "HEDGE")!;
+  await approveExposure(t, cycle as string); // the starter approves
+  await app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: rec.recommendationId, actor: admin, action: "ACCEPT" });
+  await app.exposureManagement.commands.approveCycle({ tenantId: t, cycleId: cycle as string, actor: admin }); // the decider approves
+  await drain(app);
+  assert.equal((await app.exposureManagement.questions.getCycle(t, cycle))!.approvedBy, (await trailOf(t)).find((r) => r.action === "program.defined")!.actor);
+  assert.equal((await trailOf(t, { action: "tenant.segregation-of-duties-set" })).length, 1, "one change recorded: the repeat added nothing");
+  assert.equal(await app.exposureManagement.commands.setSegregationOfDuties({ tenantId: t, enabled: true, actor: admin }), true);
+  await drain(app);
+  assert.deepEqual((await trailOf(t, { action: "tenant.segregation-of-duties-set" })).map((r) => r.fields), [["segregationOfDuties"], ["segregationOfDuties"]]);
+  assert.deepEqual(await app.exposureManagement.questions.tenantSettings(t), { segregationOfDuties: true });
+});
+
+e2e("deciders: accepting, overriding and a decision still waiting on FX Trade count; a refused claim and a dismissal do not", async () => {
+  const label = async (t: TenantId) => (await trailOf(t)).find((r) => r.action === "program.defined")!.actor;
+  const hedge = (recs: readonly { action: string; recommendationId: string }[]) => recs.find((r) => r.action === "HEDGE")!.recommendationId;
+
+  const a = await finishedCycle(defaults);
+  const stuck = withFxTrade(async () => { throw new Error("FX Trade unreachable"); });
+  try { await assert.rejects(stuck.hr.commands.decide({ tenantId: a.t, recommendationId: hedge(a.recs), actor: a.admin, action: "ACCEPT" }), /unreachable/); } finally { await stuck.done(); }
+  assert.deepEqual(await app.hedgeRecommendation.questions.deciders(a.t, a.cycle), [await label(a.t)], "waiting on FX Trade still counts");
+
+  const b = await finishedCycle(defaults);
+  const refused = withFxTrade(async () => { throw Object.assign(new Error("no"), { problems: ["not allowed"] }); });
+  try { await assert.rejects(refused.hr.commands.decide({ tenantId: b.t, recommendationId: hedge(b.recs), actor: b.admin, action: "ACCEPT" }), /refused/); } finally { await refused.done(); }
+  assert.deepEqual(await app.hedgeRecommendation.questions.deciders(b.t, b.cycle), [], "a refused claim reopened the recommendation");
+  await app.hedgeRecommendation.commands.decide({ tenantId: b.t, recommendationId: hedge(b.recs), actor: b.admin, action: "DISMISS" });
+  assert.deepEqual(await app.hedgeRecommendation.questions.deciders(b.t, b.cycle), [], "a dismissal does not count");
+
+  const c = await finishedCycle(defaults);
+  await app.hedgeRecommendation.commands.decide({ tenantId: c.t, recommendationId: hedge(c.recs), actor: c.admin, action: "OVERRIDE", amount: "300" });
+  await drain(app);
+  assert.deepEqual(await app.hedgeRecommendation.questions.deciders(c.t, c.cycle), [await label(c.t)]);
+  assert.deepEqual(await app.hedgeRecommendation.questions.deciders(c.t, b.cycle), [], "another tenant's cycle ID finds nothing");
 });

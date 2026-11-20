@@ -11,6 +11,7 @@ Tier: core.
 - The policy of a program, with defaults filled in
 - A cycle's recommendations, including groups where no action was needed and why
 - One recommendation
+- Who accepted or overrode a hedge on a cycle (dismissals excluded)
 Each is defined in contract/.
 
 ## Announces
