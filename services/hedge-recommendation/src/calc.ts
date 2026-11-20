@@ -10,16 +10,6 @@ export function roundDownToStep(amount: Num, step: Num): Num {
   return amount.abs().div(step).floor().times(step).times(amount.isNegative() ? -1 : 1);
 }
 
-export interface Needed {
-  readonly grossExposure: string;
-  readonly hedgedAmount: string;
-  readonly ratio: string;
-  readonly rounding: string;
-  /** The minimum in the exposure currency; null when the program sets none. */
-  readonly minExposure: string | null;
-  /** The minimum is set but the rate to convert it is missing. */
-  readonly rateMissing: boolean;
-}
 export interface Outcome {
   readonly target: Num;
   readonly needed: Num;
@@ -31,20 +21,73 @@ export interface Outcome {
 }
 
 /**
- * Target hedge = minus ratio times gross exposure (a hedge against a long exposure is a sale). Needed = target minus what is already hedged.
- * The needed amount is rounded down to the step and then tested against the minimum, both in the exposure currency.
+ * What one strategy wants, before the rules every strategy shares (decision 0020). `needed` is signed: negative is a sale. `target` is the hedge after it is done.
+ * `reason` is set when the strategy wants no hedge at all (already at target, within the threshold) or cannot decide (no rate).
  */
-export function recommend(n: Needed): Outcome {
+export interface Need {
+  readonly target: Num;
+  readonly needed: Num;
+  readonly reason: NoActionReason | null;
+}
+
+export interface RatioNeeded {
+  readonly grossExposure: string;
+  readonly hedgedAmount: string;
+  readonly ratio: string;
+}
+/** Hedge-ratio adjustment (decision 0011): target hedge = minus ratio times gross exposure (a hedge against a long exposure is a sale); needed = target minus what is already hedged. */
+export function ratioAdjustmentNeed(n: RatioNeeded): Need {
   const target = new D(n.grossExposure).times(n.ratio).negated();
   const needed = target.minus(n.hedgedAmount);
+  return { target, needed, reason: needed.isZero() ? "WITHIN_TARGET" : null };
+}
+
+export interface ThresholdNeeded {
+  /** Gross exposure plus outstanding hedges in the exposure currency, signed: positive is long. */
+  readonly netExposure: string;
+  readonly hedgedAmount: string;
+  /** The threshold in the exposure currency, not rounded (rounding it for display must not change a decision); null when the rate to convert it is missing. */
+  readonly thresholdExposure: string | null;
+}
+/**
+ * Amount threshold (decision 0020): when the net exposure is at or above the threshold (either way), hedge all of it, which brings the net to zero; only a net
+ * strictly below the threshold is within it. The threshold cannot be compared without its rate.
+ */
+export function amountThresholdNeed(n: ThresholdNeeded): Need {
+  const net = new D(n.netExposure);
+  const hedged = new D(n.hedgedAmount);
+  const none = (reason: NoActionReason): Need => ({ target: hedged, needed: new D(0), reason });
+  if (n.thresholdExposure === null) return none("NO_RATE");
+  if (net.abs().lt(n.thresholdExposure)) return none("WITHIN_THRESHOLD");
+  const needed = net.negated();
+  return { target: hedged.plus(needed), needed, reason: null };
+}
+
+export interface Finishing {
+  readonly rounding: string;
+  /** The minimum in the exposure currency; null when the program sets none. */
+  readonly minExposure: string | null;
+  /** The minimum or maximum is set but the rate to convert it is missing. */
+  readonly rateMissing: boolean;
+}
+/**
+ * The rules shared by every strategy (decision 0020): the needed amount is rounded down to the step and then tested against the minimum, both in the exposure
+ * currency. The split of an amount above the maximum follows (`splitAmount`).
+ */
+export function finishRecommendation(need: Need, f: Finishing): Outcome {
+  const { target, needed } = need;
   const none = (reason: NoActionReason): Outcome => ({ target, needed, action: "NONE", reason, direction: null, amount: null });
-  if (needed.isZero()) return none("WITHIN_TARGET");
-  if (n.rateMissing) return none("NO_RATE");
-  const rounded = roundDownToStep(needed, new D(n.rounding)).abs();
+  if (need.reason !== null) return none(need.reason);
+  if (f.rateMissing) return none("NO_RATE");
+  const rounded = roundDownToStep(needed, new D(f.rounding)).abs();
   if (rounded.isZero()) return none("ROUNDS_TO_ZERO");
-  if (n.minExposure !== null && rounded.lt(n.minExposure)) return none("BELOW_MINIMUM");
+  if (f.minExposure !== null && rounded.lt(f.minExposure)) return none("BELOW_MINIMUM");
   return { target, needed, action: "HEDGE", direction: needed.isNegative() ? "SELL" : "BUY", amount: rounded, reason: null };
 }
+
+export type Needed = RatioNeeded & Finishing;
+/** Hedge-ratio adjustment followed by the shared rules. */
+export const recommend = (n: Needed): Outcome => finishRecommendation(ratioAdjustmentNeed(n), n);
 
 /** The most parts one hedge is split into; beyond it the pieces are made larger than the maximum rather than create more trades (decision 0016). */
 export const MAX_PARTS = 50;

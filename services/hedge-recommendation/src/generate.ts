@@ -1,7 +1,7 @@
 // Turn a finished run's net exposure into recommendations (decision 0011 items 2 to 8, 12, 17).
 import { randomUUID } from "node:crypto";
 import { asOfDate, type CycleId, type ProgramId, type TenantId } from "@shared/kernel";
-import { D, addTenor, businessDaysBefore, calendarGaps, fmt, noCalendar, pairKey, recommend, rollWithSpan, splitAmount, toBusinessCalendar, type BusinessCalendar } from "./calc.ts";
+import { D, addTenor, amountThresholdNeed, businessDaysBefore, calendarGaps, finishRecommendation, fmt, noCalendar, pairKey, ratioAdjustmentNeed, rollWithSpan, splitAmount, toBusinessCalendar, type BusinessCalendar } from "./calc.ts";
 import { firstTime } from "./events.ts";
 import { q, type Db } from "./db.ts";
 import { announce } from "./outbox.ts";
@@ -37,8 +37,10 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
 
     // The minimum and the maximum are set in the display currency; each exposure currency needs its own spot rate to turn them into that currency.
     const maxByLevel = new Map(policy.maxHedgeOverrides.map((o) => [o.nettingLevel, o.maxHedgeDisplay]));
+    const byThreshold = policy.strategy === "amount-threshold";
+    const thresholdByLevel = new Map(policy.amountThresholdOverrides.map((o) => [o.nettingLevel, o.amountThresholdDisplay]));
     const rateTo = new Map<string, string | null>();
-    if (minDisplay.gt(0) || policy.maxHedgeDisplay !== null || maxByLevel.size > 0) {
+    if (minDisplay.gt(0) || policy.maxHedgeDisplay !== null || maxByLevel.size > 0 || byThreshold) {
       for (const ccy of new Set(groups.map((g) => g.exposureCurrency))) {
         if (ccy === display) { rateTo.set(ccy, "1"); continue; }
         const r = await c.rates.getRate({ tenantId: tenant, base: ccy, quote: display, asOf: run!.asOf, tenor: "SPOT" });
@@ -68,7 +70,15 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
         // The maximum of one hedge (decision 0016): the level's own when it has one, else the program's, turned into the exposure currency.
         const maxDisplay = maxByLevel.get(g.nettingLevel) ?? policy.maxHedgeDisplay;
         const maxExposure = maxDisplay !== null && rate ? new D(fmt(new D(maxDisplay).div(rate))) : null;
-        const out = recommend({ grossExposure: g.gross.exposureAmount, hedgedAmount: hedged, ratio, rounding, minExposure, rateMissing: (minDisplay.gt(0) || maxDisplay !== null) && !rate });
+        // The amount threshold (decision 0020): the level's own when it has one, else the program's, turned into the exposure currency.
+        const thresholdDisplay = byThreshold ? thresholdByLevel.get(g.nettingLevel) ?? policy.amountThresholdDisplay : null;
+        // The comparison uses the converted threshold as it is; rounding to four places is for what is stored and shown, and must not move a net across the threshold.
+        const thresholdExact = thresholdDisplay !== null && rate ? new D(thresholdDisplay).div(rate) : null;
+        // What the strategy wants, then the rules every strategy shares: rounding, the minimum and (below) the split.
+        const need = byThreshold
+          ? amountThresholdNeed({ netExposure: g.net.exposureAmount, hedgedAmount: hedged, thresholdExposure: thresholdExact === null ? null : thresholdExact.toFixed() })
+          : ratioAdjustmentNeed({ grossExposure: g.gross.exposureAmount, hedgedAmount: hedged, ratio });
+        const out = finishRecommendation(need, { rounding, minExposure, rateMissing: (minDisplay.gt(0) || maxDisplay !== null || thresholdDisplay !== null) && !rate });
         // The trade is booked by the group's entity when the netting level has one; otherwise by the policy's default trading entity (decision 0011 item 9).
         const tradingEntity = g.entityCode ?? policy.tradingEntityCode;
         const noEntity = out.action === "HEDGE" && tradingEntity === null;
@@ -81,9 +91,9 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
         const split = action === "HEDGE" && out.amount !== null ? splitAmount(out.amount, maxExposure, policy.splitMethod, new D(rounding), minExposure === null ? null : new D(minExposure)) : null;
         if (split) split.parts.forEach((part, i) => partRows.push({ tenant_id: tenant, recommendation_id: recommendationId, program_id: event.programId, part_no: i + 1, amount: fmt(part) }));
         rows.push({
-          tenant_id: tenant, recommendation_id: recommendationId, program_id: event.programId, cycle_id: event.cycleId, run_id: event.runId, strategy: "hedge-ratio-adjustment",
+          tenant_id: tenant, recommendation_id: recommendationId, program_id: event.programId, cycle_id: event.cycleId, run_id: event.runId, strategy: policy.strategy,
           group_no: g.groupNo, netting_level: g.nettingLevel, region: g.region, entity_code: g.entityCode, currency_pair: g.currencyPair, exposure_currency: g.exposureCurrency, other_currency: other,
-          gross_exposure: g.gross.exposureAmount, hedged_amount: hedged, ratio, target_hedge: fmt(out.target), needed_amount: fmt(out.needed), rounding, min_exposure_amount: minExposure,
+          gross_exposure: g.gross.exposureAmount, hedged_amount: hedged, ratio: byThreshold ? null : ratio, threshold_exposure_amount: byThreshold && thresholdExact !== null ? fmt(thresholdExact) : null, target_hedge: fmt(out.target), needed_amount: fmt(out.needed), rounding, min_exposure_amount: minExposure,
           trading_entity_code: tradingEntity, action, reason: noEntity ? "NO_TRADING_ENTITY" : out.reason, direction: noEntity ? null : out.direction,
           amount: out.amount === null || noEntity ? null : fmt(out.amount), instrument,
           value_date: valueDate, fixing_date: instrument === "NDF" ? businessDaysBefore(valueDate!, 2, cals) : null,
