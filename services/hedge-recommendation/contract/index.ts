@@ -5,6 +5,13 @@ import type { CycleId, ProgramId, TenantId } from "@shared/kernel";
 export const STRATEGIES = ["hedge-ratio-adjustment", "amount-threshold"] as const;
 export type Strategy = (typeof STRATEGIES)[number];
 
+/** NONE: no roll. ADJUST_SWAP: maturing hedges are rolled to the far date and the adjustment is made at the far date (decision 0021). */
+export const ROLL_TYPES = ["NONE", "ADJUST_SWAP"] as const;
+export type RollType = (typeof ROLL_TYPES)[number];
+/** SEPARATE: the close-outs, the roll and the adjustment are separate trades. COMBINED: the roll and the adjustment are one trade at the far date. */
+export const ROLL_ADJUSTMENTS = ["SEPARATE", "COMBINED"] as const;
+export type RollAdjustment = (typeof ROLL_ADJUSTMENTS)[number];
+
 export const SPLIT_METHODS = ["EVEN", "THRESHOLD_REMAINDER"] as const;
 export type SplitMethod = (typeof SPLIT_METHODS)[number];
 
@@ -32,6 +39,12 @@ export interface HedgePolicy {
   readonly amountThresholdDisplay: string | null;
   /** A different threshold for the groups of a netting level; it replaces the program's threshold for them. */
   readonly amountThresholdOverrides: readonly { readonly nettingLevel: string; readonly amountThresholdDisplay: string }[];
+  /** NONE unless the program rolls maturing hedges (decision 0021). The decision rule above (ratio or amount threshold) still decides the adjustment. */
+  readonly rollType: RollType;
+  /** How the adjustment is booked next to the roll. */
+  readonly rollAdjustment: RollAdjustment;
+  /** Calendar days added to the near date to select the maturing hedges, unless the cycle's roll dates give their own. */
+  readonly rollOffsetDays: number;
   /** False when nothing has been saved and the defaults apply. */
   readonly saved: boolean;
 }
@@ -40,7 +53,7 @@ export interface HedgePolicy {
 export type RecommendationStatus = "OPEN" | "DECIDING" | "ACCEPTED" | "OVERRIDDEN" | "DISMISSED" | "LAPSED" | "SUPERSEDED" | "NONE";
 /** EXECUTED_REST_CANCELLED: every part is finished, some executed and some cancelled (decision 0017). Only a whole recommendation has it, never a part. */
 export type FollowUp = "NOT_STARTED" | "OPEN" | "PARTLY_EXECUTED" | "EXECUTED" | "EXECUTED_REST_CANCELLED" | "CANCELLED";
-export type NoActionReason = "WITHIN_TARGET" | "WITHIN_THRESHOLD" | "ROUNDS_TO_ZERO" | "BELOW_MINIMUM" | "NO_RATE" | "NO_TRADING_ENTITY";
+export type NoActionReason = "WITHIN_TARGET" | "WITHIN_THRESHOLD" | "ROUNDS_TO_ZERO" | "BELOW_MINIMUM" | "NO_RATE" | "NO_TRADING_ENTITY" | "ROLL_DATES_NOT_SET";
 /** What to tell the user for each reason a group has no actionable recommendation. */
 export const NO_ACTION_MESSAGES: Readonly<Record<NoActionReason, string>> = {
   WITHIN_TARGET: "Already hedged to the target ratio.",
@@ -49,6 +62,7 @@ export const NO_ACTION_MESSAGES: Readonly<Record<NoActionReason, string>> = {
   BELOW_MINIMUM: "The rounded amount is below the minimum hedge amount.",
   NO_RATE: "The spot rate needed to convert the minimum or maximum hedge amount, or the amount threshold, is missing.",
   NO_TRADING_ENTITY: "This netting group has no entity. Configure a default trading entity in the hedge policy to get a recommendation for it.",
+  ROLL_DATES_NOT_SET: "The program rolls maturing hedges, but this cycle has no usable roll dates. Set them (the far date must fall after the near date plus the offset) and rerun the cycle.",
 };
 
 /** Why a currency's business-day calendar could not be fully relied on for a recommendation's dates (decision 0014). The dates then treat only Saturdays and Sundays as non-business days for that currency. */
@@ -111,13 +125,43 @@ export interface Recommendation {
   /** Set when the split was adjusted so no part falls below the minimum. */
   readonly splitNote: string | null;
   /** The pieces of the hedge, in order; one when it is not split. After a decision they are the amounts of the pre-trades. Empty when there is no action. */
+  /** Null for a recommendation that was not made by rolling. For a rolled one the direction, amount and value date above are those of the adjustment (of the combined far trade when they are booked as one); the trades to close and roll are in `parts`. */
+  readonly roll: RecommendationRoll | null;
   readonly parts: readonly RecommendationPart[];
   /** Of the whole: executed when every part is, partly executed once any part is, cancelled when every part is. */
   readonly followUp: FollowUp;
 }
 
+/** What a part of a recommendation is (decision 0021): an adjustment, the close-out of the maturing hedges of one value date, the roll that replaces them at the far date, or the roll and the adjustment as one trade. */
+export type PartRole = "ADJUSTMENT" | "CLOSE_OUT" | "ROLL" | "COMBINED";
+
+/** The roll dates of a cycle, and what they came to once defaults were filled in. */
+export interface RollParameters {
+  readonly cycleId: CycleId;
+  readonly programId: ProgramId;
+  readonly nearDate: string;
+  /** Null: each group's far date is the policy's tenor date. */
+  readonly farDate: string | null;
+  /** Null: the policy's default offset. */
+  readonly offsetDays: number | null;
+  readonly setBy: string;
+}
+
+export interface RecommendationRoll {
+  readonly type: RollType;
+  readonly adjustment: RollAdjustment;
+  readonly nearDate: string;
+  readonly farDate: string;
+  readonly offsetDays: number;
+}
+
 export interface RecommendationPart {
   readonly partNo: number;
+  readonly role: PartRole;
+  readonly direction: "BUY" | "SELL" | null;
+  /** The part's own value date; for an adjustment, the recommendation's. */
+  readonly valueDate: string | null;
+  readonly fixingDate: string | null;
   /** Positive, in the exposure currency. */
   readonly amount: string;
   readonly preTradeId: string | null;
@@ -127,6 +171,8 @@ export interface RecommendationPart {
 export interface HedgeRecommendationQuestions {
   /** The saved policy, or the defaults when none is saved. */
   policy(tenantId: TenantId, programId: ProgramId): Promise<HedgePolicy>;
+  /** The roll dates entered for the cycle, or null. */
+  rollParameters(tenantId: TenantId, cycleId: CycleId): Promise<RollParameters | null>;
   /** The cycle's current recommendations (not superseded ones), actions first. */
   recommendations(tenantId: TenantId, cycleId: CycleId): Promise<readonly Recommendation[]>;
   getRecommendation(tenantId: TenantId, recommendationId: string): Promise<Recommendation | null>;

@@ -11,7 +11,7 @@ Tier: core. Decision: `docs/decisions/0008-exposure-analysis.md`.
 ## Answers
 - The cycle's current run, and why a waiting run waits
 - Gross exposure by netting level, currency pair and period, with display currency amount
-- Net exposure (gross plus outstanding hedges) per group, and the hedge rows behind it
+- Net exposure (gross plus outstanding hedges) per group, and the hedge rows behind it (each with its value date, group and exposure amount, decision 0021)
 - The baseline rows behind a group, with lineage to the Data Source batch and record
 - The rates used
 Each is defined in contract/.

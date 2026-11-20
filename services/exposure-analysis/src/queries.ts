@@ -60,6 +60,7 @@ export function exposureAnalysisQuestions(db: Db): ExposureAnalysisQuestions {
       return rows.map((h) => ({
         rowNo: h.row_no, executedTradeId: h.executed_trade_id, platform: h.platform, tradeId: h.trade_id, legNo: h.leg_no, entityCode: h.entity_code, region: h.region, period: asOfDate(h.period),
         dealCurrency: h.deal_currency, settlementCurrency: h.settlement_currency, currencyPair: h.currency_pair, amount1: amount(h.amount1), amount2: amount(h.amount2),
+        valueDate: h.value_date === null ? null : asOfDate(h.value_date), groupNo: h.group_no, exposureAmount: h.exposure_amount === null ? null : amount(h.exposure_amount),
       }));
     },
 

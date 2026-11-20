@@ -5,10 +5,12 @@ export interface HedgeRecommendationDatabase {
     tenant_id: string; program_id: string; default_ratio: string; min_hedge_display: string; rounding_default: string; tenor: string;
     trading_entity_code: string | null; updated_by: string; updated_at: Date; max_hedge_display: string | null; split_method: string;
     strategy: Generated<string>; amount_threshold_display: string | null;
+    roll_type: Generated<string>; roll_adjustment: Generated<string>; roll_offset_days: Generated<number>;
   };
+  roll_parameters: { tenant_id: string; program_id: string; cycle_id: string; near_date: string; far_date: string | null; offset_days: number | null; set_by: string; set_at: Date };
   amount_threshold_overrides: { tenant_id: string; program_id: string; netting_level: string; amount_threshold_display: string };
   max_hedge_overrides: { tenant_id: string; program_id: string; netting_level: string; max_hedge_display: string };
-  recommendation_parts: { tenant_id: string; recommendation_id: string; program_id: string; part_no: number; amount: string; pre_trade_id: string | null; follow_up: Generated<string> };
+  recommendation_parts: { tenant_id: string; recommendation_id: string; program_id: string; part_no: number; amount: string; pre_trade_id: string | null; follow_up: Generated<string>; role: Generated<string>; direction: string | null; value_date: string | null; fixing_date: string | null };
   ratio_overrides: { tenant_id: string; program_id: string; currency_pair: string; ratio: string };
   rounding_overrides: { tenant_id: string; program_id: string; currency: string; rounding: string };
   recommendations: {
@@ -18,6 +20,7 @@ export interface HedgeRecommendationDatabase {
     action: string; reason: string | null; direction: string | null; amount: string | null; instrument: string | null; value_date: string | null; fixing_date: string | null;
     status: string; decided_amount: string | null; decided_by: string | null; decided_at: Date | null; decision_note: string | null;
     max_exposure_amount: string | null; split_method: string | null; split_note: string | null;
+    roll_type: string | null; roll_adjustment: string | null; roll_near_date: string | null; roll_far_date: string | null; roll_offset_days: number | null;
     follow_up: Generated<string>; created_at: Date; calendar_gaps: ColumnType<unknown, string, string>;
   };
   approval_holds: { tenant_id: string; hold_id: string; cycle_id: string; approver: string; held_at: Date };

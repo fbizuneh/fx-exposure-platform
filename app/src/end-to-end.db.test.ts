@@ -1496,3 +1496,132 @@ e2e("the policy is read from one snapshot: a save committed in the middle of a r
     await db.destroy();
   }
 });
+
+// The roll-based strategy, Adjust+Swap (decision 0021). US01 holds 1,000 EUR and has these open hedges: 250 EUR net sold on 15 Dec (300 sold, 50 bought), 200 sold on 18 Dec
+// and 200 sold on 20 Jan. They add up to 650 sold, so the ratio rule wants 350 more sold. A window of 15 Dec plus 5 days holds the first two.
+const FAR = "2027-01-15";
+const rollFile = [
+  "trade_id,execution_platform_id,trading_entity,counterparty,trade_date,value_date,deal_currency,deal_amount,settlement_currency,settlement_amount,instrument,buy_sell,hedging_program_id,pre_trade_reference",
+  "R1,SIMFX,US01,Sim Bank,2026-11-10,2026-12-15,EUR,300.0000,USD,330.0000,FORWARD,SELL,BS,",
+  "R2,SIMFX,US01,Sim Bank,2026-11-10,2026-12-15,EUR,50.0000,USD,55.0000,FORWARD,BUY,BS,",
+  "R3,SIMFX,US01,Sim Bank,2026-11-10,2026-12-18,EUR,200.0000,USD,220.0000,FORWARD,SELL,BS,",
+  "R4,SIMFX,US01,Sim Bank,2026-11-10,2027-01-20,EUR,200.0000,USD,220.0000,FORWARD,SELL,BS,",
+].join("\n");
+const rollPolicy = (over: object = {}) => ({ ...defaults, roundingDefault: "10", rollType: "ADJUST_SWAP", rollOffsetDays: 5, ...over });
+async function rolledCycle(over: object = {}, dates: { nearDate: string; farDate?: string | null; offsetDays?: number | null } | null = { nearDate: "2026-12-15", farDate: FAR }) {
+  const run = await finishedCycle(rollPolicy(over), "ENTITY", false, false, async (t) => {
+    await app.fxTrade.commands.importExecutedTrades({ tenantId: t, rows: parseExecutedFile(rollFile), by: "simulator" });
+  });
+  if (dates === null) return { ...run, recs: run.recs };
+  await app.hedgeRecommendation.commands.setRollDates({ tenantId: run.t, cycleId: run.cycle, actor: run.admin, dates });
+  await app.exposureManagement.commands.rerunCycle({ tenantId: run.t, cycleId: run.cycle, actor: run.admin } as never);
+  await drain(app);
+  const recs = await app.hedgeRecommendation.questions.recommendations(run.t, run.cycle);
+  await approveExposure(run.t, run.cycle as string);
+  return { ...run, recs };
+}
+const partsShown = (r: { parts: readonly { partNo: number; role: string; direction: string | null; amount: string; valueDate: string | null }[] }) => r.parts.map((p) => [p.partNo, p.role, p.direction, p.amount, p.valueDate]);
+
+e2e("roll: a program that rolls recommends nothing until the cycle has roll dates, and says why", async () => {
+  const { t, admin, recs } = await rolledCycle({}, null);
+  assert.ok(recs.length > 0 && recs.every((r) => r.action === "NONE" && r.reason === "ROLL_DATES_NOT_SET" && r.roll === null && r.parts.length === 0), "every group, even one that would only need an adjustment");
+  assert.equal((await app.hedgeRecommendation.questions.rollParameters(t, recs[0]!.cycleId)), null);
+  await assert.rejects(app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: recs[0]!.recommendationId, actor: admin, action: "ACCEPT" }), /cannot be decided/);
+});
+
+e2e("roll, separate trades: close-outs by value date, one roll at the far date, and the adjustment; the package is accepted as one and makes one pre-trade per trade", async () => {
+  const { t, admin, cycle, recs } = await rolledCycle();
+  const us = groupOf(recs, "US01");
+  assert.deepEqual([us.action, us.direction, us.amount, us.valueDate, us.instrument, us.reason, us.hedgedAmount, us.neededAmount], ["HEDGE", "SELL", "350.00", FAR, "FORWARD", null, "-650.00", "-350.00"]);
+  assert.deepEqual(us.roll, { type: "ADJUST_SWAP", adjustment: "SEPARATE", nearDate: "2026-12-15", farDate: FAR, offsetDays: 5 });
+  assert.deepEqual(partsShown(us), [[1, "CLOSE_OUT", "BUY", "250.00", "2026-12-15"], [2, "CLOSE_OUT", "BUY", "200.00", "2026-12-18"], [3, "ROLL", "SELL", "450.00", FAR], [4, "ADJUSTMENT", "SELL", "350.00", FAR]],
+    "the hedge on 20 Jan is outside the window and stays as it is");
+  assert.equal((await app.hedgeRecommendation.questions.rollParameters(t, cycle))!.nearDate, "2026-12-15");
+
+  const done = await app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: us.recommendationId, actor: admin, action: "ACCEPT" });
+  assert.deepEqual([done.status, done.decidedAmount, done.parts.every((p) => p.preTradeId !== null)], ["ACCEPTED", "350.00", true]);
+  const pre = (await app.fxTrade.questions.preTrades(t, { cycleId: cycle })).filter((p) => p.recommendationId === us.recommendationId);
+  assert.deepEqual(pre.map((p) => [p.partNo, p.instrument, p.legs[0]!.role, p.legs[0]!.direction, p.legs[0]!.dealCurrency, p.legs[0]!.dealAmount, p.legs[0]!.settlementCurrency, p.legs[0]!.valueDate]), [
+    [1, "FORWARD", "SINGLE", "BUY", "EUR", "250.0000", "USD", "2026-12-15"], [2, "FORWARD", "SINGLE", "BUY", "EUR", "200.0000", "USD", "2026-12-18"],
+    [3, "FORWARD", "SINGLE", "SELL", "EUR", "450.0000", "USD", FAR], [4, "FORWARD", "SINGLE", "SELL", "EUR", "350.0000", "USD", FAR]], "linked by the recommendation ID, each a single-leg forward");
+});
+
+e2e("roll: an override changes only the adjustment; the close-outs and the roll stay as the maturing hedges dictate, and a larger adjustment is split after them", async () => {
+  const { t, admin, cycle, recs } = await rolledCycle();
+  const us = groupOf(recs, "US01");
+  const over = await app.hedgeRecommendation.commands.decide({ tenantId: t, recommendationId: us.recommendationId, actor: admin, action: "OVERRIDE", amount: "500" });
+  assert.deepEqual([over.status, over.decidedAmount], ["OVERRIDDEN", "500.00"]);
+  assert.deepEqual(partsShown(over), [[1, "CLOSE_OUT", "BUY", "250.00", "2026-12-15"], [2, "CLOSE_OUT", "BUY", "200.00", "2026-12-18"], [3, "ROLL", "SELL", "450.00", FAR], [4, "ADJUSTMENT", "SELL", "500.00", FAR]]);
+  assert.equal((await app.fxTrade.questions.preTrades(t, { cycleId: cycle })).filter((p) => p.recommendationId === us.recommendationId).length, 4);
+
+  // With a maximum of 200 EUR (220 USD) the adjustment is split into parts that follow the roll; nothing else is.
+  const split = await rolledCycle({ maxHedgeDisplay: "220" });
+  const s = groupOf(split.recs, "US01");
+  assert.deepEqual(s.parts.map((p) => [p.partNo, p.role]), [[1, "CLOSE_OUT"], [2, "CLOSE_OUT"], [3, "ROLL"], [4, "ADJUSTMENT"], [5, "ADJUSTMENT"]]);
+  assert.equal(s.parts.filter((p) => p.role === "ADJUSTMENT").reduce((a, p) => a + Number(p.amount), 0), 350);
+  const bigger = await app.hedgeRecommendation.commands.decide({ tenantId: split.t, recommendationId: s.recommendationId, actor: split.admin, action: "OVERRIDE", amount: "600" });
+  assert.deepEqual(bigger.parts.map((p) => [p.partNo, p.role]).slice(0, 3), [[1, "CLOSE_OUT"], [2, "CLOSE_OUT"], [3, "ROLL"]]);
+  assert.equal(bigger.parts.filter((p) => p.role === "ADJUSTMENT").reduce((a, p) => a + Number(p.amount), 0), 600);
+  assert.ok(bigger.parts.filter((p) => p.role === "ADJUSTMENT").length >= 3 && bigger.parts.every((p, i) => p.partNo === i + 1));
+});
+
+e2e("roll, one far trade: the roll and the adjustment are booked together, so a smaller or larger adjustment the other way shrinks, removes or flips it", async () => {
+  const same = await rolledCycle({ rollAdjustment: "COMBINED" });
+  const us = groupOf(same.recs, "US01");
+  assert.deepEqual([us.direction, us.amount, us.valueDate, us.roll!.adjustment], ["SELL", "800.00", FAR, "COMBINED"]);
+  assert.deepEqual(partsShown(us), [[1, "CLOSE_OUT", "BUY", "250.00", "2026-12-15"], [2, "CLOSE_OUT", "BUY", "200.00", "2026-12-18"], [3, "COMBINED", "SELL", "800.00", FAR]]);
+  const over = await app.hedgeRecommendation.commands.decide({ tenantId: same.t, recommendationId: us.recommendationId, actor: same.admin, action: "OVERRIDE", amount: "700" });
+  assert.deepEqual(partsShown(over).slice(2), [[3, "COMBINED", "SELL", "700.00", FAR]], "the override is the far trade; the close-outs do not move");
+  const trades = (await app.fxTrade.questions.preTrades(same.t, { cycleId: same.cycle })).filter((p) => p.recommendationId === us.recommendationId);
+  assert.deepEqual(trades.map((p) => [p.partNo, p.legs[0]!.direction, p.legs[0]!.dealAmount]), [[1, "BUY", "250.0000"], [2, "BUY", "200.0000"], [3, "SELL", "700.0000"]]);
+
+  // At 20% the rule wants 450 bought back, which is exactly what is rolled: no far trade, only the close-outs.
+  const none = groupOf((await rolledCycle({ rollAdjustment: "COMBINED", defaultRatio: "0.2" })).recs, "US01");
+  assert.deepEqual([none.action, none.direction, none.amount, none.reason, partsShown(none).map((p) => p[1])], ["HEDGE", null, null, null, ["CLOSE_OUT", "CLOSE_OUT"]]);
+  // At 0% the rule wants all 650 bought back: 450 more than is rolled, so the far trade is a purchase of 200.
+  const flip = groupOf((await rolledCycle({ rollAdjustment: "COMBINED", defaultRatio: "0" })).recs, "US01");
+  assert.deepEqual([flip.direction, flip.amount, partsShown(flip).slice(2)], ["BUY", "200.00", [[3, "COMBINED", "BUY", "200.00", FAR]]]);
+});
+
+e2e("roll: with no adjustment needed there are only the roll trades; they are accepted or dismissed together, and there is nothing to override", async () => {
+  const run = await rolledCycle({ defaultRatio: "0.65" }); // 65% of 1,000 is the 650 already sold
+  const us = groupOf(run.recs, "US01");
+  assert.deepEqual([us.action, us.direction, us.amount, us.reason, us.status], ["HEDGE", null, null, "WITHIN_TARGET", "OPEN"]);
+  assert.deepEqual(partsShown(us), [[1, "CLOSE_OUT", "BUY", "250.00", "2026-12-15"], [2, "CLOSE_OUT", "BUY", "200.00", "2026-12-18"], [3, "ROLL", "SELL", "450.00", FAR]]);
+  await assert.rejects(app.hedgeRecommendation.commands.decide({ tenantId: run.t, recommendationId: us.recommendationId, actor: run.admin, action: "OVERRIDE", amount: "100" }), /no adjustment to override/);
+  const accepted = await app.hedgeRecommendation.commands.decide({ tenantId: run.t, recommendationId: us.recommendationId, actor: run.admin, action: "ACCEPT" });
+  assert.deepEqual([accepted.status, accepted.decidedAmount, accepted.parts.length, (await app.fxTrade.questions.preTrades(run.t, { cycleId: run.cycle })).length], ["ACCEPTED", null, 3, 3]);
+
+  const other = await rolledCycle({ defaultRatio: "0.65" });
+  const dismissed = await app.hedgeRecommendation.commands.decide({ tenantId: other.t, recommendationId: groupOf(other.recs, "US01").recommendationId, actor: other.admin, action: "DISMISS" });
+  assert.equal(dismissed.status, "DISMISSED");
+  assert.deepEqual(await app.fxTrade.questions.preTrades(other.t, { cycleId: other.cycle }), [], "dismissing one makes none of them");
+});
+
+e2e("roll: a window with nothing maturing gives the plain adjustment at the far date, and the offset and far date default from the policy", async () => {
+  const empty = await rolledCycle({}, { nearDate: "2026-12-22", farDate: FAR, offsetDays: 0 });
+  const us = groupOf(empty.recs, "US01");
+  assert.deepEqual([us.direction, us.amount, us.valueDate, partsShown(us).map((p) => p[1])], ["SELL", "350.00", FAR, ["ADJUSTMENT"]]);
+  // No far date: each group's tenor date from the as-of date, and the policy's offset of 5 days.
+  const tenor = await rolledCycle({ tenor: "3M" }, { nearDate: "2026-12-15" });
+  const t1 = groupOf(tenor.recs, "US01");
+  assert.ok(t1.roll!.farDate > "2026-12-20" && t1.roll!.farDate === t1.valueDate && t1.roll!.offsetDays === 5, `${t1.roll!.farDate}`);
+  assert.deepEqual(partsShown(t1).slice(0, 2).map((p) => p[3]), ["250.00", "200.00"]);
+  // A tenor date that falls inside the window is no far date at all: the group gets no recommendation rather than a roll that ends before it starts.
+  const early = groupOf((await rolledCycle({ tenor: "1M" }, { nearDate: "2026-12-15" })).recs, "US01");
+  assert.deepEqual([early.action, early.reason, early.roll, early.parts.length], ["NONE", "ROLL_DATES_NOT_SET", null, 0]);
+});
+
+e2e("roll dates are refused when the program does not roll, are too early, or come after the exposure is approved", async () => {
+  const plain = await finishedCycle(defaults, "ENTITY", false);
+  await assert.rejects(app.hedgeRecommendation.commands.setRollDates({ tenantId: plain.t, cycleId: plain.cycle, actor: plain.admin, dates: { nearDate: "2026-12-15" } }), /does not roll/);
+  const run = await rolledCycle({}, null);
+  const set = (dates: { nearDate: string; farDate?: string | null; offsetDays?: number | null }) => app.hedgeRecommendation.commands.setRollDates({ tenantId: run.t, cycleId: run.cycle, actor: run.admin, dates });
+  await assert.rejects(set({ nearDate: "2026-11-11" }), /after the cycle's as-of date/);
+  await assert.rejects(set({ nearDate: "2026-12-15", farDate: "2026-12-20" }), /far date must be after the near date plus the offset/);
+  await set({ nearDate: "2026-12-15", farDate: FAR });
+  await set({ nearDate: "2026-12-16", farDate: FAR, offsetDays: 2 });
+  assert.deepEqual([(await app.hedgeRecommendation.questions.rollParameters(run.t, run.cycle))!.nearDate, (await app.hedgeRecommendation.questions.rollParameters(run.t, run.cycle))!.offsetDays], ["2026-12-16", 2], "entering them again replaces them");
+  await approveExposure(run.t, run.cycle as string);
+  await assert.rejects(set({ nearDate: "2026-12-15", farDate: FAR }), /can no longer change/);
+});

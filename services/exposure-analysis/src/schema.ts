@@ -78,6 +78,7 @@ export interface ExposureAnalysisDatabase {
   hedge_rows: {
     tenant_id: string; program_id: string; run_id: string; row_no: number; executed_trade_id: string; platform: string; trade_id: string; leg_no: number;
     entity_code: string; region: string; period: string; deal_currency: string; settlement_currency: string; currency_pair: string; currency1: string; currency2: string; amount1: string; amount2: string;
+    value_date: string | null; group_no: number | null; exposure_amount: string | null;
   };
   net_groups: {
     tenant_id: string; program_id: string; run_id: string; group_no: number; netting_level: string; region: string | null; entity_code: string | null; currency_pair: string;

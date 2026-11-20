@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { D, addTenor, amountThresholdNeed, finishRecommendation, pairKey, recommend, roundDownToStep, valueDateFor, businessDaysBefore, calendarGaps, noCalendar, rollModifiedFollowing, rollWithSpan, toBusinessCalendar } from "./calc.ts";
+import { D, addTenor, amountThresholdNeed, finishRecommendation, pairKey, recommend, roundDownToStep, valueDateFor, businessDaysBefore, calendarGaps, noCalendar, rollModifiedFollowing, rollWithSpan, toBusinessCalendar, addDays, combineRoll, planRoll } from "./calc.ts";
 import { policyProblems } from "./policy.ts";
+import { rollDatesProblems } from "./roll.ts";
 
 const base = { grossExposure: "1000000", hedgedAmount: "0", ratio: "1", rounding: "1000", minExposure: null, rateMissing: false } as const;
 
@@ -245,4 +246,58 @@ test("a policy with the amount-threshold strategy needs a threshold, and the thr
   const bad = policyProblems({ ...ok, strategy: "var" as never, amountThresholdDisplay: "0", amountThresholdOverrides: [{ nettingLevel: "ENTITY", amountThresholdDisplay: "-1" }, { nettingLevel: "ENTITY", amountThresholdDisplay: "5" }, { nettingLevel: "DESK", amountThresholdDisplay: "5" }] });
   assert.equal(bad.length, 5, bad.join(" | "));
   assert.deepEqual(policyProblems({ ...ok, strategy: "amount-threshold", amountThresholdDisplay: "100", minHedgeDisplay: "500" }), [], "a threshold below the minimum is allowed; the minimum then decides");
+});
+
+// The roll (decision 0021).
+const leg = (valueDate: string, exposureAmount: string) => ({ valueDate, exposureAmount });
+const shown = (p: ReturnType<typeof planRoll>) => ({ closeOuts: p.closeOuts.map((c) => [c.valueDate, c.direction, c.amount.toString()]), roll: p.roll && [p.roll.direction, p.roll.amount.toString()], maturing: p.maturing.toString() });
+
+test("a roll closes each value date in the window on its own and puts the total back at the far date", () => {
+  const legs = [leg("2026-12-15", "-300"), leg("2026-12-15", "50"), leg("2026-12-18", "-200"), leg("2027-01-20", "-200")];
+  assert.deepEqual(shown(planRoll(legs, "2026-12-15", 5)), { closeOuts: [["2026-12-15", "BUY", "250"], ["2026-12-18", "BUY", "200"]], roll: ["SELL", "450"], maturing: "-450" },
+    "sold hedges are closed by buying; the 50 bought on the first date nets against its 300 sold");
+  assert.deepEqual(shown(planRoll([leg("2026-12-15", "120")], "2026-12-15", 0)), { closeOuts: [["2026-12-15", "SELL", "120"]], roll: ["BUY", "120"], maturing: "120" }, "a bought hedge is closed by selling");
+});
+
+test("the window runs from the near date to the near date plus the offset, both days included", () => {
+  const legs = [leg("2026-12-14", "-1"), leg("2026-12-15", "-2"), leg("2026-12-20", "-4"), leg("2026-12-21", "-8")];
+  assert.deepEqual(planRoll(legs, "2026-12-15", 5).closeOuts.map((c) => c.valueDate), ["2026-12-15", "2026-12-20"]);
+  assert.deepEqual(planRoll(legs, "2026-12-15", 0).closeOuts.map((c) => c.valueDate), ["2026-12-15"], "an offset of 0 is the near date alone");
+  assert.equal(addDays("2026-12-30", 3), "2027-01-02");
+});
+
+test("a date whose hedges net to nothing has no close-out, and dates that offset each other close out but roll nothing", () => {
+  assert.deepEqual(shown(planRoll([leg("2026-12-15", "-100"), leg("2026-12-15", "100")], "2026-12-15", 3)), { closeOuts: [], roll: null, maturing: "0" });
+  assert.deepEqual(shown(planRoll([leg("2026-12-15", "-100"), leg("2026-12-16", "100")], "2026-12-15", 3)), { closeOuts: [["2026-12-15", "BUY", "100"], ["2026-12-16", "SELL", "100"]], roll: null, maturing: "0" });
+  assert.deepEqual(shown(planRoll([], "2026-12-15", 3)), { closeOuts: [], roll: null, maturing: "0" }, "nothing maturing is not an error");
+});
+
+test("booked as one trade, the roll and the adjustment add up with their signs, and a total of zero is no trade", () => {
+  const sell = (n: string) => ({ direction: "SELL" as const, amount: new D(n) }), buy = (n: string) => ({ direction: "BUY" as const, amount: new D(n) });
+  const one = (r: ReturnType<typeof combineRoll>) => r && [r.direction, r.amount.toString()];
+  assert.deepEqual(one(combineRoll(new D("-450"), sell("350"))), ["SELL", "800"]);
+  assert.deepEqual(one(combineRoll(new D("-450"), buy("250"))), ["SELL", "200"], "a smaller adjustment the other way reduces it");
+  assert.deepEqual(one(combineRoll(new D("-450"), buy("450"))), null);
+  assert.deepEqual(one(combineRoll(new D("-450"), buy("650"))), ["BUY", "200"], "a larger one flips it");
+  assert.deepEqual(one(combineRoll(new D("-450"), null)), ["SELL", "450"]);
+  assert.deepEqual(one(combineRoll(new D("0"), buy("40"))), ["BUY", "40"]);
+});
+
+test("roll dates: the near date is after the as-of date, and the far date after the near date plus the offset (the policy's when none is given)", () => {
+  assert.deepEqual(rollDatesProblems({ nearDate: "2026-12-15", farDate: "2027-01-15", offsetDays: 5 }, "2026-11-12", 0), []);
+  assert.deepEqual(rollDatesProblems({ nearDate: "2026-12-15" }, "2026-11-12", 0), [], "the far date and offset may be left to the policy");
+  assert.equal(rollDatesProblems({ nearDate: "2026-11-12" }, "2026-11-12", 0).length, 1, "the as-of date itself is too early");
+  assert.equal(rollDatesProblems({ nearDate: "2026-12-15", farDate: "2026-12-20", offsetDays: 5 }, "2026-11-12", 0).length, 1, "a far date on the last day of the window is too early");
+  assert.equal(rollDatesProblems({ nearDate: "2026-12-15", farDate: "2026-12-20" }, "2026-11-12", 7).length, 1, "the policy's offset applies when none is given");
+  assert.deepEqual(rollDatesProblems({ nearDate: "2026-12-15", farDate: "2026-12-21", offsetDays: 5 }, "2026-11-12", 0), []);
+  assert.equal(rollDatesProblems({ nearDate: "2026-02-30" }, "2026-01-01", 0).length, 1);
+  assert.equal(rollDatesProblems({ nearDate: "2026-12-15", offsetDays: -1 }, "2026-11-12", 0).length, 1);
+  assert.equal(rollDatesProblems({ nearDate: "2026-12-15", farDate: "soon" }, "2026-11-12", 0).length, 1);
+});
+
+test("a policy's roll settings are checked", () => {
+  const ok = { defaultRatio: "1", ratioOverrides: [], minHedgeDisplay: "0", roundingDefault: "1000", roundingOverrides: [], tenor: "1M", tradingEntityCode: null };
+  assert.deepEqual(policyProblems({ ...ok, rollType: "ADJUST_SWAP", rollAdjustment: "COMBINED", rollOffsetDays: 3 }), []);
+  assert.equal(policyProblems({ ...ok, rollType: "SWAP" as never, rollAdjustment: "SPLIT" as never, rollOffsetDays: 1.5 }).length, 3);
+  assert.equal(policyProblems({ ...ok, rollOffsetDays: -1 }).length, 1);
 });

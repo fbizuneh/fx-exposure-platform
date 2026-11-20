@@ -264,3 +264,50 @@ export const fmt = (d: Num): string => {
 
 /** A pair without regard to which currency is written first: "USD-EUR" and "EUR-USD" are the same pair for a ratio. */
 export const pairKey = (pair: string): string => pair.split("-").sort().join("-");
+
+/** A date some calendar days later. */
+export function addDays(date: string, days: number): string {
+  const d = utc(date);
+  d.setUTCDate(d.getUTCDate() + days);
+  return iso(d);
+}
+
+export interface MaturingLeg {
+  readonly valueDate: string;
+  /** Signed, in the group's exposure currency: a hedge against a long exposure is negative. */
+  readonly exposureAmount: string;
+}
+export interface RollTrade { readonly direction: "BUY" | "SELL"; readonly amount: Num }
+export interface RollPlan {
+  /** One close-out per value date in the window, oldest first: the maturing hedges of that date netted and closed the other way. A date whose hedges net to nothing has none. */
+  readonly closeOuts: readonly (RollTrade & { readonly valueDate: string })[];
+  /** The hedge that replaces everything maturing, at the far date; null when it nets to nothing. */
+  readonly roll: RollTrade | null;
+  /** Signed total of the maturing hedges. */
+  readonly maturing: Num;
+}
+/**
+ * The roll of an Adjust+Swap (decision 0021). The legs maturing from `near` to `near` plus `offsetDays` (both ends included) are netted by value date; each
+ * date is closed on its own, and one trade at the far date puts back the total that was closed.
+ */
+export function planRoll(legs: readonly MaturingLeg[], near: string, offsetDays: number): RollPlan {
+  const end = addDays(near, offsetDays);
+  const byDate = new Map<string, Num>();
+  for (const l of legs) {
+    if (l.valueDate < near || l.valueDate > end) continue;
+    byDate.set(l.valueDate, (byDate.get(l.valueDate) ?? new D(0)).plus(l.exposureAmount));
+  }
+  const closeOuts = [...byDate].sort(([a], [b]) => (a < b ? -1 : 1)).filter(([, s]) => !s.isZero())
+    .map(([valueDate, s]) => ({ valueDate, direction: s.isNegative() ? "BUY" as const : "SELL" as const, amount: s.abs() }));
+  const maturing = [...byDate.values()].reduce((a, b) => a.plus(b), new D(0));
+  return { closeOuts, roll: maturing.isZero() ? null : { direction: maturing.isNegative() ? "SELL" : "BUY", amount: maturing.abs() }, maturing };
+}
+
+/**
+ * The roll and the adjustment as one trade at the far date (decision 0021): the signed sum of the two. Zero means no far trade; a sum on the other side of zero
+ * is a trade the other way.
+ */
+export function combineRoll(maturing: Num, adjustment: RollTrade | null): RollTrade | null {
+  const signed = maturing.plus(adjustment === null ? new D(0) : adjustment.direction === "SELL" ? adjustment.amount.negated() : adjustment.amount);
+  return signed.isZero() ? null : { direction: signed.isNegative() ? "SELL" : "BUY", amount: signed.abs() };
+}

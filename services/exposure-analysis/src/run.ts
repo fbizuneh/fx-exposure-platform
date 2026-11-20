@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import { asOfDate, cycleId as toCycleId, programId as toProgramId, type CycleId, type TenantId } from "@shared/kernel";
 import type { HedgeCounts, RateWarning } from "../contract/index.ts";
-import { buildBaseline, buildHedgeRows, filterBalances, accountKey, fixed4, netByLevel, netExposure, overrideKey, requiredRates, type Baseline, type GroupResult, type HedgeRow, type NetGroupResult } from "./calc.ts";
+import { buildBaseline, buildHedgeRows, filterBalances, accountKey, fixed4, hedgeRowPlacement, netByLevel, netExposure, overrideKey, requiredRates, type Baseline, type GroupResult, type HedgeRow, type NetGroupResult } from "./calc.ts";
 import { q, type Db, type Queryable } from "./db.ts";
 import { announce } from "./outbox.ts";
 import type { Collaborators } from "./ports.ts";
@@ -106,13 +106,14 @@ export function runCommands(db: Db, c: Collaborators, now: () => Date) {
     const rules = { ndf, overrides };
     const groups = netByLevel(baseline, level, run.as_of, display, rateOf, rules);
     const net = netExposure(baseline, hedge.rows, level, run.as_of, display, rateOf, rules, groups);
+    const placement = hedgeRowPlacement(hedge.rows, level, run.as_of, display, rateOf, rules, net);
     startSaving();
-    return save(tenant, run.program_id, runId, { pairMappings: mappings, baseline, groups, hedgeRows: hedge.rows, hedgeCounts: hedge.counts, net, counts, warnings, blocked, needs, fetched });
+    return save(tenant, run.program_id, runId, { pairMappings: mappings, baseline, groups, hedgeRows: hedge.rows, hedgeCounts: hedge.counts, placement, net, counts, warnings, blocked, needs, fetched });
   }
 
   async function save(
     tenant: TenantId, program: string, runId: string,
-    r: { pairMappings: readonly { pair: string; exposureCurrency: string }[]; baseline: Baseline[]; groups: GroupResult[]; hedgeRows: HedgeRow[]; hedgeCounts: HedgeCounts; net: NetGroupResult[]; counts: unknown; warnings: RateWarning[]; blocked: number; needs: ReturnType<typeof requiredRates>; fetched: Map<string, Awaited<ReturnType<Collaborators["rates"]["getRate"]>>> },
+    r: { pairMappings: readonly { pair: string; exposureCurrency: string }[]; baseline: Baseline[]; groups: GroupResult[]; hedgeRows: HedgeRow[]; hedgeCounts: HedgeCounts; placement: ReturnType<typeof hedgeRowPlacement>; net: NetGroupResult[]; counts: unknown; warnings: RateWarning[]; blocked: number; needs: ReturnType<typeof requiredRates>; fetched: Map<string, Awaited<ReturnType<Collaborators["rates"]["getRate"]>>> },
   ): Promise<RunOutcome> {
     return db.transaction().execute(async (tx) => {
       const run = await q(tx).selectFrom("runs").select(["status", "cycle_id", "display_currency", "as_of"]).where("tenant_id", "=", tenant).where("run_id", "=", runId).executeTakeFirst();
@@ -144,7 +145,8 @@ export function runCommands(db: Db, c: Collaborators, now: () => Date) {
         await q(tx).insertInto("hedge_rows").values(part.map((h) => ({
           ...key, row_no: h.rowNo, executed_trade_id: h.executedTradeId, platform: h.platform, trade_id: h.tradeId, leg_no: h.legNo, entity_code: h.entityCode, region: h.region,
           period: run!.as_of, deal_currency: h.dealCurrency, settlement_currency: h.settlementCurrency, currency_pair: h.pair, currency1: h.currency1, currency2: h.currency2,
-          amount1: fixed4(h.amount1), amount2: fixed4(h.amount2),
+          amount1: fixed4(h.amount1), amount2: fixed4(h.amount2), value_date: h.valueDate,
+          group_no: r.placement.get(h.rowNo)?.groupNo ?? null, exposure_amount: r.placement.has(h.rowNo) ? fixed4(r.placement.get(h.rowNo)!.exposureAmount) : null,
         }))).execute();
       }
       for (const [i, n] of r.net.entries()) {

@@ -5,7 +5,7 @@ import { require_, who } from "./access.ts";
 import { recordChange } from "./change-record.ts";
 import { readPolicy } from "./queries.ts";
 import type { NettingLevel } from "@services/exposure-management/contract";
-import { SPLIT_METHODS, STRATEGIES, type SplitMethod, type Strategy } from "../contract/index.ts";
+import { ROLL_ADJUSTMENTS, ROLL_TYPES, SPLIT_METHODS, STRATEGIES, type RollAdjustment, type RollType, type SplitMethod, type Strategy } from "../contract/index.ts";
 import { TENOR, pairKey } from "./calc.ts";
 import { q, type Db } from "./db.ts";
 import type { Collaborators } from "./ports.ts";
@@ -26,6 +26,10 @@ export interface PolicyInput {
   readonly strategy?: Strategy;
   readonly amountThresholdDisplay?: string | null;
   readonly amountThresholdOverrides?: readonly { readonly nettingLevel: string; readonly amountThresholdDisplay: string }[];
+  /** Decision 0021. Left out, the program does not roll; the adjustment is booked as separate trades; the offset is 0 days. */
+  readonly rollType?: RollType;
+  readonly rollAdjustment?: RollAdjustment;
+  readonly rollOffsetDays?: number;
 }
 
 export class PolicyInvalid extends Error {
@@ -74,6 +78,9 @@ export function policyProblems(p: PolicyInput): string[] {
     thresholdLevels.add(o.nettingLevel);
     threshold(`amount threshold override ${o.nettingLevel}`, o.amountThresholdDisplay);
   }
+  if (p.rollType !== undefined && !ROLL_TYPES.includes(p.rollType)) out.push(`roll type must be one of ${ROLL_TYPES.join(", ")}`);
+  if (p.rollAdjustment !== undefined && !ROLL_ADJUSTMENTS.includes(p.rollAdjustment)) out.push(`roll adjustment must be one of ${ROLL_ADJUSTMENTS.join(", ")}`);
+  if (p.rollOffsetDays !== undefined && (!Number.isInteger(p.rollOffsetDays) || p.rollOffsetDays < 0 || p.rollOffsetDays > 366)) out.push("roll offset must be a whole number of days from 0 to 366");
   const pairs = new Set<string>();
   for (const o of p.ratioOverrides) {
     if (!/^[A-Z]{3}-[A-Z]{3}$/.test(o.pair)) out.push(`ratio override pair ${o.pair} must look like EUR-USD`);
@@ -112,7 +119,7 @@ export function policyCommands(db: Db, c: Collaborators, clock: () => Date) {
       await q(tx).deleteFrom("policies").where("tenant_id", "=", input.tenantId).where("program_id", "=", input.programId).execute();
       await q(tx).insertInto("policies").values({
         ...key, default_ratio: p.defaultRatio, min_hedge_display: p.minHedgeDisplay, rounding_default: p.roundingDefault, tenor: p.tenor,
-        trading_entity_code: p.tradingEntityCode, max_hedge_display: p.maxHedgeDisplay ?? null, split_method: p.splitMethod ?? "EVEN", strategy: p.strategy ?? "hedge-ratio-adjustment", amount_threshold_display: p.amountThresholdDisplay ?? null, updated_by: who(input.actor), updated_at: clock(),
+        trading_entity_code: p.tradingEntityCode, max_hedge_display: p.maxHedgeDisplay ?? null, split_method: p.splitMethod ?? "EVEN", strategy: p.strategy ?? "hedge-ratio-adjustment", amount_threshold_display: p.amountThresholdDisplay ?? null, roll_type: p.rollType ?? "NONE", roll_adjustment: p.rollAdjustment ?? "SEPARATE", roll_offset_days: p.rollOffsetDays ?? 0, updated_by: who(input.actor), updated_at: clock(),
       }).execute();
       if (p.ratioOverrides.length > 0) await q(tx).insertInto("ratio_overrides").values(p.ratioOverrides.map((o) => ({ ...key, currency_pair: o.pair, ratio: o.ratio }))).execute();
       if (p.roundingOverrides.length > 0) await q(tx).insertInto("rounding_overrides").values(p.roundingOverrides.map((o) => ({ ...key, currency: o.currency, rounding: o.rounding }))).execute();
@@ -120,7 +127,7 @@ export function policyCommands(db: Db, c: Collaborators, clock: () => Date) {
       if ((p.amountThresholdOverrides ?? []).length > 0) await q(tx).insertInto("amount_threshold_overrides").values((p.amountThresholdOverrides ?? []).map((o) => ({ ...key, netting_level: o.nettingLevel, amount_threshold_display: o.amountThresholdDisplay }))).execute();
       const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
       const after = await readPolicy(tx, input.tenantId, input.programId);
-      const fields = (["defaultRatio", "ratioOverrides", "minHedgeDisplay", "roundingDefault", "roundingOverrides", "tenor", "tradingEntityCode", "maxHedgeDisplay", "maxHedgeOverrides", "splitMethod", "strategy", "amountThresholdDisplay", "amountThresholdOverrides"] as const).filter((f) => !same(before[f], after[f]));
+      const fields = (["defaultRatio", "ratioOverrides", "minHedgeDisplay", "roundingDefault", "roundingOverrides", "tenor", "tradingEntityCode", "maxHedgeDisplay", "maxHedgeOverrides", "splitMethod", "strategy", "amountThresholdDisplay", "rollType", "rollAdjustment", "rollOffsetDays", "amountThresholdOverrides"] as const).filter((f) => !same(before[f], after[f]));
       await recordChange(tx, { tenantId: input.tenantId, programId: input.programId, actor: who(input.actor), action: "hedge-policy.set", targetType: "hedge-policy", targetId: input.programId, fields: before.saved ? fields : ["policy"] });
     });
   }
