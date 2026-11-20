@@ -330,6 +330,8 @@ const pairExposureOps: Ops<PairExposureCurrencyRow> = {
     for (const r of rows) {
       const key = r.pair;
       l.ids.set(key, r.mapping_id);
+      // A version's end date is history too: a change dated before an ending would replace it and revive the mapping after it.
+      l.maxValidFrom = later(l.maxValidFrom, r.valid_to ?? r.valid_from);
       l.maxValidFrom = later(l.maxValidFrom, r.valid_from);
       if (isOpen(r, asOf)) l.open.set(key, { id: r.mapping_id, validFrom: r.valid_from, source: r.source_system, attrs: stable({ exposureCurrency: r.exposure_currency }) });
     }
@@ -435,7 +437,9 @@ async function execute(db: Db, req: Request): Promise<SubmitResult> {
       await q(tx).updateTable("change_sets").set({ status: "APPLIED", decided_by: releasing.by, decided_at: new Date() }).where("tenant_id", "=", tenant).where("batch_id", "=", batchId).execute();
     }
     if (p.creates.length + p.changes.length + p.ends.length > 0) {
-      await announce(tx, { type: "master-data.changed", tenantId: tenant, batchId, kind, asOf: sub.asOf });
+      const base = { type: "master-data.changed", tenantId: tenant, batchId, asOf: sub.asOf } as const;
+      if (kind === "EXPOSURE_CURRENCY") await announce(tx, { ...base, kind, programId: programId(scope!) });
+      else await announce(tx, { ...base, kind });
       const by = releasing ? releasing.by : sub.by;
       if (byPerson(by)) await recordChange(tx, { tenantId: tenant, programId: scope ? programId(scope) : null, actor: by, action: `master-data.${String(kind).toLowerCase()}-changed`, targetType: "change-set", targetId: batchId, fields: [] });
     }

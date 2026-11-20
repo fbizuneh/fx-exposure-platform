@@ -367,6 +367,40 @@ dbTest("pair exposure currencies: programs sharing a source stay apart; a snapsh
   await assert.rejects(md.commands.applyPairExposureCurrencies(forProgram(snap(t2, [pairRow("EUR-GBP", "GBP")], D1), "CF")), /would rewrite history/);
 });
 
+dbTest("pair exposure currencies: an ending is history too; a change dated before it is refused, the lookup after it is unchanged, and another program's dates do not block", async () => {
+  const jun1 = asOfDate("2026-06-01"), jun2 = asOfDate("2026-06-02"), jun3 = asOfDate("2026-06-03");
+  const t = newTenant();
+  await md.commands.applyPairExposureCurrencies(forProgram(snap(t, [pairRow("EUR-GBP", "EUR")], jun1), "BS"));
+  await md.commands.applyPairExposureCurrencies(forProgram(snap(t, [], jun3), "BS")); // ends it on 3 June
+  assert.deepEqual([await pairs(t, "BS", jun2), await pairs(t, "BS", jun3)], [["EUR-GBP:EUR"], []]);
+
+  // A 2 June change would replace the 3 June end and leave the mapping live on 3 June: refused.
+  await assert.rejects(md.commands.applyPairExposureCurrencies(forProgram(part(t, [pairRow("EUR-GBP", "GBP")], jun2, "erp"), "BS")), /would rewrite history/);
+  assert.deepEqual([await pairs(t, "BS", jun2), await pairs(t, "BS", jun3)], [["EUR-GBP:EUR"], []], "the lookups are as before");
+  // A change dated on the ending day is fine, and a program with later dates elsewhere does not block this one.
+  await md.commands.applyPairExposureCurrencies(forProgram(snap(t, [pairRow("EUR-GBP", "GBP")], asOfDate("2026-06-10")), "CF"));
+  assert.equal((await md.commands.applyPairExposureCurrencies(forProgram(part(t, [pairRow("EUR-GBP", "GBP")], jun3, "erp"), "BS"))).status, "APPLIED");
+  assert.deepEqual(await pairs(t, "BS", jun3), ["EUR-GBP:GBP"]);
+  const t2 = newTenant();
+  await md.commands.applyPairExposureCurrencies(forProgram(snap(t2, [pairRow("EUR-GBP", "EUR")], asOfDate("2026-06-10")), "CF"));
+  assert.equal((await md.commands.applyPairExposureCurrencies(forProgram(part(t2, [pairRow("EUR-GBP", "GBP")], jun2, "erp"), "BS"))).status, "APPLIED", "the other program's later dates do not block");
+});
+
+dbTest("pair exposure currencies: master-data.changed carries the program, for an applied change and for a released snapshot", async () => {
+  const t = newTenant();
+  const twelve = "ABCDEFGHIJKL".split("").map((c) => pairRow(`${c}${c}${c}-USD`, "USD"));
+  await md.commands.applyPairExposureCurrencies(forProgram(snap(t, twelve, D1), "BS"));
+  await md.commands.applyPairExposureCurrencies(forProgram(snap(t, [pairRow("EUR-GBP", "EUR")], D1), "CF"));
+  const held = await md.commands.applyPairExposureCurrencies(forProgram(snap(t, twelve.slice(0, 8), D2), "BS"));
+  assert.equal(held.status, "HELD");
+  assert.equal((await events(t)).filter((e) => e.kind === "EXPOSURE_CURRENCY").length, 2, "a held set announces nothing yet");
+  await md.commands.releaseChangeSet(t, held.batchId, "user:1");
+  const sent = (await events(t)).filter((e) => e.kind === "EXPOSURE_CURRENCY").map((e) => [e.batchId === held.batchId, (e as { programId?: string }).programId]);
+  assert.deepEqual(sent.sort(), [[false, "BS"], [false, "CF"], [true, "BS"]].sort(), "every mapping event names its program, the released one included");
+  await md.commands.applyCurrencies(snap(t, [{ code: "EUR", isNdf: false }], D1));
+  assert.ok((await events(t)).filter((e) => e.kind !== "EXPOSURE_CURRENCY").every((e) => !("programId" in e)), "other kinds stay tenant-scoped");
+});
+
 dbTest("pair exposure currencies: the safeguard counts only the program's own open rows", async () => {
   const t = newTenant();
   const twelve = "ABCDEFGHIJKL".split("").map((c) => pairRow(`${c}${c}${c}-USD`, "USD"));

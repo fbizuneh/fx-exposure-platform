@@ -123,15 +123,18 @@ export interface MasterDataQuestions {
 }
 
 /** One event per applied change set. It carries identifiers only; receivers ask Master Data for detail. */
-export interface MasterDataChanged {
+interface MasterDataChangedBase {
   readonly type: "master-data.changed";
   readonly eventId: string;
   readonly tenantId: TenantId;
   readonly occurredAt: string;
   readonly batchId: string;
-  readonly kind: "ENTITY" | "HIERARCHY" | "ACCOUNT" | "CURRENCY" | "CALENDAR" | "EXPOSURE_CURRENCY";
   readonly asOf: AsOfDate;
 }
+export type MasterDataChanged =
+  | (MasterDataChangedBase & { readonly kind: "ENTITY" | "HIERARCHY" | "ACCOUNT" | "CURRENCY" | "CALENDAR" })
+  /** Exposure currencies are kept per hedging program (decision 0015), so this event carries the program (AGENTS.md rule 6). */
+  | (MasterDataChangedBase & { readonly kind: "EXPOSURE_CURRENCY"; readonly programId: ProgramId });
 
 /** A change record for Audit (decision 0012): who did what to which record. Identifiers and field names only. */
 export interface MasterDataChangeRecorded extends ChangeRecordFields {

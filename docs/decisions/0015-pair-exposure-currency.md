@@ -11,6 +11,8 @@ Status: accepted. Follows decision 0008 (override in program settings) and 0010 
 ## What it does
 - New Master Data table `pair_exposure_currencies` (program-scoped, versioned, tenant isolated): program, pair, exposure currency. A change set of mappings is **for one program**: the submission names it (`programCode`), rows carry only pair and exposure currency, and a blank program is refused. The pair is stored in alphabetical order, so `GBP-EUR` and `EUR-GBP` are one mapping. The exposure currency must be one of the pair.
 - The program scopes everything the change set does: the history check, the snapshot key (`change_sets.scope_key`, so two programs can each send a snapshot from the same source on the same date), which rows a snapshot may end (an empty snapshot ends only that program's), the safeguard's counts, and a release. A Balance Sheet snapshot can never end Cash Flow mappings.
+- The history check counts end dates as well as start dates, per program: a change dated before a mapping's ending is refused, so it cannot revive the mapping.
+- `master-data.changed` for this kind carries the program ID (AGENTS.md rule 6), also when a held snapshot is released; the other kinds stay tenant-scoped.
 - The change record goes to Audit under that program (so a reviewer limited to a program sees only its own mapping changes), with no mapping values in it.
 - Loaded like other reference data: a change set of kind `EXPOSURE_CURRENCY`, snapshot or partial, versioned from its date, audited, one `master-data.changed` event per applied set.
 - Question `getPairExposureCurrencies(tenant, program, asOf)`. Another program's mappings are never returned.
