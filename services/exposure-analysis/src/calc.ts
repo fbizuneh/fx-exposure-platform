@@ -258,7 +258,11 @@ export function netByLevel(
   // The exposure currency is chosen per contribution, before aggregation, and is part of the netting key (decision 0010).
   const exposureOf = (c: Contribution): string => {
     const fn = c.functional === "" ? null : c.functional;
-    if (byEntity(level) && c.dealCurrency !== undefined && (fn === null || (c.currency1 !== fn && c.currency2 !== fn))) return c.dealCurrency;
+    if (byEntity(level) && c.dealCurrency !== undefined && (fn === null || (c.currency1 !== fn && c.currency2 !== fn))) {
+      // Hedge without the functional currency in the pair: the program's override for the pair if it has one, else the deal currency. No default ranking.
+      const o = exposureRules.overrides.get(overrideKey(c.currency1, c.currency2));
+      return o !== undefined && (o === c.currency1 || o === c.currency2) ? o : c.dealCurrency;
+    }
     return exposureCurrencyFor(level, c.currency1, c.currency2, display, exposureRules, fn);
   };
   const groups = new Map<string, Contribution[]>();

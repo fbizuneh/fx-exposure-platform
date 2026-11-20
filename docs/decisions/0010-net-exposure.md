@@ -14,7 +14,7 @@ Date: 2026-11-19. Service: exposure-analysis (amends 0008). Sources: Hedging Pro
 9. **Rates.** The hedge pairs need display rates (and portfolio rates at that level) like any pair; a missing one makes the run wait, as before. No pair rate is needed for a hedge.
 10. **Evidence.** The hedge rows are saved with the run with the executed trade ID, platform, trade ID and leg, so a hedge number traces to the trade version used. Counts of trades, open legs used, and left out are saved on the run.
 11. **If FX Trade cannot be reached,** the run waits with that reason (the rule of decision 0008 that already covers any service).
-12. **Exposure currency for hedges, chosen per row before aggregation, at entity-level netting.** If the trading entity's functional currency is one leg, the exposure currency is the other leg. If neither leg is the functional currency, it is the hedge's **deal currency**, not the program override or the default ranking. Acceptance case: for a USD-functional entity, an EUR/GBP hedge with EUR as deal currency and one with GBP as deal currency give **two** EUR/GBP rows, with exposure currency EUR and GBP. Other netting levels keep decision 0008's rules.
+12. **Exposure currency for hedges, chosen per row before aggregation, at every netting level with an entity in the netting dimension** (entity, and region by entity). If the trading entity's functional currency is one leg, the exposure currency is the other leg. If neither leg is the functional currency, it is the program's exposure currency override for the pair if there is one, otherwise the hedge's **deal currency**. There is no default ranking. Acceptance case: a USD-functional entity with an EUR/GBP hedge booked with EUR as deal currency and one with GBP as deal currency gives **two** EUR/GBP rows (exposure currency EUR and GBP) unless the program overrides the pair. Levels without an entity (group natural, region, portfolio) keep decision 0008's rules. (Product owner, PR #2, second comment.)
 
 13. **Precision.** Gross, hedge and net amounts keep two decimals. The contractual hedge amount is never changed to make displayed totals reconcile; a one-unit difference when the UI shows zero decimals is accepted.
 
@@ -23,5 +23,4 @@ Client configuration mapping a currency pair to an exposure currency, so clients
 
 ## Defaults I chose, to confirm or change
 - Trades traded after the as-of date are not outstanding at that date, even if the run happens later.
-- At netting levels that are not entity level, hedges use the existing exposure currency rules (the deal-currency rule is stated for entity level only).
 - The question is `netExposures(runId)`; the existing `exposures` (gross) stays as it is.

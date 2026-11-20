@@ -315,3 +315,18 @@ dbTest("a hedge whose trading entity is missing is excluded and recorded by trad
   assert.deepEqual([run.hedgeCounts!.used, run.hedgeCounts!.noEntity, run.hedgeCounts!.excluded.map((x) => x.tradeId)], [0, 1, ["m1"]]);
   assert.equal(run.waitReason, null);
 });
+
+dbTest("region by entity: the deal-currency rule applies too, and a program override for the pair replaces it; no default ranking (decision 0010)", async () => {
+  const trades = [hedge("US01", "BUY", "EUR", "100", "GBP", "87", "2027-01-15", "r1"), hedge("US01", "SELL", "GBP", "50", "EUR", "57", "2027-01-15", "r2")];
+  const a = setup({ balances: [bal("US01", "4000", "EUR", "1000")], trades }, "REGION_BY_ENTITY");
+  assert.equal(await ea.commands.onCycleInitiated(a.event()), "FINISHED");
+  const runA = (await ea.questions.currentRun(a.t, a.c))!;
+  const pairA = (await ea.questions.netExposures(a.t, runA.runId)).filter((n) => n.currencyPair.includes("GBP") && n.currencyPair.includes("EUR"));
+  assert.deepEqual(pairA.map((n) => n.exposureCurrency).sort(), ["EUR", "GBP"]);
+  const pair = pairA[0]!.currencyPair;
+  const b = setup({ balances: [bal("US01", "4000", "EUR", "1000")], trades }, "REGION_BY_ENTITY", [{ pair, exposureCurrency: "GBP" }]);
+  assert.equal(await ea.commands.onCycleInitiated(b.event()), "FINISHED");
+  const runB = (await ea.questions.currentRun(b.t, b.c))!;
+  const pairB = (await ea.questions.netExposures(b.t, runB.runId)).filter((n) => n.currencyPair === pair);
+  assert.deepEqual(pairB.map((n) => n.exposureCurrency), ["GBP"], "the override puts both trades in one row");
+});
