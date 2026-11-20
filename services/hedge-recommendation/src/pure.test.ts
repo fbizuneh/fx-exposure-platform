@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { D, addTenor, pairKey, recommend, roundDownToStep, valueDateFor, businessDaysBefore, calendarGaps, noCalendar, rollModifiedFollowing, toBusinessCalendar } from "./calc.ts";
+import { D, addTenor, pairKey, recommend, roundDownToStep, valueDateFor, businessDaysBefore, calendarGaps, noCalendar, rollModifiedFollowing, rollWithSpan, toBusinessCalendar } from "./calc.ts";
 import { policyProblems } from "./policy.ts";
 
 const base = { grossExposure: "1000000", hedgedAmount: "0", ratio: "1", rounding: "1000", minExposure: null, rateMissing: false } as const;
@@ -68,6 +68,22 @@ test("business days: a day must be open in every calendar of the pair; modified 
   const gulf = cal("SAR", [], { weekendDays: ["FRI", "SAT"] });
   assert.equal(rollModifiedFollowing("2026-11-13", [eur, gulf]), "2026-11-16");
   assert.equal(rollModifiedFollowing("2026-11-12", [eur, gulf]), "2026-11-12", "Thursday is open in both");
+});
+
+test("an expired calendar is not trusted for its weekend either: past its covered-through date only Saturdays and Sundays are closed, in the roll and in the fixing count", () => {
+  const eur = cal("EUR", []);
+  // A Friday/Saturday calendar known only to Thursday 10 December 2026.
+  const gulf = cal("SAR", [], { weekendDays: ["FRI", "SAT"], coveredThrough: "2026-12-10" });
+  assert.equal(rollModifiedFollowing("2026-12-11", [eur, gulf]), "2026-12-11", "Friday 11th is after the cover: Saturday/Sunday fallback, so it is open");
+  assert.equal(rollModifiedFollowing("2026-12-12", [eur, gulf]), "2026-12-14", "the weekend after the cover is Saturday and Sunday: Monday");
+  assert.equal(businessDaysBefore("2026-12-14", 2, [eur, gulf]), "2026-12-10", "Friday 11th counts as open, then Thursday the 10th (open: Thursday is not SAR's weekend)");
+  // Inside the cover the calendar is still obeyed: Friday 4th is closed in SAR, Saturday 5th in both, Sunday 6th in EUR; Monday 7th is open in both.
+  assert.equal(rollModifiedFollowing("2026-12-04", [eur, gulf]), "2026-12-07");
+  // A holiday cannot be listed after the cover, so none applies there; with no calendar at all it is Saturday and Sunday.
+  assert.equal(rollModifiedFollowing("2026-12-11", [eur, noCalendar("BRL")]), "2026-12-11");
+  // The span reports the latest day looked at, which is what the gap check needs.
+  assert.deepEqual(rollWithSpan("2026-10-31", [eur]), { date: "2026-10-30", through: "2026-11-02" }, "rolled back, but it looked at November 2nd first");
+  assert.deepEqual(rollWithSpan("2026-12-11", [eur, gulf]), { date: "2026-12-11", through: "2026-12-11" });
 });
 
 test("calendar gaps: none on record, or holidays known only to an earlier date", () => {

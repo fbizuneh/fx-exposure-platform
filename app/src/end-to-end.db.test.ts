@@ -934,4 +934,13 @@ e2e("value dates follow the pair's business-day calendars; a currency without a 
   ]));
   const shortRec = short.recs.find((r) => r.action === "HEDGE")!;
   assert.deepEqual([shortRec.valueDate, shortRec.calendarGaps], ["2026-12-11", [{ currency: "USD", reason: "CALENDAR_ENDED" }]]);
+
+  // An expired calendar with a Friday/Saturday weekend, known to Thursday 10 December: the 11th is after the cover, so it falls back to Saturday/Sunday and
+  // Friday the 11th stays a business day (trusting the expired weekend would roll it to Monday the 14th). The warning stays.
+  const gulf = await finishedCycle(undefined, "ENTITY", true, false, (t) => loadCalendars(t, [
+    { currencyCode: "USD", weekendDays: ["FRI", "SAT"] as never, coveredThrough: "2026-12-10", holidays: [] },
+    { currencyCode: "EUR", weekendDays: ["SAT", "SUN"], coveredThrough: "2026-12-31", holidays: [] },
+  ]));
+  const gulfRec = gulf.recs.find((r) => r.action === "HEDGE")!;
+  assert.deepEqual([gulfRec.valueDate, gulfRec.calendarGaps], ["2026-12-11", [{ currency: "USD", reason: "CALENDAR_ENDED" }]]);
 });

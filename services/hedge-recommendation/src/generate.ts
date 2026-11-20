@@ -1,7 +1,7 @@
 // Turn a finished run's net exposure into recommendations (decision 0011 items 2 to 8, 12, 17).
 import { randomUUID } from "node:crypto";
 import { asOfDate, type CycleId, type ProgramId, type TenantId } from "@shared/kernel";
-import { D, businessDaysBefore, calendarGaps, fmt, noCalendar, pairKey, recommend, toBusinessCalendar, valueDateFor, type BusinessCalendar } from "./calc.ts";
+import { D, addTenor, businessDaysBefore, calendarGaps, fmt, noCalendar, pairKey, recommend, rollWithSpan, toBusinessCalendar, type BusinessCalendar } from "./calc.ts";
 import { firstTime } from "./events.ts";
 import { q, type Db } from "./db.ts";
 import { announce } from "./outbox.ts";
@@ -70,7 +70,8 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
         const action = noEntity ? "NONE" : out.action;
         const instrument = action === "HEDGE" ? (ndf.has(g.exposureCurrency) ? "NDF" : "FORWARD") : null;
         const cals = [calendarOf(g.currency1), calendarOf(g.currency2)];
-        const valueDate = action === "HEDGE" ? valueDateFor(run!.asOf, policy.tenor, cals) : null;
+        const rolled = action === "HEDGE" ? rollWithSpan(addTenor(run!.asOf, policy.tenor), cals) : null;
+        const valueDate = rolled?.date ?? null;
         rows.push({
           tenant_id: tenant, recommendation_id: randomUUID(), program_id: event.programId, cycle_id: event.cycleId, run_id: event.runId, strategy: "hedge-ratio-adjustment",
           group_no: g.groupNo, netting_level: g.nettingLevel, region: g.region, entity_code: g.entityCode, currency_pair: g.currencyPair, exposure_currency: g.exposureCurrency, other_currency: other,
@@ -78,7 +79,7 @@ export function generateCommands(db: Db, c: Collaborators, clock: () => Date) {
           trading_entity_code: tradingEntity, action, reason: noEntity ? "NO_TRADING_ENTITY" : out.reason, direction: noEntity ? null : out.direction,
           amount: out.amount === null || noEntity ? null : fmt(out.amount), instrument,
           value_date: valueDate, fixing_date: instrument === "NDF" ? businessDaysBefore(valueDate!, 2, cals) : null,
-          calendar_gaps: JSON.stringify(valueDate === null ? [] : calendarGaps(cals, valueDate)),
+          calendar_gaps: JSON.stringify(rolled === null ? [] : calendarGaps(cals, rolled.through)),
           status: action === "HEDGE" ? "OPEN" : "NONE", created_at: clock(),
         });
       }

@@ -48,7 +48,7 @@ export function recommend(n: Needed): Outcome {
 
 const iso = (d: Date): string => d.toISOString().slice(0, 10);
 const utc = (s: string): Date => new Date(`${s}T00:00:00Z`);
-/** One currency's business days (decision 0014). `coveredThrough` is null when no calendar is on record: only Saturdays and Sundays are then non-business days. */
+/** One currency's business days (decision 0014). `coveredThrough` is null when no calendar is on record. Beyond it, only Saturdays and Sundays are non-business days. */
 export interface BusinessCalendar {
   readonly currency: string;
   /** Days of the week that are not business days, as `Date#getUTCDay` numbers (0 is Sunday). */
@@ -64,10 +64,21 @@ export const toBusinessCalendar = (c: { currency: string; weekendDays: readonly 
 
 const LIMIT = 400; // no real calendar goes this long without a business day; stops a bad calendar looping forever
 
+const DEFAULT_WEEKEND: ReadonlySet<number> = new Set([0, 6]);
+
+/**
+ * Is the currency open on the date? Only a day the calendar covers is judged by it. On a day after its covered-through date (or with no calendar at all)
+ * the calendar is not trusted, weekend days included: only Saturdays and Sundays are closed there (decision 0014).
+ */
+const openOn = (c: BusinessCalendar, date: string, day: number): boolean => {
+  if (c.coveredThrough === null || date > c.coveredThrough) return !DEFAULT_WEEKEND.has(day);
+  return !c.weekend.has(day) && !c.holidays.has(date);
+};
+
 /** A day on which every one of the calendars is open. */
 export const isBusinessDay = (date: string, cals: readonly BusinessCalendar[]): boolean => {
   const day = utc(date).getUTCDay();
-  return cals.every((c) => !c.weekend.has(day) && !c.holidays.has(date));
+  return cals.every((c) => openOn(c, date, day));
 };
 
 function step(date: string, by: 1 | -1, cals: readonly BusinessCalendar[]): string {
@@ -79,11 +90,15 @@ function step(date: string, by: 1 | -1, cals: readonly BusinessCalendar[]): stri
   throw new Error(`no business day within ${LIMIT} days of ${date} on the calendars of ${cals.map((c) => c.currency).join(", ")}`);
 }
 
-/** Modified following: the next business day on all the calendars, unless that is in another month, in which case the last one before. */
-export function rollModifiedFollowing(date: string, cals: readonly BusinessCalendar[]): string {
+/**
+ * Modified following: the next business day on all the calendars, unless that is in another month, in which case the last one before.
+ * `through` is the latest day looked at, which is what a calendar must cover for the answer to be fully trusted.
+ */
+export function rollWithSpan(date: string, cals: readonly BusinessCalendar[]): { date: string; through: string } {
   const forward = step(date, 1, cals);
-  return forward.slice(0, 7) === date.slice(0, 7) ? forward : step(date, -1, cals);
+  return forward.slice(0, 7) === date.slice(0, 7) ? { date: forward, through: forward } : { date: step(date, -1, cals), through: forward };
 }
+export const rollModifiedFollowing = (date: string, cals: readonly BusinessCalendar[]): string => rollWithSpan(date, cals).date;
 
 /** The business day `count` business days before the date, counting only days open on every calendar. */
 export function businessDaysBefore(date: string, count: number, cals: readonly BusinessCalendar[]): string {
@@ -97,7 +112,7 @@ export function businessDaysBefore(date: string, count: number, cals: readonly B
 }
 
 export type CalendarGapReason = "NO_CALENDAR" | "CALENDAR_ENDED";
-/** The calendars that could not be trusted for a date: none on record, or holidays known only up to an earlier date. */
+/** The calendars that could not be fully trusted for the days looked at, up to `through`: none on record, or covered only to an earlier date. */
 export function calendarGaps(cals: readonly BusinessCalendar[], through: string): { currency: string; reason: CalendarGapReason }[] {
   const out: { currency: string; reason: CalendarGapReason }[] = [];
   for (const c of cals) {
