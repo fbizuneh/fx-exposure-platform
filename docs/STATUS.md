@@ -15,7 +15,11 @@ Shared kernel, checks, Identity (done) -> Master Data (done) -> FX Rate (done) -
 `docs/uat/data-design.md` is the merged E1 design. Fikre confirmed two tenants, one balance sheet program each, loading the same generated files; unique tenant names; rate-derived simulated settlement amounts; and Close-out+New rolling for `BS-REG` (decision 0025). The 12 Release 1 scenarios are recorded, with 2026-10-27 designated as the late GL load. E2–E4 and E6 are merged; E5 is in review; E7 remains.
 
 ## Known gaps (recorded, not built)
-Control totals by currency; contract versioning; platform-level versus tenant-level NDF list; Audit retention and purge, trail export, Data Source and Exposure Analysis records (decision 0012); an operator screen for stuck events (decision 0019 gives the list and retry as functions only, with no permission model).
+Control totals by currency; contract versioning; platform-level versus tenant-level NDF list; Audit retention and purge, trail export; an operator screen for stuck events (decision 0019 gives the list and retry as functions only, with no permission model).
+
+## Release 1 stream J
+
+J2 audit records for Data Source and Exposure Analysis is proposed (decision 0032): Data Source records `batch.loaded`, `mapping-rule.added` and `mapping-rule.ended` for a person, same shape as Master Data and FX Rate; a connector feed and a duplicate record nothing. Exposure Analysis has no person-triggered command (every one of its commands is called only by the dispatcher, reacting to another service's event), so it records nothing — found and confirmed, not invented. Still not recorded (found, not fixed, per the J file): FX Rate's `setStaleAfter`/`setPreferredSource`/`setPivotCurrency`/`setOutlierShare` and Master Data's `setMaxEndShare` take no actor. J1 and J3 are separate PRs.
 
 ## Release 1 stream E prerequisite
 
