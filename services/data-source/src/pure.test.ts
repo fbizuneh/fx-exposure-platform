@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { Decimal } from "decimal.js";
+import { D, diffTotals, expectedTotalsProblems } from "./control-totals.ts";
 import { firstSharedDate, matchProgram, scopesMeet, type MatchFact } from "./match.ts";
 import { checkRow, normalizeAmount, recordKey } from "./validate.ts";
 import type { GlBalanceRow, MappingRule } from "./rows.ts";
@@ -76,6 +78,9 @@ test("amounts: signed balance as given, or debit minus credit; never both; at mo
   assert.equal(normalizeAmount(row({ balance: "abc" })).issues[0]?.ruleCode, "GL_AMOUNT_INVALID");
   assert.equal(normalizeAmount(row({ balance: null, debit: "-1" })).issues[0]?.ruleCode, "GL_AMOUNT_INVALID", "debit and credit are not negative");
   assert.equal(normalizeAmount(row({ balance: "1.2300" })).amount, "1.2300", "trailing zeros are fine");
+  // 20 integer digits + 4 decimals on each side: decimal.js's default 20-significant-digit precision would round
+  // this subtraction to ...890.0000, dropping the fractional difference entirely.
+  assert.equal(normalizeAmount(row({ balance: null, debit: "12345678901234567890.1234", credit: "0.0001" })).amount, "12345678901234567890.1233");
 });
 
 test("row checks name each problem", () => {
@@ -95,4 +100,42 @@ test("a balance is identified by entity, account, currency and dimensions, whate
   assert.notEqual(recordKey(row()), recordKey(row({ currency: "EUR" })));
   assert.notEqual(recordKey(row()), recordKey(row({ dimensions: { costCenter: "A" } })));
   assert.equal(recordKey(row()), "US1|1000|USD|");
+});
+
+test("control totals: matching totals have no differences", () => {
+  const received = new Map([["USD", { rows: 2, sum: "140.5000" }]]);
+  assert.deepEqual(diffTotals(received, [{ currency: "USD", rowCount: 2, sum: "140.50" }]), [], "the same amount, written with a different scale, still matches");
+});
+
+test("control totals: a different sum, a different row count, and a currency missing on either side each produce a difference", () => {
+  const received = new Map([["USD", { rows: 2, sum: "140.5000" }]]);
+  assert.equal(diffTotals(received, [{ currency: "USD", rowCount: 2, sum: "999.00" }]).length, 1, "sum differs");
+  assert.equal(diffTotals(received, [{ currency: "USD", rowCount: 5, sum: "140.50" }]).length, 1, "row count differs");
+  assert.match(diffTotals(received, [{ currency: "USD", rowCount: 2, sum: "140.50" }, { currency: "GBP", rowCount: 1, sum: "1.00" }])[0]!, /GBP: expected 1 rows.*not received/, "a currency expected but never received is a difference, not a silent zero");
+  assert.match(diffTotals(received, [])[0]!, /USD: received 2 rows.*not expected/, "received a currency that was not expected");
+  assert.match(diffTotals(new Map(), [{ currency: "", rowCount: 1, sum: "3.00" }])[0]!, /\(no currency\)/, "the no-currency bucket is named, not the empty string, in a message");
+});
+
+test("control totals: a currency never received is a difference even when the expected numbers are an explicit zero", () => {
+  const usdOnly = new Map([["USD", { rows: 2, sum: "140.5000" }]]);
+  const diffs = diffTotals(usdOnly, [{ currency: "USD", rowCount: 2, sum: "140.50" }, { currency: "EUR", rowCount: 0, sum: "0.00" }]);
+  assert.equal(diffs.length, 1, "EUR is not merely zero: it is a key the batch gives no evidence about either way");
+  assert.match(diffs[0]!, /EUR: expected 0 rows \/ 0\.00, not received/);
+});
+
+test("expectedTotals validation: a duplicate currency, a bad rowCount and a malformed sum are each refused", () => {
+  assert.deepEqual(expectedTotalsProblems([{ currency: "USD", rowCount: 1, sum: "1" }]), []);
+  assert.match(expectedTotalsProblems([{ currency: "USD", rowCount: 1, sum: "1" }, { currency: "USD", rowCount: 2, sum: "2" }])[0]!, /USD is listed more than once/);
+  assert.match(expectedTotalsProblems([{ currency: "USD", rowCount: -1, sum: "1" }])[0]!, /rowCount must be a whole number/);
+  assert.match(expectedTotalsProblems([{ currency: "USD", rowCount: 1.5, sum: "1" }])[0]!, /rowCount must be a whole number/);
+  assert.match(expectedTotalsProblems([{ currency: "USD", rowCount: 1, sum: "abc" }])[0]!, /sum must be a decimal amount/);
+  assert.match(expectedTotalsProblems([{ currency: "USD", rowCount: 1, sum: "" }])[0]!, /sum must be a decimal amount/);
+  assert.equal(expectedTotalsProblems([]).length, 0, "an empty list has no shape problems; diffTotals alone decides what it means against what was received");
+});
+
+test("control totals: D's precision does not round a sum near the 20-integer-digit limit, unlike decimal.js's default", () => {
+  const big = "12345678901234567890.1234"; // 20 integer digits + 4 decimal places: the largest a balance may carry
+  const small = "1.0001";
+  assert.equal(new Decimal(big).plus(new Decimal(small)).toFixed(4), "12345678901234567891.0000", "decimal.js's default 20-significant-digit precision rounds this away");
+  assert.equal(new D(big).plus(new D(small)).toFixed(4), "12345678901234567891.1235", "D (precision 40) keeps the exact sum");
 });

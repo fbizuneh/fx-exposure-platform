@@ -26,6 +26,7 @@ export type { Db };
 export { BatchRefused } from "./intake.ts";
 export { RuleInvalid } from "./rules.ts";
 export type { GlBatch, BatchResult } from "./intake.ts";
+export type { ExpectedTotal } from "./control-totals.ts";
 export type { GlBalanceRow, MappingRule, RuleKind, RuleTarget } from "./rows.ts";
 export type { NewRule } from "./rules.ts";
 export { parseGlFile } from "./file.ts";

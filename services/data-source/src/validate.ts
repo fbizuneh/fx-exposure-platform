@@ -2,6 +2,9 @@
 import { Decimal } from "decimal.js";
 import type { GlBalanceRow } from "./rows.ts";
 
+/** A balance fits NUMERIC(24,4): up to 24 significant digits, past decimal.js's default 20-significant-digit precision. Arithmetic on amounts (debit minus credit here; summing them in control-totals.ts) must go through this, not the bare import, or a result can be silently rounded. (toFixed alone is not affected: only ops like .plus()/.minus() round to the configured precision.) */
+export const D = Decimal.clone({ precision: 40, rounding: Decimal.ROUND_HALF_UP });
+
 export const MAX_ROWS = 20_000;
 /** Market codes outside ISO 4217 that a GL file may use on purpose (decision 0028). */
 export const NON_ISO_CURRENCIES = ["CNH"] as const;
@@ -44,13 +47,13 @@ export function normalizeAmount(row: Pick<GlBalanceRow, "balance" | "debit" | "c
     }
     return { amount: new Decimal(row.balance!).toFixed(4), issues };
   }
-  let debit = new Decimal(0);
-  let credit = new Decimal(0);
+  let debit = new D(0);
+  let credit = new D(0);
   for (const [label, v] of [["Debit", row.debit], ["Credit", row.credit]] as const) {
     if (blank(v)) continue;
     if (!UNSIGNED.test(v) || !fits(v)) bad(label);
-    else if (label === "Debit") debit = new Decimal(v);
-    else credit = new Decimal(v);
+    else if (label === "Debit") debit = new D(v);
+    else credit = new D(v);
   }
   return issues.length > 0 ? { amount: null, issues } : { amount: debit.minus(credit).toFixed(4), issues };
 }

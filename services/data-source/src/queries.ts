@@ -1,6 +1,8 @@
 // The questions Data Source answers.
+import { sql } from "kysely";
 import { accountId, entityId, lineageRef, programId, type AsOfDate } from "@shared/kernel";
-import type { DataSourceQuestions } from "../contract/index.ts";
+import type { CurrencyControlTotal, DataSourceQuestions } from "../contract/index.ts";
+import { D } from "./control-totals.ts";
 import { q, type Db } from "./db.ts";
 
 const asDims = (v: unknown): Record<string, string> => (typeof v === "string" ? JSON.parse(v) : (v as Record<string, string>)) ?? {};
@@ -61,6 +63,45 @@ export function dataSourceQuestions(db: Db): DataSourceQuestions {
         issueId: r.issue_id, batchId: r.batch_id, lineage: r.record_key === null ? null : lineageRef(r.source_system, r.batch_id, r.record_key),
         ruleCode: r.rule_code, severity: r.severity, description: r.description, status: r.status, raisedAt: r.raised_at.toISOString(),
       }));
+    },
+
+    async controlTotals(tenant, batchId) {
+      const owns = await q(db).selectFrom("batches").select("batch_id").where("tenant_id", "=", tenant).where("batch_id", "=", batchId).executeTakeFirst();
+      if (!owns) throw new Error("no such batch");
+      const rows = await q(db)
+        .selectFrom("balances")
+        .select(["currency", "outcome", sql<string>`count(*)`.as("row_count"), sql<string>`coalesce(sum(amount), 0)`.as("sum")])
+        .where("tenant_id", "=", tenant).where("batch_id", "=", batchId)
+        .groupBy(["currency", "outcome"])
+        .execute();
+
+      type Bucket = { rows: number; sum: InstanceType<typeof D> };
+      const zero = (): Bucket => ({ rows: 0, sum: new D(0) });
+      const byCurrency = new Map<string, { included: Bucket; excluded: Bucket; blocked: Bucket }>();
+      for (const r of rows) {
+        const currency = r.currency ?? "";
+        const entry = byCurrency.get(currency) ?? { included: zero(), excluded: zero(), blocked: zero() };
+        const bucket: Bucket = { rows: Number(r.row_count), sum: new D(r.sum) };
+        if (r.outcome === "INCLUDED") entry.included = bucket;
+        else if (r.outcome === "EXCLUDED") entry.excluded = bucket;
+        else entry.blocked = bucket;
+        byCurrency.set(currency, entry);
+      }
+
+      const totals: CurrencyControlTotal[] = [...byCurrency.entries()]
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([currency, g]) => ({
+          currency,
+          receivedRows: g.included.rows + g.excluded.rows + g.blocked.rows,
+          receivedSum: g.included.sum.plus(g.excluded.sum).plus(g.blocked.sum).toFixed(4),
+          includedRows: g.included.rows,
+          includedSum: g.included.sum.toFixed(4),
+          excludedRows: g.excluded.rows,
+          excludedSum: g.excluded.sum.toFixed(4),
+          blockedRows: g.blocked.rows,
+          blockedSum: g.blocked.sum.toFixed(4),
+        }));
+      return totals;
     },
   };
 }

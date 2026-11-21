@@ -1,5 +1,6 @@
 // Published questions and events of Data Source. Other services import this file, never src/.
 import type { AccountId, AsOfDate, EntityId, LineageRef, ProgramId, TenantId } from "@shared/kernel";
+import type { ChangeRecordFields } from "@services/audit/contract";
 
 /** One included balance, stamped with its program. Amounts are signed decimal strings, kept as the source sent them; the sign says nothing about asset or liability. */
 export interface IncludedBalance {
@@ -55,6 +56,24 @@ export interface DataQualityIssue {
   readonly raisedAt: string;
 }
 
+/**
+ * How a batch's rows add up in one currency: how many rows and their signed amounts, received and then split by outcome.
+ * `receivedRows`/`receivedSum` always equal the included, excluded and blocked numbers added together. A row with no
+ * currency, or an amount intake could not parse, is grouped under `currency: ""` and contributes 0 to that bucket's sum.
+ * Sums are `decimal.js` strings, fixed to 4 places.
+ */
+export interface CurrencyControlTotal {
+  readonly currency: string;
+  readonly receivedRows: number;
+  readonly receivedSum: string;
+  readonly includedRows: number;
+  readonly includedSum: string;
+  readonly excludedRows: number;
+  readonly excludedSum: string;
+  readonly blockedRows: number;
+  readonly blockedSum: string;
+}
+
 export interface DataSourceQuestions {
   /** The balances stamped with a program that are in scope, from the current batches. */
   includedBalances(query: IncludedBalancesQuery): Promise<readonly IncludedBalance[]>;
@@ -63,6 +82,8 @@ export interface DataSourceQuestions {
     tenantId: TenantId,
     filter?: { readonly batchId?: string; readonly asOf?: AsOfDate; readonly status?: "OPEN" | "RESOLVED"; readonly limit?: number },
   ): Promise<readonly DataQualityIssue[]>;
+  /** How the batch's rows add up by currency (decision 0006/#J1). A batch that does not exist, or belongs to another tenant, is an error naming neither. */
+  controlTotals(tenantId: TenantId, batchId: string): Promise<readonly CurrencyControlTotal[]>;
 }
 
 /** A batch was stamped. It carries identifiers only; receivers ask Data Source for detail. */
@@ -84,4 +105,11 @@ export interface IssuesRaised {
   readonly occurredAt: string;
   readonly batchId: string;
 }
-export type DataSourceEvents = DataStamped | IssuesRaised;
+
+/** A change record for Audit (decision 0012): who did what to which record. Identifiers and field names only. */
+export interface DataSourceChangeRecorded extends ChangeRecordFields {
+  readonly type: "data-source.change-recorded";
+  readonly eventId: string;
+  readonly occurredAt: string;
+}
+export type DataSourceEvents = DataStamped | IssuesRaised | DataSourceChangeRecorded;

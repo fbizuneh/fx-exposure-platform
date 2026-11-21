@@ -701,6 +701,40 @@ e2e("every governed change reaches the audit trail with who did it, in order; pe
   assert.equal((await trailOf(t)).length, before);
 });
 
+e2e("Data Source: a person's batch load and mapping rule changes reach the audit trail with the right program; a feed's load does not (J2)", async () => {
+  const t = await tenantWithProgram();
+  const admin = admins.get(t)!;
+  const personLabel = (await trailOf(t)).find((r) => r.action === "program.defined")!.actor;
+  assert.ok(personLabel.startsWith("user:"));
+
+  const ruleId = await app.dataSource.commands.addMappingRule({ tenantId: t, programId: "BS", kind: "INCLUDE", target: { type: "ACCOUNT", chartCode: "C", accountNumber: "4000" }, validFrom: "2026-02-01", validTo: null, by: personLabel });
+  await app.dataSource.commands.endMappingRule(t, ruleId, "2026-06-01", personLabel);
+  const personBatch = await app.dataSource.commands.submitGlBatch({ tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: asOfDate("2026-02-01"), rows: [row("US01", "EUR", "10")], by: personLabel });
+  await app.dataSource.commands.submitGlBatch({ tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: asOfDate("2026-02-02"), rows: [row("US01", "EUR", "20")], by: "test" }); // a routine feed, not a person
+  await drain(app);
+
+  assert.deepEqual((await trailOf(t, { targetType: "batch" })).map((r) => [r.action, r.actor, r.targetId, r.programId, r.fields]), [["batch.loaded", personLabel, personBatch.batchId, null, []]], "the feed's load is not in the trail");
+  assert.deepEqual((await trailOf(t, { targetType: "mapping-rule" })).map((r) => [r.action, r.actor, r.targetId, r.programId, r.fields]), [
+    ["mapping-rule.added", personLabel, ruleId, "BS", []],
+    ["mapping-rule.ended", personLabel, ruleId, "BS", ["validTo"]],
+  ]);
+  const whole = await trailOf(t);
+  assert.deepEqual(await app.audit.questions.verify(t, admin), { ok: true, checked: whole.length, brokenAtSeq: null });
+
+  // A duplicate batch records nothing more, and delivering the same announcement twice records it once.
+  const before = whole.length;
+  const dup = await app.dataSource.commands.submitGlBatch({ tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: asOfDate("2026-02-01"), rows: [row("US01", "EUR", "10")], by: personLabel });
+  assert.equal(dup.status, "DUPLICATE");
+  await drain(app);
+  assert.equal((await trailOf(t)).length, before);
+  const loaded = (await trailOf(t, { targetType: "batch" }))[0]!;
+  assert.equal(
+    await app.audit.commands.record({ type: "data-source.change-recorded", eventId: loaded.recordId, occurredAt: loaded.occurredAt, tenantId: t, programId: loaded.programId, actor: loaded.actor, action: loaded.action, targetType: loaded.targetType, targetId: loaded.targetId, fields: loaded.fields }),
+    "DUPLICATE",
+  );
+  assert.equal((await trailOf(t)).length, before);
+});
+
 e2e("a decision that loses a race, or a retry of the one that won, leaves exactly one record; refused commands leave none", async () => {
   const { t, admin, cycle, recs } = await finishedCycle(defaults);
   const rec = recs.find((r) => r.action === "HEDGE")!;
