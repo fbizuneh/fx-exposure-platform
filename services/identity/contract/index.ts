@@ -2,6 +2,14 @@
 import type { ChangeRecordFields } from "@services/audit/contract";
 import type { ProgramId, TenantId } from "@shared/kernel";
 
+/** A tenant name is already reserved, including by a disabled tenant. */
+export class TenantNameTaken extends Error {
+  constructor(name: string) {
+    super(`tenant name ${name} already exists`);
+    this.name = "TenantNameTaken";
+  }
+}
+
 declare const brand: unique symbol;
 /** A user of one tenant. Defined here, not in the shared kernel. */
 export type UserId = string & { readonly [brand]: "UserId" };
@@ -92,6 +100,8 @@ export interface ProgramScope {
 
 /** The questions Identity answers. Inside the deployable this is a direct call. */
 export interface IdentityQuestions {
+  /** Exact-name lookup, including disabled tenants. A name is reserved for one tenant. */
+  tenantByName(name: string): Promise<TenantId | null>;
   checkAccess(query: AccessQuery): Promise<AccessDecision>;
   enabledPrograms(tenantId: TenantId): Promise<readonly ProgramId[]>;
   /** The program scope of an actor in a tenant, for services that list records across programs (decision 0001). */
