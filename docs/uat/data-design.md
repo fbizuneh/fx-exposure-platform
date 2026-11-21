@@ -17,21 +17,21 @@ This is the proposed design for Fikre's review. The data is entirely fictional. 
 
 ## Programs and people
 
-Two tenants load the same generated master data, rates and GL files, one program per tenant. Each tenant has 50 entity records, 40 currencies and a 20,000-row daily GL batch. `BS-ENT` runs daily at ENTITY netting. Its hedge-ratio-adjustment policy has a 0.75 default ratio, a 0.90 override for one pair, and Adjust + Swap rolling. `BS-REG` runs weekly at REGION netting. Its amount-threshold policy has one USD threshold and no threshold override or roll. Each tenant has its own mapping rules, hedge policy and five tenant users (admin, analyst, reviewer, approver, viewer); a platform user is outside both tenants. Both policies have a minimum amount, currency rounding, 3M tenor, a trading entity and a maximum amount. Every policy must pass `policyProblems` before it is saved. Segregation of duties remains on, with different people for the two approval gates.
+Two tenants load the same generated master data, rates and GL files, one program per tenant. Each tenant has 50 entity records, 40 currencies and a 20,000-row daily GL batch. `BS-ENT` runs daily at ENTITY netting. Its hedge-ratio-adjustment policy has a 0.75 default ratio, a 0.90 override for one pair, and Adjust + Swap rolling. `BS-REG` runs weekly at REGION netting. Its amount-threshold policy has one USD threshold, no threshold override, and Close-out+New rolling. Fikre chose this pairing to cover all four strategies in scenario 5. Each tenant has its own mapping rules, hedge policy and five tenant users (admin, analyst, reviewer, approver, viewer); a platform user is outside both tenants. Both policies have a minimum amount, currency rounding, 3M tenor, a trading entity and a maximum amount. Every policy must pass `policyProblems` before it is saved. Segregation of duties remains on, with different people for the two approval gates.
 
 ## Controlled failures
 
 | Fixture | Stage | Expected behavior |
 | --- | --- | --- |
 | `gl-malformed.csv`, 20,000 rows | D's GL parser | Exactly 40 planted file-shape problems, each named by row and column; `INVALID_FILE`, CLI exit 1, zero rows stored. Problems cover conflicting balance/debit/credit, no amount, invalid date, invalid currency code, nonnumeric amount and missing required cell. |
-| `gl-dirty.csv`, 20,000 rows | Data Source and Exposure Analysis | Parser accepts every row; the batch is `APPLIED`. Unknown entity, unknown account and excluded account counts come from the services' batch result and issue questions. Exact counts will be fixed against those contracts, then written to `packs/uat/expected/`. |
+| `gl-dirty.csv`, 20,000 rows | Data Source and Exposure Analysis | Parser accepts every row; the batch is `APPLIED`. Compare J1's batch control totals by currency with independently calculated totals, and independently calculate unknown-entity, unknown-account and excluded-account rows and their amounts without platform code. Data Source's total included/excluded/blocked counts and blocked issue codes are checked against that calculation; it does not report exclusion reasons. Exact expected values live in `packs/uat/expected/`. |
 | Missing rate on one day/pair | Rates or exposure stage | The missing-rate condition is checked where rates are consumed; it is absent from both GL failure fixtures. |
 
-Other planted cases are a stale rate, an outlier rate, a holiday on a value date, the long-to-short reversal and the fully excluded entity. The data guide will name their exact dates and expected results after the generated files and loader are available.
+Other planted cases are a stale rate, an outlier rate, a holiday on a value date, the long-to-short reversal and the fully excluded entity. The generated 2026-10-27 GL file is the late-file case: the load sequence withholds it in both tenants until after the cycle starts, then loads it and reruns. The data guide names the dates and expected results.
 
 ## Handoffs and decisions
 
-E3 starts after D1's `docs/file-layouts.md` is merged and agreed. E7 needs D's loaders and J's backend work. The UAT scenario table needs the Release 1 outline's scenarios from Fikre's Claude Docs. The design is ready for review; E1 is done only when Fikre agrees and it is merged.
+D1's `docs/file-layouts.md` has merged, so E3 is underway. E7 needs D's loaders and J's backend work. Fikre supplied the Release 1 scenarios below. E1 is done when this design is reviewed and merged.
 
 **Decided — simulated settlement amounts.** Fikre chose to derive the executed settlement amount from generated rates. The simulator therefore needs the generated rates for its trade date and value date; a missing rate must refuse simulation rather than invent an amount.
 
