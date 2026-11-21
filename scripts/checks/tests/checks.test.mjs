@@ -115,6 +115,53 @@ test("tenant-program: tables need tenant_id unless exempt; program-scoped tables
   assert.match(run("tenant-program", mig(`-- tenant-exempt:\nCREATE TABLE alpha.t (id uuid);\n`))[0], /no tenant_id/);
 });
 
+test("csv-copies: the four readers must match; a drifted copy fails", () => {
+  const reader =
+    `// One of four identical CSV readers (master-data, data-source, fx-rate, fx-trade); change all four together.\n\n` +
+    `/** Comma-separated text with quotes. A blank line is skipped. */\n` +
+    `export function splitCsv(text: string): string[][] {\n  return [];\n}\n`;
+  const body = `/** Comma-separated text with quotes. A blank line is skipped. */\nexport function splitCsv(text: string): string[][] {\n  return [];\n}\n\n`;
+  const fileTs = `// preamble\n${body}/** Header names are matched ignoring case and spaces; columns we do not know become custom fields. */\nexport function parseExecutedFile() { return []; }\n`;
+  const copies = {
+    "services/master-data/README.md": readme("Master Data", "master_data", "supporting"),
+    "services/master-data/contract/index.ts": "export {};\n",
+    "services/master-data/src/csv.ts": reader,
+    "services/master-data/migrations/.gitkeep": "",
+    "services/data-source/README.md": readme("Data Source", "data_source"),
+    "services/data-source/contract/index.ts": "export {};\n",
+    "services/data-source/src/csv.ts": reader,
+    "services/data-source/migrations/.gitkeep": "",
+    "services/fx-rate/README.md": readme("FX Rate", "fx_rate", "supporting"),
+    "services/fx-rate/contract/index.ts": "export {};\n",
+    "services/fx-rate/src/csv.ts": reader,
+    "services/fx-rate/migrations/.gitkeep": "",
+    "services/fx-trade/README.md": readme("FX Trade", "fx_trade"),
+    "services/fx-trade/contract/index.ts": "export {};\n",
+    "services/fx-trade/src/file.ts": fileTs,
+    "services/fx-trade/migrations/.gitkeep": "",
+  };
+  // Drop the default alpha/beta fixtures' conflict by using only these four via a custom root.
+  const root = repo({
+    "services/alpha/README.md": null,
+    "services/alpha/contract/index.ts": null,
+    "services/alpha/src/.gitkeep": null,
+    "services/alpha/migrations/.gitkeep": null,
+    "services/beta-two/README.md": null,
+    "services/beta-two/contract/index.ts": null,
+    "services/beta-two/src/.gitkeep": null,
+    "services/beta-two/migrations/.gitkeep": null,
+    ...copies,
+  });
+  // Remove emptied alpha/beta dirs so listServices only sees the four.
+  for (const s of ["alpha", "beta-two"]) {
+    fs.rmSync(path.join(root, "services", s), { recursive: true, force: true });
+  }
+  assert.deepEqual(run("csv-copies", root), []);
+
+  fs.writeFileSync(path.join(root, "services/data-source/src/csv.ts"), reader.replace("return [];", "return [[\"x\"]];"));
+  assert.match(run("csv-copies", root)[0], /differs from/);
+});
+
 test("tenant-program: a foreign key between two program-scoped tables must include program_id (decision 0018)", () => {
   const parent = `-- program-scoped\nCREATE TABLE alpha.runs (\n  tenant_id uuid NOT NULL,\n  run_id uuid NOT NULL,\n  program_id text NOT NULL,\n  PRIMARY KEY (tenant_id, run_id),\n  UNIQUE (tenant_id, run_id, program_id)\n);\n`;
   const child = (fk) => `-- program-scoped\nCREATE TABLE alpha.rows (\n  tenant_id uuid NOT NULL,\n  run_id uuid NOT NULL,\n  program_id text NOT NULL,\n  ${fk}\n);\n`;
