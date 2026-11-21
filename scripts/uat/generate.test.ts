@@ -31,6 +31,7 @@ test("one seed produces identical complete UAT files and a manifest that covers 
     assert.equal(manifest.files.filter((f) => f.file.startsWith("rates/rates-")).length, 262);
     assert.equal(manifest.malformedProblems.length, 40);
     assert.equal(new Set(manifest.malformedProblems.map((p) => p.row)).size, 40);
+    assert.deepEqual(manifest.malformedProblems.map((p) => p.row), Array.from({ length: 40 }, (_, i) => i + 1));
     for (const entry of manifest.files) {
       const bytes = await readFile(join(first, entry.file));
       assert.equal(bytes.toString("utf8").trimEnd().split("\n").length - 1, entry.rows, entry.file);
