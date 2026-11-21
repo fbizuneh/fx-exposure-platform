@@ -102,10 +102,13 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
       receivedTotals.set(currencyKey, { rows: prior.rows + 1, sum: amount === null ? prior.sum : prior.sum.plus(amount) });
     });
     const receivedForCompare = new Map([...receivedTotals].map(([currency, t]) => [currency, { rows: t.rows, sum: t.sum.toFixed(4) }]));
-    const totalsDiff = batch.expectedTotals ? diffTotals(receivedForCompare, batch.expectedTotals) : null;
 
     const result = await db.transaction().execute(async (tx) => {
       await sql`SELECT pg_advisory_xact_lock(hashtext(${`${tenant}:${batch.sourceSystem}:${batch.asOf}`}))`.execute(tx);
+
+      // The comparison itself runs inside the transaction (decision 0031/J1), evaluated once and used on both the
+      // duplicate and normal paths below; only the pure preparation above needs no transaction.
+      const totalsDiff = batch.expectedTotals ? diffTotals(receivedForCompare, batch.expectedTotals) : null;
 
       const dup = await q(tx).selectFrom("batches").select(["batch_id", "status", "received_count", "included_count", "excluded_count", "blocked_count"])
         .where("tenant_id", "=", tenant).where("source_system", "=", batch.sourceSystem).where("as_of", "=", batch.asOf)

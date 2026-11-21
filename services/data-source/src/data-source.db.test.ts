@@ -440,6 +440,20 @@ dbTest("control totals reconcile to 4 decimals across many rows of large signed 
   assert.equal(usd!.receivedSum, usd!.includedSum, "all four rows included; the group sums still reconcile exactly");
 });
 
+dbTest("debit minus credit keeps full precision too, not only the balance-column sum path", async () => {
+  const t = newTenant();
+  await setup(t);
+  const rows = [bal("1000", null as never, { balance: null, debit: "12345678901234567890.1234", credit: "0.0001" })];
+  const r = await ds.commands.submitGlBatch({
+    tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows, by: "test",
+    expectedTotals: [{ currency: "USD", rowCount: 1, sum: "12345678901234567890.1233" }],
+  });
+  assert.equal(r.status, "APPLIED", "the exact expected total, computed the same way, is accepted");
+  const [usd] = await ds.questions.controlTotals(t, r.batchId);
+  assert.equal(usd!.receivedSum, "12345678901234567890.1233", "the reported total is exact, not rounded at normalization");
+  assert.equal((await included(t))[0]?.amount, "12345678901234567890.1233");
+});
+
 dbTest("control totals answer well within budget at UAT size (20,000 rows, 40 currencies)", async () => {
   const t = newTenant();
   await setup(t);

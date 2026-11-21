@@ -78,6 +78,9 @@ test("amounts: signed balance as given, or debit minus credit; never both; at mo
   assert.equal(normalizeAmount(row({ balance: "abc" })).issues[0]?.ruleCode, "GL_AMOUNT_INVALID");
   assert.equal(normalizeAmount(row({ balance: null, debit: "-1" })).issues[0]?.ruleCode, "GL_AMOUNT_INVALID", "debit and credit are not negative");
   assert.equal(normalizeAmount(row({ balance: "1.2300" })).amount, "1.2300", "trailing zeros are fine");
+  // 20 integer digits + 4 decimals on each side: decimal.js's default 20-significant-digit precision would round
+  // this subtraction to ...890.0000, dropping the fractional difference entirely.
+  assert.equal(normalizeAmount(row({ balance: null, debit: "12345678901234567890.1234", credit: "0.0001" })).amount, "12345678901234567890.1233");
 });
 
 test("row checks name each problem", () => {

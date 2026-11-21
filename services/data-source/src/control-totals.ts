@@ -1,9 +1,8 @@
 // Compares what a batch's rows add up to, per currency, against what the sender expected (decision #J1/0031).
 // A row with no currency is grouped under "" everywhere this file and its callers use a currency key.
-import { Decimal } from "decimal.js";
+import { D } from "./validate.ts";
 
-/** 20,000 rows of up to 20 integer digits each could sum past decimal.js's default 20-significant-digit precision; the other services' calc.ts files hit the same ceiling and clone for the same reason. */
-export const D = Decimal.clone({ precision: 40, rounding: Decimal.ROUND_HALF_UP });
+export { D };
 
 export interface ExpectedTotal {
   readonly currency: string;
