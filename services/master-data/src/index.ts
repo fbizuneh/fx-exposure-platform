@@ -23,3 +23,12 @@ export type { Db };
 export { ChangeSetRefused } from "./apply.ts";
 export { ChangeSetInvalid } from "./validate.ts";
 export type { AccountRow, CalendarRow, CurrencyRow, EntityRow, HierarchyNodeRow, PairExposureCurrencyRow } from "./rows.ts";
+export {
+  parseAccountsFile,
+  parseCalendarsFile,
+  parseCurrenciesFile,
+  parseEntitiesFile,
+  parseExposureCurrenciesFile,
+  parseHierarchyFile,
+} from "./files.ts";
+export type { FileProblem, ParseResult } from "./files.ts";
