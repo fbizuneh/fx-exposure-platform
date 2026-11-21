@@ -16,17 +16,20 @@ export function uatDatabaseName(connectionString: string): string {
   return name;
 }
 
-export async function reset(connectionString: string): Promise<void> {
-  uatDatabaseName(connectionString);
-  const client = new pg.Client({ connectionString });
+export async function reset(connectionString: string, client: Pick<pg.Client, "connect" | "query" | "end"> = new pg.Client({ connectionString })): Promise<void> {
+  const intended = uatDatabaseName(connectionString);
   await client.connect();
   try {
+    const actual = (await client.query<{ name: string }>("SELECT current_database() AS name")).rows[0]?.name;
+    if (actual !== intended || !/^[A-Za-z0-9_]+_(?:uat|test)$/.test(actual)) throw new Error(`uat:reset connected database ${actual ?? "(unknown)"} does not match disposable URL database ${intended}`);
     await client.query("BEGIN");
-    for (const schema of SCHEMAS) await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
+    try {
+      for (const schema of SCHEMAS) await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    }
   } finally { await client.end(); }
 }
 
