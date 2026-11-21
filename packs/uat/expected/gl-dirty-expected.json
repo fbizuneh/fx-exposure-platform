@@ -1,0 +1,1720 @@
+{
+  "loadStatus": "APPLIED",
+  "storedRows": 20000,
+  "batchControlTotals": {
+    "AED": {
+      "rows": 444,
+      "balance": "30202440.60"
+    },
+    "AUD": {
+      "rows": 682,
+      "balance": "25669461.70"
+    },
+    "BRL": {
+      "rows": 445,
+      "balance": "22965452.93"
+    },
+    "CAD": {
+      "rows": 700,
+      "balance": "42197488.96"
+    },
+    "CHF": {
+      "rows": 705,
+      "balance": "31253393.03"
+    },
+    "CLP": {
+      "rows": 444,
+      "balance": "27971078.82"
+    },
+    "CNH": {
+      "rows": 553,
+      "balance": "13698602.97"
+    },
+    "CNY": {
+      "rows": 589,
+      "balance": "23626459.35"
+    },
+    "COP": {
+      "rows": 444,
+      "balance": "18061972.71"
+    },
+    "CZK": {
+      "rows": 445,
+      "balance": "29018986.01"
+    },
+    "DKK": {
+      "rows": 445,
+      "balance": "19590043.40"
+    },
+    "EGP": {
+      "rows": 444,
+      "balance": "20962692.71"
+    },
+    "EUR": {
+      "rows": 543,
+      "balance": "-245336118.40"
+    },
+    "GBP": {
+      "rows": 597,
+      "balance": "25358860.15"
+    },
+    "HKD": {
+      "rows": 628,
+      "balance": "31487800.57"
+    },
+    "HUF": {
+      "rows": 445,
+      "balance": "20371773.53"
+    },
+    "IDR": {
+      "rows": 444,
+      "balance": "15509360.45"
+    },
+    "ILS": {
+      "rows": 444,
+      "balance": "17215800.48"
+    },
+    "INR": {
+      "rows": 445,
+      "balance": "14319977.84"
+    },
+    "JPY": {
+      "rows": 651,
+      "balance": "24782904.00"
+    },
+    "KES": {
+      "rows": 444,
+      "balance": "23819262.56"
+    },
+    "KRW": {
+      "rows": 445,
+      "balance": "28265157.00"
+    },
+    "MXN": {
+      "rows": 445,
+      "balance": "22428429.10"
+    },
+    "MYR": {
+      "rows": 444,
+      "balance": "18885596.69"
+    },
+    "NGN": {
+      "rows": 444,
+      "balance": "23374830.25"
+    },
+    "NOK": {
+      "rows": 481,
+      "balance": "12501677.10"
+    },
+    "NZD": {
+      "rows": 664,
+      "balance": "37142786.78"
+    },
+    "PEN": {
+      "rows": 444,
+      "balance": "11800102.72"
+    },
+    "PHP": {
+      "rows": 444,
+      "balance": "21458456.45"
+    },
+    "PLN": {
+      "rows": 445,
+      "balance": "20360099.63"
+    },
+    "RON": {
+      "rows": 445,
+      "balance": "21780668.45"
+    },
+    "SAR": {
+      "rows": 444,
+      "balance": "29567686.63"
+    },
+    "SEK": {
+      "rows": 517,
+      "balance": "20306642.56"
+    },
+    "SGD": {
+      "rows": 646,
+      "balance": "27404740.04"
+    },
+    "THB": {
+      "rows": 444,
+      "balance": "18372268.17"
+    },
+    "TRY": {
+      "rows": 445,
+      "balance": "31960041.56"
+    },
+    "TWD": {
+      "rows": 444,
+      "balance": "24168492.05"
+    },
+    "USD": {
+      "rows": 489,
+      "balance": "18302198.97"
+    },
+    "VND": {
+      "rows": 444,
+      "balance": "21396024.76"
+    },
+    "ZAR": {
+      "rows": 445,
+      "balance": "25822967.80"
+    }
+  },
+  "byProgram": {
+    "BS-ENT": {
+      "included": {
+        "AED": {
+          "rows": 422,
+          "balance": "20194038.02"
+        },
+        "AUD": {
+          "rows": 609,
+          "balance": "7144637.86"
+        },
+        "BRL": {
+          "rows": 422,
+          "balance": "13408748.21"
+        },
+        "CAD": {
+          "rows": 612,
+          "balance": "22971321.86"
+        },
+        "CHF": {
+          "rows": 619,
+          "balance": "13942639.44"
+        },
+        "CLP": {
+          "rows": 421,
+          "balance": "15067814.92"
+        },
+        "CNH": {
+          "rows": 524,
+          "balance": "2284431.13"
+        },
+        "CNY": {
+          "rows": 524,
+          "balance": "8038806.66"
+        },
+        "COP": {
+          "rows": 421,
+          "balance": "6141519.78"
+        },
+        "CZK": {
+          "rows": 422,
+          "balance": "16549629.18"
+        },
+        "DKK": {
+          "rows": 422,
+          "balance": "9067205.08"
+        },
+        "EGP": {
+          "rows": 422,
+          "balance": "12162010.59"
+        },
+        "EUR": {
+          "rows": 472,
+          "balance": "-215804421.53"
+        },
+        "GBP": {
+          "rows": 517,
+          "balance": "8555831.93"
+        },
+        "HKD": {
+          "rows": 561,
+          "balance": "17191185.50"
+        },
+        "HUF": {
+          "rows": 422,
+          "balance": "11347202.40"
+        },
+        "IDR": {
+          "rows": 421,
+          "balance": "3252898.79"
+        },
+        "ILS": {
+          "rows": 422,
+          "balance": "10121355.85"
+        },
+        "INR": {
+          "rows": 422,
+          "balance": "3816376.42"
+        },
+        "JPY": {
+          "rows": 568,
+          "balance": "14986693.00"
+        },
+        "KES": {
+          "rows": 422,
+          "balance": "13545298.96"
+        },
+        "KRW": {
+          "rows": 422,
+          "balance": "18956088.00"
+        },
+        "MXN": {
+          "rows": 422,
+          "balance": "11722231.50"
+        },
+        "MYR": {
+          "rows": 422,
+          "balance": "10502616.70"
+        },
+        "NGN": {
+          "rows": 422,
+          "balance": "12527243.14"
+        },
+        "NOK": {
+          "rows": 456,
+          "balance": "687012.38"
+        },
+        "NZD": {
+          "rows": 595,
+          "balance": "17098940.05"
+        },
+        "PEN": {
+          "rows": 422,
+          "balance": "834831.68"
+        },
+        "PHP": {
+          "rows": 421,
+          "balance": "10958598.33"
+        },
+        "PLN": {
+          "rows": 422,
+          "balance": "10219155.34"
+        },
+        "RON": {
+          "rows": 422,
+          "balance": "11512218.80"
+        },
+        "SAR": {
+          "rows": 422,
+          "balance": "18328096.98"
+        },
+        "SEK": {
+          "rows": 490,
+          "balance": "7291864.61"
+        },
+        "SGD": {
+          "rows": 578,
+          "balance": "12813759.04"
+        },
+        "THB": {
+          "rows": 422,
+          "balance": "7165797.71"
+        },
+        "TRY": {
+          "rows": 422,
+          "balance": "21287978.48"
+        },
+        "TWD": {
+          "rows": 421,
+          "balance": "14787579.72"
+        },
+        "USD": {
+          "rows": 466,
+          "balance": "8008482.69"
+        },
+        "VND": {
+          "rows": 422,
+          "balance": "11646048.08"
+        },
+        "ZAR": {
+          "rows": 422,
+          "balance": "15109978.29"
+        }
+      },
+      "excluded": {
+        "AED": {
+          "rows": 22,
+          "balance": "10008402.58"
+        },
+        "AUD": {
+          "rows": 72,
+          "balance": "18185768.84"
+        },
+        "BRL": {
+          "rows": 23,
+          "balance": "9556704.72"
+        },
+        "CAD": {
+          "rows": 87,
+          "balance": "18933091.60"
+        },
+        "CHF": {
+          "rows": 85,
+          "balance": "16989454.14"
+        },
+        "CLP": {
+          "rows": 23,
+          "balance": "12903263.90"
+        },
+        "CNH": {
+          "rows": 28,
+          "balance": "10967673.57"
+        },
+        "CNY": {
+          "rows": 64,
+          "balance": "15038690.44"
+        },
+        "COP": {
+          "rows": 23,
+          "balance": "11920452.93"
+        },
+        "CZK": {
+          "rows": 22,
+          "balance": "12162039.52"
+        },
+        "DKK": {
+          "rows": 22,
+          "balance": "10297285.18"
+        },
+        "EGP": {
+          "rows": 22,
+          "balance": "8800682.12"
+        },
+        "EUR": {
+          "rows": 70,
+          "balance": "-29088011.23"
+        },
+        "GBP": {
+          "rows": 79,
+          "balance": "16711312.51"
+        },
+        "HKD": {
+          "rows": 66,
+          "balance": "13813937.60"
+        },
+        "HUF": {
+          "rows": 22,
+          "balance": "8790709.51"
+        },
+        "IDR": {
+          "rows": 23,
+          "balance": "12256461.66"
+        },
+        "ILS": {
+          "rows": 22,
+          "balance": "7094444.63"
+        },
+        "INR": {
+          "rows": 23,
+          "balance": "10503601.42"
+        },
+        "JPY": {
+          "rows": 82,
+          "balance": "9012801.00"
+        },
+        "KES": {
+          "rows": 22,
+          "balance": "10273963.60"
+        },
+        "KRW": {
+          "rows": 23,
+          "balance": "9309069.00"
+        },
+        "MXN": {
+          "rows": 23,
+          "balance": "10706197.60"
+        },
+        "MYR": {
+          "rows": 22,
+          "balance": "8382979.99"
+        },
+        "NGN": {
+          "rows": 22,
+          "balance": "10847587.11"
+        },
+        "NOK": {
+          "rows": 24,
+          "balance": "11312327.60"
+        },
+        "NZD": {
+          "rows": 68,
+          "balance": "19220858.97"
+        },
+        "PEN": {
+          "rows": 22,
+          "balance": "10965271.04"
+        },
+        "PHP": {
+          "rows": 23,
+          "balance": "10499858.12"
+        },
+        "PLN": {
+          "rows": 22,
+          "balance": "9324234.47"
+        },
+        "RON": {
+          "rows": 22,
+          "balance": "9318998.90"
+        },
+        "SAR": {
+          "rows": 22,
+          "balance": "11239589.65"
+        },
+        "SEK": {
+          "rows": 26,
+          "balance": "12228548.02"
+        },
+        "SGD": {
+          "rows": 67,
+          "balance": "14066355.30"
+        },
+        "THB": {
+          "rows": 22,
+          "balance": "11206470.46"
+        },
+        "TRY": {
+          "rows": 22,
+          "balance": "9973308.20"
+        },
+        "TWD": {
+          "rows": 23,
+          "balance": "9380912.33"
+        },
+        "USD": {
+          "rows": 22,
+          "balance": "9589214.48"
+        },
+        "VND": {
+          "rows": 22,
+          "balance": "9749976.68"
+        },
+        "ZAR": {
+          "rows": 23,
+          "balance": "10712989.51"
+        }
+      },
+      "blocked": {
+        "AUD": {
+          "rows": 1,
+          "balance": "339055.00"
+        },
+        "CAD": {
+          "rows": 1,
+          "balance": "293075.50"
+        },
+        "CHF": {
+          "rows": 1,
+          "balance": "321299.45"
+        },
+        "CNH": {
+          "rows": 1,
+          "balance": "446498.27"
+        },
+        "CNY": {
+          "rows": 1,
+          "balance": "548962.25"
+        },
+        "CZK": {
+          "rows": 1,
+          "balance": "307317.31"
+        },
+        "DKK": {
+          "rows": 1,
+          "balance": "225553.14"
+        },
+        "EUR": {
+          "rows": 1,
+          "balance": "-443685.64"
+        },
+        "GBP": {
+          "rows": 1,
+          "balance": "91715.71"
+        },
+        "HKD": {
+          "rows": 1,
+          "balance": "482677.47"
+        },
+        "HUF": {
+          "rows": 1,
+          "balance": "233861.62"
+        },
+        "JPY": {
+          "rows": 1,
+          "balance": "783410.00"
+        },
+        "NOK": {
+          "rows": 1,
+          "balance": "502337.12"
+        },
+        "NZD": {
+          "rows": 1,
+          "balance": "822987.76"
+        },
+        "PLN": {
+          "rows": 1,
+          "balance": "816709.82"
+        },
+        "RON": {
+          "rows": 1,
+          "balance": "949450.75"
+        },
+        "SEK": {
+          "rows": 1,
+          "balance": "786229.93"
+        },
+        "SGD": {
+          "rows": 1,
+          "balance": "524625.70"
+        },
+        "TRY": {
+          "rows": 1,
+          "balance": "698754.88"
+        },
+        "USD": {
+          "rows": 1,
+          "balance": "704501.80"
+        }
+      },
+      "byReason": {
+        "LE45": {
+          "AUD": {
+            "rows": 37,
+            "balance": "1045792.37"
+          },
+          "CAD": {
+            "rows": 51,
+            "balance": "2411225.91"
+          },
+          "CHF": {
+            "rows": 51,
+            "balance": "520016.05"
+          },
+          "CNY": {
+            "rows": 34,
+            "balance": "1575781.58"
+          },
+          "EUR": {
+            "rows": 45,
+            "balance": "-18530187.43"
+          },
+          "GBP": {
+            "rows": 51,
+            "balance": "4387154.91"
+          },
+          "HKD": {
+            "rows": 34,
+            "balance": "-802783.42"
+          },
+          "JPY": {
+            "rows": 51,
+            "balance": "-3776989.00"
+          },
+          "NZD": {
+            "rows": 34,
+            "balance": "3136129.90"
+          },
+          "SGD": {
+            "rows": 34,
+            "balance": "927551.52"
+          }
+        },
+        "NONFX": {
+          "AED": {
+            "rows": 22,
+            "balance": "10008402.58"
+          },
+          "AUD": {
+            "rows": 35,
+            "balance": "17139976.47"
+          },
+          "BRL": {
+            "rows": 23,
+            "balance": "9556704.72"
+          },
+          "CAD": {
+            "rows": 36,
+            "balance": "16521865.69"
+          },
+          "CHF": {
+            "rows": 34,
+            "balance": "16469438.09"
+          },
+          "CLP": {
+            "rows": 23,
+            "balance": "12903263.90"
+          },
+          "CNH": {
+            "rows": 28,
+            "balance": "10967673.57"
+          },
+          "CNY": {
+            "rows": 30,
+            "balance": "13462908.86"
+          },
+          "COP": {
+            "rows": 23,
+            "balance": "11920452.93"
+          },
+          "CZK": {
+            "rows": 22,
+            "balance": "12162039.52"
+          },
+          "DKK": {
+            "rows": 22,
+            "balance": "10297285.18"
+          },
+          "EGP": {
+            "rows": 22,
+            "balance": "8800682.12"
+          },
+          "EUR": {
+            "rows": 25,
+            "balance": "-10557823.80"
+          },
+          "GBP": {
+            "rows": 28,
+            "balance": "12324157.60"
+          },
+          "HKD": {
+            "rows": 32,
+            "balance": "14616721.02"
+          },
+          "HUF": {
+            "rows": 22,
+            "balance": "8790709.51"
+          },
+          "IDR": {
+            "rows": 23,
+            "balance": "12256461.66"
+          },
+          "ILS": {
+            "rows": 22,
+            "balance": "7094444.63"
+          },
+          "INR": {
+            "rows": 23,
+            "balance": "10503601.42"
+          },
+          "JPY": {
+            "rows": 31,
+            "balance": "12789790.00"
+          },
+          "KES": {
+            "rows": 22,
+            "balance": "10273963.60"
+          },
+          "KRW": {
+            "rows": 23,
+            "balance": "9309069.00"
+          },
+          "MXN": {
+            "rows": 23,
+            "balance": "10706197.60"
+          },
+          "MYR": {
+            "rows": 22,
+            "balance": "8382979.99"
+          },
+          "NGN": {
+            "rows": 22,
+            "balance": "10847587.11"
+          },
+          "NOK": {
+            "rows": 24,
+            "balance": "11312327.60"
+          },
+          "NZD": {
+            "rows": 34,
+            "balance": "16084729.07"
+          },
+          "PEN": {
+            "rows": 22,
+            "balance": "10965271.04"
+          },
+          "PHP": {
+            "rows": 23,
+            "balance": "10499858.12"
+          },
+          "PLN": {
+            "rows": 22,
+            "balance": "9324234.47"
+          },
+          "RON": {
+            "rows": 22,
+            "balance": "9318998.90"
+          },
+          "SAR": {
+            "rows": 22,
+            "balance": "11239589.65"
+          },
+          "SEK": {
+            "rows": 26,
+            "balance": "12228548.02"
+          },
+          "SGD": {
+            "rows": 33,
+            "balance": "13138803.78"
+          },
+          "THB": {
+            "rows": 22,
+            "balance": "11206470.46"
+          },
+          "TRY": {
+            "rows": 22,
+            "balance": "9973308.20"
+          },
+          "TWD": {
+            "rows": 23,
+            "balance": "9380912.33"
+          },
+          "USD": {
+            "rows": 22,
+            "balance": "9589214.48"
+          },
+          "VND": {
+            "rows": 22,
+            "balance": "9749976.68"
+          },
+          "ZAR": {
+            "rows": 23,
+            "balance": "10712989.51"
+          }
+        },
+        "GL_ENTITY_UNKNOWN": {
+          "AUD": {
+            "rows": 1,
+            "balance": "339055.00"
+          },
+          "CAD": {
+            "rows": 1,
+            "balance": "293075.50"
+          },
+          "CHF": {
+            "rows": 1,
+            "balance": "321299.45"
+          },
+          "EUR": {
+            "rows": 1,
+            "balance": "-443685.64"
+          },
+          "GBP": {
+            "rows": 1,
+            "balance": "91715.71"
+          },
+          "HKD": {
+            "rows": 1,
+            "balance": "482677.47"
+          },
+          "JPY": {
+            "rows": 1,
+            "balance": "783410.00"
+          },
+          "NZD": {
+            "rows": 1,
+            "balance": "822987.76"
+          },
+          "SGD": {
+            "rows": 1,
+            "balance": "524625.70"
+          },
+          "USD": {
+            "rows": 1,
+            "balance": "704501.80"
+          }
+        },
+        "GL_ACCOUNT_UNKNOWN": {
+          "CNH": {
+            "rows": 1,
+            "balance": "446498.27"
+          },
+          "CNY": {
+            "rows": 1,
+            "balance": "548962.25"
+          },
+          "CZK": {
+            "rows": 1,
+            "balance": "307317.31"
+          },
+          "DKK": {
+            "rows": 1,
+            "balance": "225553.14"
+          },
+          "HUF": {
+            "rows": 1,
+            "balance": "233861.62"
+          },
+          "NOK": {
+            "rows": 1,
+            "balance": "502337.12"
+          },
+          "PLN": {
+            "rows": 1,
+            "balance": "816709.82"
+          },
+          "RON": {
+            "rows": 1,
+            "balance": "949450.75"
+          },
+          "SEK": {
+            "rows": 1,
+            "balance": "786229.93"
+          },
+          "TRY": {
+            "rows": 1,
+            "balance": "698754.88"
+          }
+        },
+        "GL_PROGRAM_UNMATCHED": {}
+      }
+    },
+    "BS-REG": {
+      "included": {
+        "AED": {
+          "rows": 407,
+          "balance": "17518078.94"
+        },
+        "AUD": {
+          "rows": 583,
+          "balance": "10739426.13"
+        },
+        "BRL": {
+          "rows": 420,
+          "balance": "13496788.26"
+        },
+        "CAD": {
+          "rows": 586,
+          "balance": "27775312.09"
+        },
+        "CHF": {
+          "rows": 592,
+          "balance": "12329362.58"
+        },
+        "CLP": {
+          "rows": 402,
+          "balance": "11312229.71"
+        },
+        "CNH": {
+          "rows": 519,
+          "balance": "-1006371.79"
+        },
+        "CNY": {
+          "rows": 499,
+          "balance": "12143018.29"
+        },
+        "COP": {
+          "rows": 400,
+          "balance": "5721917.92"
+        },
+        "CZK": {
+          "rows": 414,
+          "balance": "16054462.05"
+        },
+        "DKK": {
+          "rows": 409,
+          "balance": "10128346.66"
+        },
+        "EGP": {
+          "rows": 397,
+          "balance": "10267221.99"
+        },
+        "EUR": {
+          "rows": 463,
+          "balance": "-211371248.87"
+        },
+        "GBP": {
+          "rows": 497,
+          "balance": "9501651.13"
+        },
+        "HKD": {
+          "rows": 533,
+          "balance": "18117934.02"
+        },
+        "HUF": {
+          "rows": 416,
+          "balance": "8595802.16"
+        },
+        "IDR": {
+          "rows": 407,
+          "balance": "4063344.89"
+        },
+        "ILS": {
+          "rows": 398,
+          "balance": "7869713.55"
+        },
+        "INR": {
+          "rows": 418,
+          "balance": "3472958.38"
+        },
+        "JPY": {
+          "rows": 541,
+          "balance": "9498122.00"
+        },
+        "KES": {
+          "rows": 396,
+          "balance": "15469317.81"
+        },
+        "KRW": {
+          "rows": 414,
+          "balance": "18596741.00"
+        },
+        "MXN": {
+          "rows": 422,
+          "balance": "11722231.50"
+        },
+        "MYR": {
+          "rows": 398,
+          "balance": "10351072.67"
+        },
+        "NGN": {
+          "rows": 397,
+          "balance": "7373352.31"
+        },
+        "NOK": {
+          "rows": 440,
+          "balance": "-3878707.98"
+        },
+        "NZD": {
+          "rows": 568,
+          "balance": "11933132.32"
+        },
+        "PEN": {
+          "rows": 399,
+          "balance": "4344379.47"
+        },
+        "PHP": {
+          "rows": 405,
+          "balance": "13606064.14"
+        },
+        "PLN": {
+          "rows": 412,
+          "balance": "16425973.74"
+        },
+        "RON": {
+          "rows": 418,
+          "balance": "10670729.68"
+        },
+        "SAR": {
+          "rows": 411,
+          "balance": "15802989.71"
+        },
+        "SEK": {
+          "rows": 474,
+          "balance": "8334915.13"
+        },
+        "SGD": {
+          "rows": 550,
+          "balance": "8281880.95"
+        },
+        "THB": {
+          "rows": 398,
+          "balance": "2895449.72"
+        },
+        "TRY": {
+          "rows": 420,
+          "balance": "22504401.48"
+        },
+        "TWD": {
+          "rows": 410,
+          "balance": "13189922.23"
+        },
+        "USD": {
+          "rows": 437,
+          "balance": "11351850.93"
+        },
+        "VND": {
+          "rows": 398,
+          "balance": "13738726.17"
+        },
+        "ZAR": {
+          "rows": 422,
+          "balance": "15109978.29"
+        }
+      },
+      "excluded": {
+        "AED": {
+          "rows": 37,
+          "balance": "12684361.66"
+        },
+        "AUD": {
+          "rows": 98,
+          "balance": "14590980.57"
+        },
+        "BRL": {
+          "rows": 25,
+          "balance": "9468664.67"
+        },
+        "CAD": {
+          "rows": 113,
+          "balance": "14129101.37"
+        },
+        "CHF": {
+          "rows": 112,
+          "balance": "18602731.00"
+        },
+        "CLP": {
+          "rows": 42,
+          "balance": "16658849.11"
+        },
+        "CNH": {
+          "rows": 33,
+          "balance": "14258476.49"
+        },
+        "CNY": {
+          "rows": 89,
+          "balance": "10934478.81"
+        },
+        "COP": {
+          "rows": 44,
+          "balance": "12340054.79"
+        },
+        "CZK": {
+          "rows": 30,
+          "balance": "12657206.65"
+        },
+        "DKK": {
+          "rows": 35,
+          "balance": "9236143.60"
+        },
+        "EGP": {
+          "rows": 47,
+          "balance": "10695470.72"
+        },
+        "EUR": {
+          "rows": 79,
+          "balance": "-33521183.89"
+        },
+        "GBP": {
+          "rows": 99,
+          "balance": "15765493.31"
+        },
+        "HKD": {
+          "rows": 94,
+          "balance": "12887189.08"
+        },
+        "HUF": {
+          "rows": 28,
+          "balance": "11542109.75"
+        },
+        "IDR": {
+          "rows": 37,
+          "balance": "11446015.56"
+        },
+        "ILS": {
+          "rows": 46,
+          "balance": "9346086.93"
+        },
+        "INR": {
+          "rows": 27,
+          "balance": "10847019.46"
+        },
+        "JPY": {
+          "rows": 109,
+          "balance": "14501372.00"
+        },
+        "KES": {
+          "rows": 48,
+          "balance": "8349944.75"
+        },
+        "KRW": {
+          "rows": 31,
+          "balance": "9668416.00"
+        },
+        "MXN": {
+          "rows": 23,
+          "balance": "10706197.60"
+        },
+        "MYR": {
+          "rows": 46,
+          "balance": "8534524.02"
+        },
+        "NGN": {
+          "rows": 47,
+          "balance": "16001477.94"
+        },
+        "NOK": {
+          "rows": 40,
+          "balance": "15878047.96"
+        },
+        "NZD": {
+          "rows": 95,
+          "balance": "24386666.70"
+        },
+        "PEN": {
+          "rows": 45,
+          "balance": "7455723.25"
+        },
+        "PHP": {
+          "rows": 39,
+          "balance": "7852392.31"
+        },
+        "PLN": {
+          "rows": 32,
+          "balance": "3117416.07"
+        },
+        "RON": {
+          "rows": 26,
+          "balance": "10160488.02"
+        },
+        "SAR": {
+          "rows": 33,
+          "balance": "13764696.92"
+        },
+        "SEK": {
+          "rows": 42,
+          "balance": "11185497.50"
+        },
+        "SGD": {
+          "rows": 95,
+          "balance": "18598233.39"
+        },
+        "THB": {
+          "rows": 46,
+          "balance": "15476818.45"
+        },
+        "TRY": {
+          "rows": 24,
+          "balance": "8756885.20"
+        },
+        "TWD": {
+          "rows": 34,
+          "balance": "10978569.82"
+        },
+        "USD": {
+          "rows": 51,
+          "balance": "6245846.24"
+        },
+        "VND": {
+          "rows": 46,
+          "balance": "7657298.59"
+        },
+        "ZAR": {
+          "rows": 23,
+          "balance": "10712989.51"
+        }
+      },
+      "blocked": {
+        "AUD": {
+          "rows": 1,
+          "balance": "339055.00"
+        },
+        "CAD": {
+          "rows": 1,
+          "balance": "293075.50"
+        },
+        "CHF": {
+          "rows": 1,
+          "balance": "321299.45"
+        },
+        "CNH": {
+          "rows": 1,
+          "balance": "446498.27"
+        },
+        "CNY": {
+          "rows": 1,
+          "balance": "548962.25"
+        },
+        "CZK": {
+          "rows": 1,
+          "balance": "307317.31"
+        },
+        "DKK": {
+          "rows": 1,
+          "balance": "225553.14"
+        },
+        "EUR": {
+          "rows": 1,
+          "balance": "-443685.64"
+        },
+        "GBP": {
+          "rows": 1,
+          "balance": "91715.71"
+        },
+        "HKD": {
+          "rows": 1,
+          "balance": "482677.47"
+        },
+        "HUF": {
+          "rows": 1,
+          "balance": "233861.62"
+        },
+        "JPY": {
+          "rows": 1,
+          "balance": "783410.00"
+        },
+        "NOK": {
+          "rows": 1,
+          "balance": "502337.12"
+        },
+        "NZD": {
+          "rows": 1,
+          "balance": "822987.76"
+        },
+        "PLN": {
+          "rows": 1,
+          "balance": "816709.82"
+        },
+        "RON": {
+          "rows": 1,
+          "balance": "949450.75"
+        },
+        "SEK": {
+          "rows": 1,
+          "balance": "786229.93"
+        },
+        "SGD": {
+          "rows": 1,
+          "balance": "524625.70"
+        },
+        "TRY": {
+          "rows": 1,
+          "balance": "698754.88"
+        },
+        "USD": {
+          "rows": 1,
+          "balance": "704501.80"
+        }
+      },
+      "byReason": {
+        "ACCOUNT_1900": {
+          "AED": {
+            "rows": 15,
+            "balance": "2675959.08"
+          },
+          "AUD": {
+            "rows": 26,
+            "balance": "-3594788.27"
+          },
+          "BRL": {
+            "rows": 2,
+            "balance": "-88040.05"
+          },
+          "CAD": {
+            "rows": 26,
+            "balance": "-4803990.23"
+          },
+          "CHF": {
+            "rows": 27,
+            "balance": "1613276.86"
+          },
+          "CLP": {
+            "rows": 19,
+            "balance": "3755585.21"
+          },
+          "CNH": {
+            "rows": 5,
+            "balance": "3290802.92"
+          },
+          "CNY": {
+            "rows": 25,
+            "balance": "-4104211.63"
+          },
+          "COP": {
+            "rows": 21,
+            "balance": "419601.86"
+          },
+          "CZK": {
+            "rows": 8,
+            "balance": "495167.13"
+          },
+          "DKK": {
+            "rows": 13,
+            "balance": "-1061141.58"
+          },
+          "EGP": {
+            "rows": 25,
+            "balance": "1894788.60"
+          },
+          "EUR": {
+            "rows": 9,
+            "balance": "-4433172.66"
+          },
+          "GBP": {
+            "rows": 20,
+            "balance": "-945819.20"
+          },
+          "HKD": {
+            "rows": 28,
+            "balance": "-926748.52"
+          },
+          "HUF": {
+            "rows": 6,
+            "balance": "2751400.24"
+          },
+          "IDR": {
+            "rows": 14,
+            "balance": "-810446.10"
+          },
+          "ILS": {
+            "rows": 24,
+            "balance": "2251642.30"
+          },
+          "INR": {
+            "rows": 4,
+            "balance": "343418.04"
+          },
+          "JPY": {
+            "rows": 27,
+            "balance": "5488571.00"
+          },
+          "KES": {
+            "rows": 26,
+            "balance": "-1924018.85"
+          },
+          "KRW": {
+            "rows": 8,
+            "balance": "359347.00"
+          },
+          "MYR": {
+            "rows": 24,
+            "balance": "151544.03"
+          },
+          "NGN": {
+            "rows": 25,
+            "balance": "5153890.83"
+          },
+          "NOK": {
+            "rows": 16,
+            "balance": "4565720.36"
+          },
+          "NZD": {
+            "rows": 27,
+            "balance": "5165807.73"
+          },
+          "PEN": {
+            "rows": 23,
+            "balance": "-3509547.79"
+          },
+          "PHP": {
+            "rows": 16,
+            "balance": "-2647465.81"
+          },
+          "PLN": {
+            "rows": 10,
+            "balance": "-6206818.40"
+          },
+          "RON": {
+            "rows": 4,
+            "balance": "841489.12"
+          },
+          "SAR": {
+            "rows": 11,
+            "balance": "2525107.27"
+          },
+          "SEK": {
+            "rows": 16,
+            "balance": "-1043050.52"
+          },
+          "SGD": {
+            "rows": 28,
+            "balance": "4531878.09"
+          },
+          "THB": {
+            "rows": 24,
+            "balance": "4270347.99"
+          },
+          "TRY": {
+            "rows": 2,
+            "balance": "-1216423.00"
+          },
+          "TWD": {
+            "rows": 11,
+            "balance": "1597657.49"
+          },
+          "USD": {
+            "rows": 29,
+            "balance": "-3343368.24"
+          },
+          "VND": {
+            "rows": 24,
+            "balance": "-2092678.09"
+          }
+        },
+        "LE45": {
+          "AUD": {
+            "rows": 37,
+            "balance": "1045792.37"
+          },
+          "CAD": {
+            "rows": 51,
+            "balance": "2411225.91"
+          },
+          "CHF": {
+            "rows": 51,
+            "balance": "520016.05"
+          },
+          "CNY": {
+            "rows": 34,
+            "balance": "1575781.58"
+          },
+          "EUR": {
+            "rows": 45,
+            "balance": "-18530187.43"
+          },
+          "GBP": {
+            "rows": 51,
+            "balance": "4387154.91"
+          },
+          "HKD": {
+            "rows": 34,
+            "balance": "-802783.42"
+          },
+          "JPY": {
+            "rows": 51,
+            "balance": "-3776989.00"
+          },
+          "NZD": {
+            "rows": 34,
+            "balance": "3136129.90"
+          },
+          "SGD": {
+            "rows": 34,
+            "balance": "927551.52"
+          }
+        },
+        "NONFX": {
+          "AED": {
+            "rows": 22,
+            "balance": "10008402.58"
+          },
+          "AUD": {
+            "rows": 35,
+            "balance": "17139976.47"
+          },
+          "BRL": {
+            "rows": 23,
+            "balance": "9556704.72"
+          },
+          "CAD": {
+            "rows": 36,
+            "balance": "16521865.69"
+          },
+          "CHF": {
+            "rows": 34,
+            "balance": "16469438.09"
+          },
+          "CLP": {
+            "rows": 23,
+            "balance": "12903263.90"
+          },
+          "CNH": {
+            "rows": 28,
+            "balance": "10967673.57"
+          },
+          "CNY": {
+            "rows": 30,
+            "balance": "13462908.86"
+          },
+          "COP": {
+            "rows": 23,
+            "balance": "11920452.93"
+          },
+          "CZK": {
+            "rows": 22,
+            "balance": "12162039.52"
+          },
+          "DKK": {
+            "rows": 22,
+            "balance": "10297285.18"
+          },
+          "EGP": {
+            "rows": 22,
+            "balance": "8800682.12"
+          },
+          "EUR": {
+            "rows": 25,
+            "balance": "-10557823.80"
+          },
+          "GBP": {
+            "rows": 28,
+            "balance": "12324157.60"
+          },
+          "HKD": {
+            "rows": 32,
+            "balance": "14616721.02"
+          },
+          "HUF": {
+            "rows": 22,
+            "balance": "8790709.51"
+          },
+          "IDR": {
+            "rows": 23,
+            "balance": "12256461.66"
+          },
+          "ILS": {
+            "rows": 22,
+            "balance": "7094444.63"
+          },
+          "INR": {
+            "rows": 23,
+            "balance": "10503601.42"
+          },
+          "JPY": {
+            "rows": 31,
+            "balance": "12789790.00"
+          },
+          "KES": {
+            "rows": 22,
+            "balance": "10273963.60"
+          },
+          "KRW": {
+            "rows": 23,
+            "balance": "9309069.00"
+          },
+          "MXN": {
+            "rows": 23,
+            "balance": "10706197.60"
+          },
+          "MYR": {
+            "rows": 22,
+            "balance": "8382979.99"
+          },
+          "NGN": {
+            "rows": 22,
+            "balance": "10847587.11"
+          },
+          "NOK": {
+            "rows": 24,
+            "balance": "11312327.60"
+          },
+          "NZD": {
+            "rows": 34,
+            "balance": "16084729.07"
+          },
+          "PEN": {
+            "rows": 22,
+            "balance": "10965271.04"
+          },
+          "PHP": {
+            "rows": 23,
+            "balance": "10499858.12"
+          },
+          "PLN": {
+            "rows": 22,
+            "balance": "9324234.47"
+          },
+          "RON": {
+            "rows": 22,
+            "balance": "9318998.90"
+          },
+          "SAR": {
+            "rows": 22,
+            "balance": "11239589.65"
+          },
+          "SEK": {
+            "rows": 26,
+            "balance": "12228548.02"
+          },
+          "SGD": {
+            "rows": 33,
+            "balance": "13138803.78"
+          },
+          "THB": {
+            "rows": 22,
+            "balance": "11206470.46"
+          },
+          "TRY": {
+            "rows": 22,
+            "balance": "9973308.20"
+          },
+          "TWD": {
+            "rows": 23,
+            "balance": "9380912.33"
+          },
+          "USD": {
+            "rows": 22,
+            "balance": "9589214.48"
+          },
+          "VND": {
+            "rows": 22,
+            "balance": "9749976.68"
+          },
+          "ZAR": {
+            "rows": 23,
+            "balance": "10712989.51"
+          }
+        },
+        "GL_ENTITY_UNKNOWN": {
+          "AUD": {
+            "rows": 1,
+            "balance": "339055.00"
+          },
+          "CAD": {
+            "rows": 1,
+            "balance": "293075.50"
+          },
+          "CHF": {
+            "rows": 1,
+            "balance": "321299.45"
+          },
+          "EUR": {
+            "rows": 1,
+            "balance": "-443685.64"
+          },
+          "GBP": {
+            "rows": 1,
+            "balance": "91715.71"
+          },
+          "HKD": {
+            "rows": 1,
+            "balance": "482677.47"
+          },
+          "JPY": {
+            "rows": 1,
+            "balance": "783410.00"
+          },
+          "NZD": {
+            "rows": 1,
+            "balance": "822987.76"
+          },
+          "SGD": {
+            "rows": 1,
+            "balance": "524625.70"
+          },
+          "USD": {
+            "rows": 1,
+            "balance": "704501.80"
+          }
+        },
+        "GL_ACCOUNT_UNKNOWN": {
+          "CNH": {
+            "rows": 1,
+            "balance": "446498.27"
+          },
+          "CNY": {
+            "rows": 1,
+            "balance": "548962.25"
+          },
+          "CZK": {
+            "rows": 1,
+            "balance": "307317.31"
+          },
+          "DKK": {
+            "rows": 1,
+            "balance": "225553.14"
+          },
+          "HUF": {
+            "rows": 1,
+            "balance": "233861.62"
+          },
+          "NOK": {
+            "rows": 1,
+            "balance": "502337.12"
+          },
+          "PLN": {
+            "rows": 1,
+            "balance": "816709.82"
+          },
+          "RON": {
+            "rows": 1,
+            "balance": "949450.75"
+          },
+          "SEK": {
+            "rows": 1,
+            "balance": "786229.93"
+          },
+          "TRY": {
+            "rows": 1,
+            "balance": "698754.88"
+          }
+        },
+        "GL_PROGRAM_UNMATCHED": {}
+      }
+    }
+  }
+}
