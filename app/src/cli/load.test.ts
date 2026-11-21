@@ -309,6 +309,57 @@ describe("runLoad --drain", () => {
   });
 });
 
+describe("INVALID_FILE diagnostics never print CSV values", () => {
+  it("calendar disagreement omits synthetic currency from stdout and stderr", async () => {
+    // Shape-valid currency code so the parser reaches the disagreement check (not "must be three letters").
+    const currency = "ZZZ";
+    const header = "currency_code,weekend_days,covered_through,holiday_date,holiday_name";
+    const text = [
+      header,
+      `${currency},SAT|SUN,2027-12-31,2026-01-01,NY`,
+      `${currency},FRI|SAT,2027-12-31,2026-07-04,July4`,
+    ].join("\n");
+    const result = await runLoad(
+      ["calendars", "calendars.csv", "--tenant", TENANT, "--source", "md", "--as-of", "2026-03-09", "--mode", "SNAPSHOT", "--dry-run"],
+      {},
+      { defaultBy: "cli:test", readFile: async () => text },
+    );
+    assert.equal(result.exitCode, 1);
+    assert.match(result.lines[0]!, /INVALID_FILE/);
+    assert.ok(result.lines.some((l) => /row 2/.test(l) && /column weekend_days/.test(l) && /disagrees with earlier rows for the same currency/.test(l)));
+    assert.ok(result.lines.every((l) => !l.includes(currency)));
+
+    const script = `
+      import { runLoad } from "./app/src/cli/load.ts";
+      const text = ${JSON.stringify(text)};
+      const result = await runLoad(
+        ["calendars", "calendars.csv", "--tenant", "${TENANT}", "--source", "md", "--as-of", "2026-03-09", "--mode", "SNAPSHOT", "--dry-run"],
+        {},
+        { defaultBy: "cli:test", readFile: async () => text },
+      );
+      for (const line of result.lines) console.log(line);
+      process.exitCode = result.exitCode;
+    `;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
+      cwd: new URL("../../..", import.meta.url).pathname,
+      env: process.env,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    const code = await new Promise<number | null>((resolve) => child.on("close", resolve));
+    assert.equal(code, 1);
+    assert.match(stdout, /row 2, column weekend_days: weekend_days disagrees with earlier rows for the same currency/);
+    assert.equal(stdout.includes(currency), false);
+    assert.equal(stderr.includes(currency), false);
+  });
+});
+
 describe("refusal output never prints CSV values", () => {
   it("runLoad omits synthetic marker from REFUSED lines", async () => {
     const result = await runLoad(

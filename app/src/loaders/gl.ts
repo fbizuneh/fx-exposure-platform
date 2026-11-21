@@ -24,7 +24,7 @@ export async function loadGlFile(app: App, opts: GlLoadOptions): Promise<LoadOut
     return [{
       rowNo: i + 1,
       column: "as_of",
-      message: `as_of ${row.asOf} differs from the batch's ${opts.asOf}`,
+      message: "as_of differs from the batch as-of",
     }];
   });
   if (asOfMismatches.length > 0) return { kind: "INVALID_FILE", problems: asOfMismatches };
