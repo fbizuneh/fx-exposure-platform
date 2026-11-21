@@ -21,6 +21,6 @@ Each service's outbox table gains `attempts`, `last_error`, `retry_at`, `stuck_a
 One database test walks the waits (1, 2, 4, 8 minutes, nothing earlier), the 5th failure, the stuck event left alone, the hold on its own tenant only, operator retry, and delivery in order afterwards. Another test advances the clock 70 seconds during a delivery and checks the event is ineligible 59 seconds after the failure and eligible at 60; reading the clock once per drain fails it. A further test reads the table after each of five failures (wait kept, then stuck, never eligible again) and shows the database refusing the old half-written state; restoring the two-step write fails both. Mutations that remove the hold, the doubling, or the off-by-one on the 5th try fail the first test. The existing "failed status read" test now expects a recorded failure and a later retry instead of a thrown drain.
 
 ## Not done, and why (for you to decide)
-- **An operator screen or API with roles.** Who may retry (Platform Ops, a tenant admin) is a permission choice; not made here.
+- **An operator screen or API with roles.** ~~Who may retry (Platform Ops, a tenant admin) is a permission choice; not made here.~~ Done: decision 0030 adds `operations:manage-events` (TREASURY_ADMIN, platform role) and the guarded functions in `app/src/operations.ts`. The screen/API themselves are still not built (B).
 - **Alerts** when an event becomes stuck.
 - **Retrying a stuck event for every tenant at once**, and skipping (discarding) a poison event: skipping loses data, so it is left out.

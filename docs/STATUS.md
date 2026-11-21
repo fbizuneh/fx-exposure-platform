@@ -15,7 +15,11 @@ Shared kernel, checks, Identity (done) -> Master Data (done) -> FX Rate (done) -
 `docs/uat/data-design.md` is the merged E1 design. Fikre confirmed two tenants, one balance sheet program each, loading the same generated files; unique tenant names; rate-derived simulated settlement amounts; and Close-out+New rolling for `BS-REG` (decision 0025). The 12 Release 1 scenarios are recorded, with 2026-10-27 designated as the late GL load. E2–E4 and E6 are merged; E5 is in review; E7 remains.
 
 ## Known gaps (recorded, not built)
-Control totals by currency; contract versioning; platform-level versus tenant-level NDF list; Audit retention and purge, trail export, Data Source and Exposure Analysis records (decision 0012); an operator screen for stuck events (decision 0019 gives the list and retry as functions only, with no permission model).
+Control totals by currency; contract versioning; platform-level versus tenant-level NDF list; Audit retention and purge, trail export, Data Source and Exposure Analysis records (decision 0012); an operator screen and API for stuck events (decision 0019 gives the list and retry as functions; decision 0030 adds the permission model; the screen and API themselves are B).
+
+## Release 1 stream J
+
+J3 stuck-event permissions are merged (decision 0030): `operations:manage-events` (TREASURY_ADMIN, platform role), and `listDeliveryProblems`/`deliveryProblemSummary`/`retryDeliveryProblem` in `app/src/operations.ts`, guarding `dispatch.ts`'s unguarded primitives. Every retry is recorded to Audit as `event.retried`; a platform role's use is recorded automatically by `checkAccess`, as for any other permission. `app/`'s `/status` route is unchanged (no actor yet; stream C). J1 and J2 are separate PRs.
 
 ## Release 1 stream E prerequisite
 

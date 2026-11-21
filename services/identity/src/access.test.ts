@@ -67,3 +67,11 @@ test("the audit trail is read by approvers and admins only (decision 0012)", () 
   const holders = TENANT_ROLES.filter((r) => ROLE_PERMISSIONS[r].has("audit:read"));
   assert.deepEqual([...holders].sort(), ["TREASURY_ADMIN", "TREASURY_APPROVER"]);
 });
+
+test("stuck events are seen and retried by the tenant admin, or the platform role, only (decision 0030)", () => {
+  const holders = TENANT_ROLES.filter((r) => ROLE_PERMISSIONS[r].has("operations:manage-events"));
+  assert.deepEqual([...holders], ["TREASURY_ADMIN"]);
+  assert.deepEqual(decide(q("operations:manage-events"), facts(user("TREASURY_APPROVER"))), { allowed: false, reason: "permission-missing" });
+  assert.deepEqual(decide(q("operations:manage-events"), facts(user("TREASURY_ADMIN"))), { allowed: true, via: "user" });
+  assert.deepEqual(decide(q("operations:manage-events"), facts(null, "SYSTEM_ADMIN")), { allowed: true, via: "platform-role" });
+});
