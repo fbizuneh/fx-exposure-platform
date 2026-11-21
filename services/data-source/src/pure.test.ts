@@ -84,6 +84,8 @@ test("row checks name each problem", () => {
   assert.deepEqual(codes(row({ entityCode: null, accountNumber: " ", currency: null })), ["GL_ENTITY_MISSING", "GL_ACCOUNT_MISSING", "GL_CURRENCY_MISSING"]);
   assert.deepEqual(codes(row({ currency: "XYZ" })), ["GL_CURRENCY_UNSUPPORTED"]);
   assert.deepEqual(codes(row({ currency: "usd" })), ["GL_CURRENCY_UNSUPPORTED"]);
+  assert.deepEqual(codes(row({ currency: "CNH" })), [], "offshore yuan is accepted on purpose (decision 0028)");
+  assert.deepEqual(codes(row({ currency: "CNY" })), []);
   assert.deepEqual(codes(row({ asOf: "2026-02-28" })), ["GL_AS_OF_MISMATCH"]);
   assert.deepEqual(codes(row({ asOf: "2026-03-01" })), []);
 });
