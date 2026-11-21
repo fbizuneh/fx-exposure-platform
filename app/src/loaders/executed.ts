@@ -1,7 +1,7 @@
-// Executed-trade file loader: reject CSV syntax errors, then parse and import.
-// Missing/invalid trade fields stay with the import command (Decision 0009 partial acceptance).
+// Executed-trade file loader: reject CSV syntax and missing required headers, then parse and import.
+// Missing/invalid trade *values* stay with the import command (Decision 0009 partial acceptance).
 import type { TenantId } from "@shared/kernel";
-import { parseExecutedFile, quotingProblems } from "../../../services/fx-trade/src/index.ts";
+import { parseExecutedFile, quotingProblems, splitCsv } from "../../../services/fx-trade/src/index.ts";
 import type { App } from "../compose.ts";
 import type { FileProblem, LoadOutcome } from "./outcome.ts";
 
@@ -10,6 +10,21 @@ export interface ExecutedLoadOptions {
   readonly text: string;
   readonly by: string;
 }
+
+/** Required columns per docs/file-layouts.md (executed trades). */
+const REQUIRED_COLUMNS = [
+  "trade_id",
+  "execution_platform_id",
+  "trading_entity",
+  "trade_date",
+  "value_date",
+  "deal_currency",
+  "deal_amount",
+  "settlement_currency",
+  "settlement_amount",
+  "instrument",
+  "buy_sell",
+] as const;
 
 const normalizeHeader = (h: string): string => h.trim().toLowerCase().replace(/[\s-]+/g, "_");
 
@@ -21,9 +36,31 @@ function csvSyntaxProblems(text: string): FileProblem[] {
   });
 }
 
+function requiredHeaderProblems(text: string): FileProblem[] {
+  const [header] = splitCsv(text);
+  if (!header) {
+    return REQUIRED_COLUMNS.map((column) => ({
+      rowNo: null,
+      column,
+      message: `missing required column ${column}`,
+    }));
+  }
+  const names = new Set(header.map(normalizeHeader).filter((n) => n !== ""));
+  const problems: FileProblem[] = [];
+  for (const column of REQUIRED_COLUMNS) {
+    if (!names.has(column)) {
+      problems.push({ rowNo: null, column, message: `missing required column ${column}` });
+    }
+  }
+  return problems;
+}
+
 export async function loadExecutedFile(app: App, opts: ExecutedLoadOptions): Promise<LoadOutcome> {
   const syntax = csvSyntaxProblems(opts.text);
   if (syntax.length > 0) return { kind: "INVALID_FILE", problems: syntax };
+
+  const headers = requiredHeaderProblems(opts.text);
+  if (headers.length > 0) return { kind: "INVALID_FILE", problems: headers };
 
   const rows = parseExecutedFile(opts.text);
   const result = await app.fxTrade.commands.importExecutedTrades({

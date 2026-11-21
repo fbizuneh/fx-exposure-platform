@@ -12,7 +12,7 @@ import {
   type SubmitResult,
 } from "../../../services/master-data/src/index.ts";
 import type { App } from "../compose.ts";
-import type { LoadOutcome } from "./outcome.ts";
+import type { FileProblem, LoadOutcome } from "./outcome.ts";
 
 type Mode = "SNAPSHOT" | "PARTIAL";
 
@@ -53,20 +53,15 @@ function refused(e: unknown): LoadOutcome | null {
   return null;
 }
 
-export async function loadEntitiesFile(app: App, opts: MasterDataLoadOptions): Promise<LoadOutcome> {
-  const parsed = parseEntitiesFile(opts.text);
+async function loadMasterDataFile<R>(
+  text: string,
+  parse: (text: string) => { rows: R[]; problems: FileProblem[] },
+  apply: (rows: R[]) => Promise<SubmitResult>,
+): Promise<LoadOutcome> {
+  const parsed = parse(text);
   if (parsed.problems.length > 0) return { kind: "INVALID_FILE", problems: parsed.problems };
   try {
-    return fromSubmit(
-      await app.masterData.commands.applyEntities({
-        tenantId: opts.tenantId,
-        sourceSystem: opts.sourceSystem,
-        asOf: opts.asOf,
-        mode: opts.mode,
-        rows: parsed.rows,
-        by: opts.by,
-      }),
-    );
+    return fromSubmit(await apply(parsed.rows));
   } catch (e) {
     const r = refused(e);
     if (r) return r;
@@ -74,108 +69,81 @@ export async function loadEntitiesFile(app: App, opts: MasterDataLoadOptions): P
   }
 }
 
-export async function loadHierarchyFile(app: App, opts: MasterDataLoadOptions): Promise<LoadOutcome> {
-  const parsed = parseHierarchyFile(opts.text);
-  if (parsed.problems.length > 0) return { kind: "INVALID_FILE", problems: parsed.problems };
-  try {
-    return fromSubmit(
-      await app.masterData.commands.applyHierarchy({
-        tenantId: opts.tenantId,
-        sourceSystem: opts.sourceSystem,
-        asOf: opts.asOf,
-        mode: opts.mode,
-        rows: parsed.rows,
-        by: opts.by,
-      }),
-    );
-  } catch (e) {
-    const r = refused(e);
-    if (r) return r;
-    throw e;
-  }
+export function loadEntitiesFile(app: App, opts: MasterDataLoadOptions): Promise<LoadOutcome> {
+  return loadMasterDataFile(opts.text, parseEntitiesFile, (rows) =>
+    app.masterData.commands.applyEntities({
+      tenantId: opts.tenantId,
+      sourceSystem: opts.sourceSystem,
+      asOf: opts.asOf,
+      mode: opts.mode,
+      rows,
+      by: opts.by,
+    }),
+  );
 }
 
-export async function loadAccountsFile(app: App, opts: MasterDataLoadOptions): Promise<LoadOutcome> {
-  const parsed = parseAccountsFile(opts.text);
-  if (parsed.problems.length > 0) return { kind: "INVALID_FILE", problems: parsed.problems };
-  try {
-    return fromSubmit(
-      await app.masterData.commands.applyAccounts({
-        tenantId: opts.tenantId,
-        sourceSystem: opts.sourceSystem,
-        asOf: opts.asOf,
-        mode: opts.mode,
-        rows: parsed.rows,
-        by: opts.by,
-      }),
-    );
-  } catch (e) {
-    const r = refused(e);
-    if (r) return r;
-    throw e;
-  }
+export function loadHierarchyFile(app: App, opts: MasterDataLoadOptions): Promise<LoadOutcome> {
+  return loadMasterDataFile(opts.text, parseHierarchyFile, (rows) =>
+    app.masterData.commands.applyHierarchy({
+      tenantId: opts.tenantId,
+      sourceSystem: opts.sourceSystem,
+      asOf: opts.asOf,
+      mode: opts.mode,
+      rows,
+      by: opts.by,
+    }),
+  );
 }
 
-export async function loadCurrenciesFile(app: App, opts: MasterDataLoadOptions): Promise<LoadOutcome> {
-  const parsed = parseCurrenciesFile(opts.text);
-  if (parsed.problems.length > 0) return { kind: "INVALID_FILE", problems: parsed.problems };
-  try {
-    return fromSubmit(
-      await app.masterData.commands.applyCurrencies({
-        tenantId: opts.tenantId,
-        sourceSystem: opts.sourceSystem,
-        asOf: opts.asOf,
-        mode: opts.mode,
-        rows: parsed.rows,
-        by: opts.by,
-      }),
-    );
-  } catch (e) {
-    const r = refused(e);
-    if (r) return r;
-    throw e;
-  }
+export function loadAccountsFile(app: App, opts: MasterDataLoadOptions): Promise<LoadOutcome> {
+  return loadMasterDataFile(opts.text, parseAccountsFile, (rows) =>
+    app.masterData.commands.applyAccounts({
+      tenantId: opts.tenantId,
+      sourceSystem: opts.sourceSystem,
+      asOf: opts.asOf,
+      mode: opts.mode,
+      rows,
+      by: opts.by,
+    }),
+  );
 }
 
-export async function loadCalendarsFile(app: App, opts: MasterDataLoadOptions): Promise<LoadOutcome> {
-  const parsed = parseCalendarsFile(opts.text);
-  if (parsed.problems.length > 0) return { kind: "INVALID_FILE", problems: parsed.problems };
-  try {
-    return fromSubmit(
-      await app.masterData.commands.applyCalendars({
-        tenantId: opts.tenantId,
-        sourceSystem: opts.sourceSystem,
-        asOf: opts.asOf,
-        mode: opts.mode,
-        rows: parsed.rows,
-        by: opts.by,
-      }),
-    );
-  } catch (e) {
-    const r = refused(e);
-    if (r) return r;
-    throw e;
-  }
+export function loadCurrenciesFile(app: App, opts: MasterDataLoadOptions): Promise<LoadOutcome> {
+  return loadMasterDataFile(opts.text, parseCurrenciesFile, (rows) =>
+    app.masterData.commands.applyCurrencies({
+      tenantId: opts.tenantId,
+      sourceSystem: opts.sourceSystem,
+      asOf: opts.asOf,
+      mode: opts.mode,
+      rows,
+      by: opts.by,
+    }),
+  );
 }
 
-export async function loadExposureCurrenciesFile(app: App, opts: ExposureCurrencyLoadOptions): Promise<LoadOutcome> {
-  const parsed = parseExposureCurrenciesFile(opts.text);
-  if (parsed.problems.length > 0) return { kind: "INVALID_FILE", problems: parsed.problems };
-  try {
-    return fromSubmit(
-      await app.masterData.commands.applyPairExposureCurrencies({
-        tenantId: opts.tenantId,
-        sourceSystem: opts.sourceSystem,
-        asOf: opts.asOf,
-        mode: opts.mode,
-        rows: parsed.rows,
-        by: opts.by,
-        programCode: opts.programCode,
-      }),
-    );
-  } catch (e) {
-    const r = refused(e);
-    if (r) return r;
-    throw e;
-  }
+export function loadCalendarsFile(app: App, opts: MasterDataLoadOptions): Promise<LoadOutcome> {
+  return loadMasterDataFile(opts.text, parseCalendarsFile, (rows) =>
+    app.masterData.commands.applyCalendars({
+      tenantId: opts.tenantId,
+      sourceSystem: opts.sourceSystem,
+      asOf: opts.asOf,
+      mode: opts.mode,
+      rows,
+      by: opts.by,
+    }),
+  );
+}
+
+export function loadExposureCurrenciesFile(app: App, opts: ExposureCurrencyLoadOptions): Promise<LoadOutcome> {
+  return loadMasterDataFile(opts.text, parseExposureCurrenciesFile, (rows) =>
+    app.masterData.commands.applyPairExposureCurrencies({
+      tenantId: opts.tenantId,
+      sourceSystem: opts.sourceSystem,
+      asOf: opts.asOf,
+      mode: opts.mode,
+      rows,
+      by: opts.by,
+      programCode: opts.programCode,
+    }),
+  );
 }

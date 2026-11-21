@@ -149,6 +149,15 @@ describe("loaders INVALID_FILE (no service call)", () => {
       assert.ok(out.problems.some((p) => p.rowNo === 1 && (p.column === "deal_amount" || p.column === null)));
     }
   });
+
+  it("executed: header with no required columns is INVALID_FILE (no service call)", async () => {
+    const out = await loadExecutedFile(app, { tenantId: tenant, text: "foo,bar\n1,2\n", by });
+    assert.equal(out.kind, "INVALID_FILE");
+    if (out.kind === "INVALID_FILE") {
+      assert.ok(out.problems.some((p) => p.column === "trade_id" && p.rowNo === null));
+      assert.ok(out.problems.some((p) => p.column === "deal_amount"));
+    }
+  });
 });
 
 describe("loaders accept blank GL as_of and call the service", () => {
