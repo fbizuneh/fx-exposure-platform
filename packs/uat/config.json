@@ -231,5 +231,265 @@
         }
       }
     }
-  ]
+  ],
+  "generator": {
+    "rateStartDate": "2025-11-20",
+    "endDate": "2026-11-20",
+    "chartCode": "UAT",
+    "rateSource": "uat-rates",
+    "currencies": [
+      {
+        "code": "USD",
+        "initialUsdRate": "1",
+        "dailyVolatilityBps": "25",
+        "annualInterestPct": "4"
+      },
+      {
+        "code": "EUR",
+        "initialUsdRate": "1.08",
+        "dailyVolatilityBps": "45",
+        "annualInterestPct": "2.5"
+      },
+      {
+        "code": "GBP",
+        "initialUsdRate": "1.27",
+        "dailyVolatilityBps": "50",
+        "annualInterestPct": "3.5"
+      },
+      {
+        "code": "JPY",
+        "initialUsdRate": "0.0067",
+        "dailyVolatilityBps": "55",
+        "annualInterestPct": "0.5"
+      },
+      {
+        "code": "CHF",
+        "initialUsdRate": "1.12",
+        "dailyVolatilityBps": "40",
+        "annualInterestPct": "1.5"
+      },
+      {
+        "code": "CAD",
+        "initialUsdRate": "0.73",
+        "dailyVolatilityBps": "45",
+        "annualInterestPct": "3"
+      },
+      {
+        "code": "AUD",
+        "initialUsdRate": "0.66",
+        "dailyVolatilityBps": "55",
+        "annualInterestPct": "3.8"
+      },
+      {
+        "code": "NZD",
+        "initialUsdRate": "0.61",
+        "dailyVolatilityBps": "60",
+        "annualInterestPct": "4.2"
+      },
+      {
+        "code": "SGD",
+        "initialUsdRate": "0.75",
+        "dailyVolatilityBps": "30",
+        "annualInterestPct": "2.8"
+      },
+      {
+        "code": "HKD",
+        "initialUsdRate": "0.128",
+        "dailyVolatilityBps": "5",
+        "annualInterestPct": "3.6"
+      },
+      {
+        "code": "CNY",
+        "initialUsdRate": "0.14",
+        "dailyVolatilityBps": "25",
+        "annualInterestPct": "2.2"
+      },
+      {
+        "code": "CNH",
+        "initialUsdRate": "0.14",
+        "dailyVolatilityBps": "30",
+        "annualInterestPct": "2.5"
+      },
+      {
+        "code": "SEK",
+        "initialUsdRate": "0.095",
+        "dailyVolatilityBps": "55",
+        "annualInterestPct": "2.4"
+      },
+      {
+        "code": "NOK",
+        "initialUsdRate": "0.093",
+        "dailyVolatilityBps": "60",
+        "annualInterestPct": "3.5"
+      },
+      {
+        "code": "DKK",
+        "initialUsdRate": "0.145",
+        "dailyVolatilityBps": "30",
+        "annualInterestPct": "2.6"
+      },
+      {
+        "code": "PLN",
+        "initialUsdRate": "0.25",
+        "dailyVolatilityBps": "65",
+        "annualInterestPct": "5"
+      },
+      {
+        "code": "CZK",
+        "initialUsdRate": "0.043",
+        "dailyVolatilityBps": "60",
+        "annualInterestPct": "4"
+      },
+      {
+        "code": "HUF",
+        "initialUsdRate": "0.0028",
+        "dailyVolatilityBps": "75",
+        "annualInterestPct": "6"
+      },
+      {
+        "code": "RON",
+        "initialUsdRate": "0.215",
+        "dailyVolatilityBps": "55",
+        "annualInterestPct": "5.5"
+      },
+      {
+        "code": "TRY",
+        "initialUsdRate": "0.029",
+        "dailyVolatilityBps": "110",
+        "annualInterestPct": "28"
+      },
+      {
+        "code": "ZAR",
+        "initialUsdRate": "0.055",
+        "dailyVolatilityBps": "95",
+        "annualInterestPct": "8"
+      },
+      {
+        "code": "MXN",
+        "initialUsdRate": "0.058",
+        "dailyVolatilityBps": "75",
+        "annualInterestPct": "9"
+      },
+      {
+        "code": "BRL",
+        "initialUsdRate": "0.19",
+        "dailyVolatilityBps": "85",
+        "annualInterestPct": "10",
+        "isNdf": true
+      },
+      {
+        "code": "INR",
+        "initialUsdRate": "0.012",
+        "dailyVolatilityBps": "35",
+        "annualInterestPct": "6.5",
+        "isNdf": true
+      },
+      {
+        "code": "KRW",
+        "initialUsdRate": "0.00075",
+        "dailyVolatilityBps": "55",
+        "annualInterestPct": "3",
+        "isNdf": true
+      },
+      {
+        "code": "TWD",
+        "initialUsdRate": "0.031",
+        "dailyVolatilityBps": "40",
+        "annualInterestPct": "1.8",
+        "isNdf": true
+      },
+      {
+        "code": "IDR",
+        "initialUsdRate": "0.000064",
+        "dailyVolatilityBps": "50",
+        "annualInterestPct": "6",
+        "isNdf": true
+      },
+      {
+        "code": "PHP",
+        "initialUsdRate": "0.018",
+        "dailyVolatilityBps": "50",
+        "annualInterestPct": "5.5",
+        "isNdf": true
+      },
+      {
+        "code": "CLP",
+        "initialUsdRate": "0.0011",
+        "dailyVolatilityBps": "70",
+        "annualInterestPct": "5",
+        "isNdf": true
+      },
+      {
+        "code": "COP",
+        "initialUsdRate": "0.00025",
+        "dailyVolatilityBps": "75",
+        "annualInterestPct": "9",
+        "isNdf": true
+      },
+      {
+        "code": "PEN",
+        "initialUsdRate": "0.27",
+        "dailyVolatilityBps": "60",
+        "annualInterestPct": "5"
+      },
+      {
+        "code": "AED",
+        "initialUsdRate": "0.272",
+        "dailyVolatilityBps": "5",
+        "annualInterestPct": "4",
+        "weekendDays": "FRI|SAT"
+      },
+      {
+        "code": "SAR",
+        "initialUsdRate": "0.267",
+        "dailyVolatilityBps": "5",
+        "annualInterestPct": "4",
+        "weekendDays": "FRI|SAT"
+      },
+      {
+        "code": "ILS",
+        "initialUsdRate": "0.27",
+        "dailyVolatilityBps": "70",
+        "annualInterestPct": "4"
+      },
+      {
+        "code": "THB",
+        "initialUsdRate": "0.029",
+        "dailyVolatilityBps": "50",
+        "annualInterestPct": "2.5"
+      },
+      {
+        "code": "MYR",
+        "initialUsdRate": "0.22",
+        "dailyVolatilityBps": "55",
+        "annualInterestPct": "3"
+      },
+      {
+        "code": "VND",
+        "initialUsdRate": "0.00004",
+        "dailyVolatilityBps": "35",
+        "annualInterestPct": "4.5",
+        "isNdf": true
+      },
+      {
+        "code": "EGP",
+        "initialUsdRate": "0.02",
+        "dailyVolatilityBps": "100",
+        "annualInterestPct": "20"
+      },
+      {
+        "code": "NGN",
+        "initialUsdRate": "0.00065",
+        "dailyVolatilityBps": "120",
+        "annualInterestPct": "18",
+        "isNdf": true
+      },
+      {
+        "code": "KES",
+        "initialUsdRate": "0.0077",
+        "dailyVolatilityBps": "80",
+        "annualInterestPct": "11"
+      }
+    ]
+  }
 }

@@ -3,6 +3,8 @@
 Read this with AGENTS.md at the start of a session. Update it when a service is finished or a decision is added.
 
 ## Order and status
+Release 1 stream E: E1 design is merged. E2 configuration and E3 generator are in review-ready PRs; E4–E7 follow in the stack. The generator has seeded master, GL, rate and trade files, two GL fixtures and a SHA-256 manifest. Loader-backed verification awaits D4+ and a UAT database.
+
 Shared kernel, checks, Identity (done) -> Master Data (done) -> FX Rate (done) -> Data Source (done) -> Exposure Management (done) -> **Exposure Analysis (done, incl. net exposure)** -> **FX Trade (done; the demo simulator is a separate tool outside the services)** -> **Hedge Recommendation (done: hedge-ratio-adjustment, decision 0011)** -> **Audit (built: change records, append-only hash chain, decision 0012)**. **Release 1 stream D (data loaders):** D1 file layouts are documented in `docs/file-layouts.md`; D2 is complete with per-service CSV readers and the drift check (Decision 0024); D3 pure file parsers are in Master Data (`files.ts`), Data Source and FX Rate (`file.ts`); D4 onward has not started. **Follow-up for D4/E:** the rates file parser allows a FORWARD row with no `value_date` (shape-only); the trade simulator needs a value date on forwards, so E3 pack files and/or the D4 loader should always supply one for forward-rate scenarios.
 
 ## app/ (composition)

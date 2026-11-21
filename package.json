@@ -14,7 +14,8 @@
     "db:migrate": "node scripts/migrate.mjs",
     "start": "node app/src/server.ts",
     "uat:configure": "node scripts/uat/configure.ts",
-    "uat:reset": "node scripts/uat/reset.ts"
+    "uat:reset": "node scripts/uat/reset.ts",
+    "uat:generate": "node scripts/uat/generate.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

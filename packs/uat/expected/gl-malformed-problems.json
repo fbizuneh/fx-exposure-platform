@@ -1,0 +1,207 @@
+{
+  "expectedStatus": "INVALID_FILE",
+  "expectedExitCode": 1,
+  "storedRows": 0,
+  "problems": [
+    {
+      "row": 1,
+      "column": "balance",
+      "kind": "balance_with_debit"
+    },
+    {
+      "row": 2,
+      "column": "balance",
+      "kind": "no_amount"
+    },
+    {
+      "row": 3,
+      "column": "as_of",
+      "kind": "bad_date"
+    },
+    {
+      "row": 4,
+      "column": "currency",
+      "kind": "bad_currency"
+    },
+    {
+      "row": 5,
+      "column": "balance",
+      "kind": "non_numeric"
+    },
+    {
+      "row": 6,
+      "column": "entity_code",
+      "kind": "missing_entity"
+    },
+    {
+      "row": 7,
+      "column": "balance",
+      "kind": "balance_with_debit"
+    },
+    {
+      "row": 8,
+      "column": "balance",
+      "kind": "no_amount"
+    },
+    {
+      "row": 9,
+      "column": "as_of",
+      "kind": "bad_date"
+    },
+    {
+      "row": 10,
+      "column": "currency",
+      "kind": "bad_currency"
+    },
+    {
+      "row": 11,
+      "column": "balance",
+      "kind": "non_numeric"
+    },
+    {
+      "row": 12,
+      "column": "entity_code",
+      "kind": "missing_entity"
+    },
+    {
+      "row": 13,
+      "column": "balance",
+      "kind": "balance_with_debit"
+    },
+    {
+      "row": 14,
+      "column": "balance",
+      "kind": "no_amount"
+    },
+    {
+      "row": 15,
+      "column": "as_of",
+      "kind": "bad_date"
+    },
+    {
+      "row": 16,
+      "column": "currency",
+      "kind": "bad_currency"
+    },
+    {
+      "row": 17,
+      "column": "balance",
+      "kind": "non_numeric"
+    },
+    {
+      "row": 18,
+      "column": "entity_code",
+      "kind": "missing_entity"
+    },
+    {
+      "row": 19,
+      "column": "balance",
+      "kind": "balance_with_debit"
+    },
+    {
+      "row": 20,
+      "column": "balance",
+      "kind": "no_amount"
+    },
+    {
+      "row": 21,
+      "column": "as_of",
+      "kind": "bad_date"
+    },
+    {
+      "row": 22,
+      "column": "currency",
+      "kind": "bad_currency"
+    },
+    {
+      "row": 23,
+      "column": "balance",
+      "kind": "non_numeric"
+    },
+    {
+      "row": 24,
+      "column": "entity_code",
+      "kind": "missing_entity"
+    },
+    {
+      "row": 25,
+      "column": "balance",
+      "kind": "balance_with_debit"
+    },
+    {
+      "row": 26,
+      "column": "balance",
+      "kind": "no_amount"
+    },
+    {
+      "row": 27,
+      "column": "as_of",
+      "kind": "bad_date"
+    },
+    {
+      "row": 28,
+      "column": "currency",
+      "kind": "bad_currency"
+    },
+    {
+      "row": 29,
+      "column": "balance",
+      "kind": "non_numeric"
+    },
+    {
+      "row": 30,
+      "column": "entity_code",
+      "kind": "missing_entity"
+    },
+    {
+      "row": 31,
+      "column": "balance",
+      "kind": "balance_with_debit"
+    },
+    {
+      "row": 32,
+      "column": "balance",
+      "kind": "no_amount"
+    },
+    {
+      "row": 33,
+      "column": "as_of",
+      "kind": "bad_date"
+    },
+    {
+      "row": 34,
+      "column": "currency",
+      "kind": "bad_currency"
+    },
+    {
+      "row": 35,
+      "column": "balance",
+      "kind": "non_numeric"
+    },
+    {
+      "row": 36,
+      "column": "entity_code",
+      "kind": "missing_entity"
+    },
+    {
+      "row": 37,
+      "column": "balance",
+      "kind": "balance_with_debit"
+    },
+    {
+      "row": 38,
+      "column": "balance",
+      "kind": "no_amount"
+    },
+    {
+      "row": 39,
+      "column": "as_of",
+      "kind": "bad_date"
+    },
+    {
+      "row": 40,
+      "column": "currency",
+      "kind": "bad_currency"
+    }
+  ]
+}

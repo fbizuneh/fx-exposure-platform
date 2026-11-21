@@ -1,0 +1,26 @@
+chart_code,code,name,classification,parent_code
+UAT,BS,Balance sheet,BALANCE_SHEET,
+UAT,FX,FX relevant,ASSETS,BS
+UAT,NONFX,Other balance sheet,ASSETS,BS
+UAT,FXA1,FX asset group 1,ASSETS,FX
+UAT,FXA2,FX asset group 2,ASSETS,FX
+UAT,FXA3,FX asset group 3,ASSETS,FX
+UAT,FXA4,FX asset group 4,ASSETS,FX
+UAT,FXA5,FX asset group 5,ASSETS,FX
+UAT,FXA6,FX asset group 6,ASSETS,FX
+UAT,FXA7,FX asset group 7,ASSETS,FX
+UAT,FXA8,FX asset group 8,ASSETS,FX
+UAT,FXA9,FX asset group 9,ASSETS,FX
+UAT,FXA10,FX asset group 10,ASSETS,FX
+UAT,FXA11,FX asset group 11,ASSETS,FX
+UAT,FXL1,FX liability group 1,LIABILITIES,FX
+UAT,FXL2,FX liability group 2,LIABILITIES,FX
+UAT,FXL3,FX liability group 3,LIABILITIES,FX
+UAT,FXL4,FX liability group 4,LIABILITIES,FX
+UAT,FXL5,FX liability group 5,LIABILITIES,FX
+UAT,FXL6,FX liability group 6,LIABILITIES,FX
+UAT,FXL7,FX liability group 7,LIABILITIES,FX
+UAT,FXL8,FX liability group 8,LIABILITIES,FX
+UAT,FXL9,FX liability group 9,LIABILITIES,FX
+UAT,FXL10,FX liability group 10,LIABILITIES,FX
+UAT,FXL11,FX liability group 11,LIABILITIES,FX
