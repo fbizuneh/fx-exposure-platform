@@ -14,7 +14,7 @@ The script checks both names before writing, creates both tenants, ensures the p
 
 Master data is loaded later through D's file loader, after the configuration. This script never writes a service table directly.
 
-`npm run uat:reset` drops all service schemas in the selected database, including the migration records. It refuses every database whose name does not end in `_uat` or `_test`; then `npm run db:migrate` recreates the schemas. Reset is for a disposable UAT database only.
+`npm run uat:reset` drops all service schemas in the selected database, including the migration records. Before any drop, it requires the URL database name to end in `_uat` or `_test` and `current_database()` to equal that exact name. A mismatch leaves every schema untouched. Then `npm run db:migrate` recreates the schemas. Reset is for a disposable UAT database only.
 
 If configuration fails after creating either tenant, the database is partially configured and a second `uat:configure` run will correctly refuse the existing name. On a disposable `_uat` or `_test` database, recover by running `npm run uat:reset`, `npm run db:migrate`, then `npm run uat:configure -- --config packs/uat/config.json` again. Preserve the failure message before resetting. The script never deletes a tenant automatically.
 

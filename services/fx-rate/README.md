@@ -19,5 +19,8 @@ Events carry identifiers only.
 ## Consumes
 - Rate providers (loads sent by connectors, files or manual entry)
 
+## Files
+`parseRatesFile` in `src/file.ts` reads rate CSVs (layouts in `docs/file-layouts.md`) via the local `csv.ts`. Shape only; money stays text.
+
 ## Schema
 `fx_rate`. Its tables are defined by this service's migrations.
