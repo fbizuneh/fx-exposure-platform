@@ -26,11 +26,15 @@ export interface DeliveryProblem {
   readonly retryAt: Date | null; readonly stuckAt: Date | null;
 }
 
+/** True for exactly the retry announcement this service's own `retryStuck` writes (decision 0030), never any other change record. */
+const isRetryAnnouncement = (alias: "o" | "b") => sql<boolean>`(${sql.ref(`${alias}.type`)} like '%.change-recorded' and ${sql.ref(`${alias}.payload`)}->>'action' = 'event.retried')`;
+
 /**
  * Events that may be delivered now, oldest first. Per tenant, nothing is offered behind an event that is waiting to be retried or is stuck, so a tenant's
- * order is kept while other tenants carry on (decision 0019). A `.change-recorded` announcement is exempt from that hold in both directions (decision
- * 0030): Audit only needs its records to arrive, not in any order relative to this service's other events, and an operator's retry announcement must
- * still reach Audit even if the event it was about gets stuck again before the announcement is delivered.
+ * order is kept while other tenants carry on (decision 0019; records from one service otherwise arrive in order, decision 0012 point 4). A retry's own
+ * `event.retried` announcement is the single, narrow exception (decision 0030): it is never held behind an earlier unresolved event, and never holds a
+ * later one, so it still reaches Audit even if the event it was about gets stuck again before the announcement is delivered. Every other change record,
+ * J2's included, keeps the ordinary hold in both directions.
  */
 export async function pendingEvents(db: Db, limit = 100, now = new Date()): Promise<FxRateEvents[]> {
   const rows = await q(db)
@@ -41,11 +45,11 @@ export async function pendingEvents(db: Db, limit = 100, now = new Date()): Prom
     .where((eb) => eb.or([eb("o.retry_at", "is", null), eb("o.retry_at", "<=", now)]))
     .where((eb) =>
       eb.or([
-        eb("o.type", "like", "%.change-recorded"),
+        isRetryAnnouncement("o"),
         eb.not(
           eb.exists(
             eb.selectFrom("outbox as b").select("b.event_id").whereRef("b.tenant_id", "=", "o.tenant_id").whereRef("b.seq", "<", "o.seq").where("b.published_at", "is", null)
-              .where("b.type", "not like", "%.change-recorded")
+              .where((e2) => e2.not(isRetryAnnouncement("b")))
               .where((e2) => e2.or([e2("b.stuck_at", "is not", null), e2("b.retry_at", ">", now)])),
           ),
         ),
@@ -88,13 +92,14 @@ export async function deliveryProblems(db: Db): Promise<DeliveryProblem[]> {
 }
 
 /**
- * An operator's retry of a stuck event: its tries start again. False when the event is not stuck. The reset and the retry's own
- * `event.retried` announcement commit or fail together (decision 0030), so the audit trail can never come apart from the retry.
+ * An operator's retry of a stuck event: its tries start again. False when the event is not stuck, or when it belongs to a
+ * different tenant than `by.tenantId` (the mutation enforces this itself, not only the caller's lookup in `operations.ts`, decision 0030).
+ * The reset and the retry's own `event.retried` announcement commit or fail together, so the audit trail can never come apart from the retry.
  */
 export async function retryStuck(db: Db, eventId: string, by: { tenantId: TenantId; actor: string }): Promise<boolean> {
   return db.transaction().execute(async (tx) => {
     const row = await q(tx).updateTable("outbox").set({ attempts: 0, retry_at: null, stuck_at: null })
-      .where("event_id", "=", eventId).where("published_at", "is", null).where("stuck_at", "is not", null).returning("event_id").executeTakeFirst();
+      .where("event_id", "=", eventId).where("tenant_id", "=", by.tenantId).where("published_at", "is", null).where("stuck_at", "is not", null).returning("event_id").executeTakeFirst();
     if (row === undefined) return false;
     await announce(tx, {
       type: "fx-rate.change-recorded", tenantId: by.tenantId, programId: null, actor: by.actor,
