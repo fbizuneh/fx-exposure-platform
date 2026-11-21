@@ -21,6 +21,7 @@ export function createMasterData(db: Db) {
 export { connect };
 export type { Db };
 export { ChangeSetRefused } from "./apply.ts";
+export type { SubmitResult } from "./apply.ts";
 export { ChangeSetInvalid } from "./validate.ts";
 export type { AccountRow, CalendarRow, CurrencyRow, EntityRow, HierarchyNodeRow, PairExposureCurrencyRow } from "./rows.ts";
 export {
