@@ -22,6 +22,7 @@ const FK_INLINE_RE = /FOREIGN\s+KEY\s*\(([^)]*)\)\s*REFERENCES\s+([\w."]+)/gi;
 const FK_ALTER_RE = /ALTER\s+TABLE\s+([\w."]+)\s+ADD\s+(?:CONSTRAINT\s+([\w"]+)\s+)?FOREIGN\s+KEY\s*\(([^)]*)\)\s*REFERENCES\s+([\w."]+)/gi;
 const DROP_RE = /ALTER\s+TABLE\s+([\w."]+)\s+DROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?([\w"]+)/gi;
 const ADD_COLUMN_RE = /ALTER\s+TABLE\s+([\w."]+)\s+ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?program_id\b/gi;
+const DROP_COLUMN_RE = /ALTER\s+TABLE\s+([\w."]+)\s+DROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?program_id\b/gi;
 const clean = (s) => s.replace(/"/g, "").toLowerCase();
 const columns = (s) => s.split(",").map((c) => c.trim().replace(/"/g, "").toLowerCase()).filter(Boolean);
 /** Postgres names an unnamed foreign key <table>_<columns>_fkey, without the schema. */
@@ -44,6 +45,7 @@ function programKeyGaps(root, service, files) {
       } });
     }
     for (const m of text.matchAll(ADD_COLUMN_RE)) events.push({ at: m.index, run: () => hasProgram.add(clean(m[1])) });
+    for (const m of text.matchAll(DROP_COLUMN_RE)) events.push({ at: m.index, run: () => hasProgram.delete(clean(m[1])) });
     for (const m of text.matchAll(FK_ALTER_RE)) events.push({ at: m.index, run: () => { const table = clean(m[1]); const cols = columns(m[3]); fks.push({ table, cols, parent: clean(m[4]), name: m[2] ? clean(m[2]) : autoName(table, cols), where }); } });
     for (const m of text.matchAll(DROP_RE)) events.push({ at: m.index, run: () => { const table = clean(m[1]).split(".").pop(); const name = clean(m[2]); fks = fks.filter((k) => !(k.table.split(".").pop() === table && k.name === name)); } });
     for (const e of events.sort((x, y) => x.at - y.at)) e.run();

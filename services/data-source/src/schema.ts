@@ -57,9 +57,14 @@ export interface DataSourceDatabase {
     amount: ColumnType<string | null, string | null, string | null>;
     dimensions: Json;
     outcome: "INCLUDED" | "EXCLUDED" | "BLOCKED";
-    program_id: string | null;
     matched_rule_ids: Json;
     raw: JsonOrNull;
+  };
+  balance_programs: {
+    tenant_id: string;
+    balance_id: string;
+    program_id: string;
+    matched_rule_ids: Json;
   };
   data_quality_issues: {
     tenant_id: string;

@@ -1,0 +1,9 @@
+# 0027 — Two balance sheet programs may share GL balances
+
+Fikre chose two balance sheet programs on the same GL for Release 1 stream E on 2026-11-20. This supersedes the one-balance-sheet-program limit in decision 0007 and the single-program stamp in decision 0006 for this case. The first release permits up to two balance sheet programs in one tenant; other program combination rules remain.
+
+Data Source stores one source balance row and a program membership for each balance sheet program whose active mapping rules include it. A program's exclude rule removes only that program's membership. The question `includedBalances` returns the row only to a program with a membership, carrying that program ID. A batch's received, included, excluded and blocked counts remain counts of source rows, never membership counts. Overlapping include rules from different balance sheet programs are allowed; overlap involving another program type remains refused. A match of more than two programs remains blocked. The source row and memberships are stored in one Data Source transaction and retained with the batch when later batches supersede it.
+
+The `balances.program_id` column was a single-program stamp. A Data Source migration moves existing included stamps to a program-membership table and removes the column. The migration and query preserve historical included balances and tenant scope. The new table is program-scoped; the source balance table is not. Data Source still announces one batch-stamped event, and Exposure Analysis asks for each program's balances through the contract.
+
+Cost: a Data Source migration and changes to program matching, intake, queries and tests, plus a revised Exposure Management combination rule. The repository's old one-program description in the glossary and decision 0007 must be read with this exception.

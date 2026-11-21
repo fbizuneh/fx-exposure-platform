@@ -57,7 +57,7 @@ export function ruleCommands(db: Db, md: MasterDataQuestionsLike) {
     const tenant = input.tenantId;
     return db.transaction().execute(async (tx) => {
       await sql`SELECT pg_advisory_xact_lock(hashtext(${`${tenant}:rules`}))`.execute(tx);
-      const program = await q(tx).selectFrom("programs").select("program_id").where("tenant_id", "=", tenant).where("program_id", "=", input.programId).executeTakeFirst();
+      const program = await q(tx).selectFrom("programs").select(["program_id", "program_type"]).where("tenant_id", "=", tenant).where("program_id", "=", input.programId).executeTakeFirst();
       if (!program) throw new RuleInvalid([`program ${input.programId} is not in the catalog`]);
 
       const ruleId = randomUUID();
@@ -68,7 +68,9 @@ export function ruleCommands(db: Db, md: MasterDataQuestionsLike) {
 
       if (next.kind === "INCLUDE") {
         const all = (await q(tx).selectFrom("mapping_rules").selectAll().where("tenant_id", "=", tenant).execute()).map(toRule);
+        const types = new Map((await q(tx).selectFrom("programs").select(["program_id", "program_type"]).where("tenant_id", "=", tenant).execute()).map((p) => [p.program_id, p.program_type]));
         for (const other of all.filter((r) => r.kind === "INCLUDE" && r.programId !== next.programId)) {
+          if (program.program_type === "BALANCE_SHEET" && types.get(other.programId) === "BALANCE_SHEET") continue;
           const day = scopesMeet(next, other) ? firstSharedDate(next, other) : null;
           if (day === null) continue;
           const shared = [...(await accountsOf(tenant, next.target, day))];

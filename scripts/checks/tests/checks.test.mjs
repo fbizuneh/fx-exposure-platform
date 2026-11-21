@@ -127,4 +127,5 @@ test("tenant-program: a foreign key between two program-scoped tables must inclu
   assert.match(run("tenant-program", mig(parent + child("FOREIGN KEY (tenant_id, run_id) REFERENCES alpha.runs (tenant_id, run_id)"), `ALTER TABLE alpha.rows DROP CONSTRAINT rows_tenant_id_run_id_fkey;\nALTER TABLE alpha.rows ADD FOREIGN KEY (tenant_id, run_id) REFERENCES alpha.runs (tenant_id, run_id);\n`))[0], /leaves out program_id/);
   // A child with no program_id of its own (or a parent with none) is not subject to it.
   assert.deepEqual(run("tenant-program", mig(parent + `CREATE TABLE alpha.notes (\n  tenant_id uuid NOT NULL,\n  run_id uuid NOT NULL,\n  FOREIGN KEY (tenant_id, run_id) REFERENCES alpha.runs (tenant_id, run_id)\n);\n`)), []);
+  assert.deepEqual(run("tenant-program", mig(parent + child("FOREIGN KEY (tenant_id, run_id) REFERENCES alpha.runs (tenant_id, run_id)"), `ALTER TABLE alpha.runs DROP COLUMN program_id;\n`)), []);
 });

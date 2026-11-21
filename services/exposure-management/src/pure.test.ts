@@ -19,9 +19,10 @@ test("settings: netting level, buckets and schedule are each checked", () => {
   assert.match(validateSettings({ ...ok, schedule: { frequency: "HOURLY", asOfOffsetDays: 0 } as never }).join(), /DAILY, WEEKLY or MONTHLY/);
 });
 
-test("combination rules: one balance sheet program; classic programs and Budget to Cash exclude each other", () => {
+test("combination rules: two balance sheet programs; classic programs and Budget to Cash exclude each other", () => {
   assert.equal(combinationProblem([], "BALANCE_SHEET"), null);
-  assert.match(combinationProblem(["BALANCE_SHEET"], "BALANCE_SHEET") ?? "", /only one balance sheet/);
+  assert.equal(combinationProblem(["BALANCE_SHEET"], "BALANCE_SHEET"), null);
+  assert.match(combinationProblem(["BALANCE_SHEET", "BALANCE_SHEET"], "BALANCE_SHEET") ?? "", /at most two balance sheet/);
   assert.equal(combinationProblem(["BALANCE_SHEET"], "CASH_FLOW"), null);
   assert.equal(combinationProblem(["BALANCE_SHEET", "CASH_FLOW"], "IN_HOUSE_BANK"), null);
   assert.match(combinationProblem(["CASH_FLOW"], "BUDGET_TO_CASH") ?? "", /Budget to Cash/);

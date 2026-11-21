@@ -66,7 +66,7 @@ const CLASSIC: readonly ProgramType[] = ["BALANCE_SHEET", "CASH_FLOW", "IN_HOUSE
 
 /** Why a new program cannot join the programs a tenant already has, or null when it can. */
 export function combinationProblem(existing: readonly ProgramType[], adding: ProgramType): string | null {
-  if (adding === "BALANCE_SHEET" && existing.includes("BALANCE_SHEET")) return "a tenant may run only one balance sheet program";
+  if (adding === "BALANCE_SHEET" && existing.filter((t) => t === "BALANCE_SHEET").length >= 2) return "a tenant may run at most two balance sheet programs";
   if (adding === "BUDGET_TO_CASH" && existing.some((t) => CLASSIC.includes(t))) return "Budget to Cash cannot be combined with classic programs";
   if (CLASSIC.includes(adding) && existing.includes("BUDGET_TO_CASH")) return "classic programs cannot be combined with Budget to Cash";
   return null;

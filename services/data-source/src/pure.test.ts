@@ -28,6 +28,10 @@ test("another program can take what a program excludes; two programs claiming is
   assert.deepEqual([matchProgram(rules, fact()).outcome, matchProgram(rules, fact()).programId], ["ASSIGNED", "CF"]);
   const clash = matchProgram([rule("a", "BS", "INCLUDE", node("1")), rule("c", "CF", "INCLUDE", acct("1000"))], fact());
   assert.deepEqual([clash.outcome, clash.claimingPrograms], ["MULTI_MATCH", ["BS", "CF"]]);
+  const shared = matchProgram([rule("a", "BS-ENT", "INCLUDE", node("1")), rule("b", "BS-REG", "INCLUDE", acct("1000"))], fact(), new Set(["BS-ENT", "BS-REG"]));
+  assert.deepEqual([shared.outcome, shared.claimingPrograms], ["SHARED", ["BS-ENT", "BS-REG"]]);
+  const oneExcluded = matchProgram([rule("a", "BS-ENT", "INCLUDE", node("1")), rule("b", "BS-REG", "INCLUDE", node("1")), rule("c", "BS-REG", "EXCLUDE", acct("1000"))], fact(), new Set(["BS-ENT", "BS-REG"]));
+  assert.deepEqual([oneExcluded.outcome, oneExcluded.claimingPrograms], ["ASSIGNED", ["BS-ENT"]]);
 });
 
 test("scope: dates are end-exclusive; source system, entity and dimensions narrow a rule", () => {

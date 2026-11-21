@@ -3,11 +3,11 @@
 Tier: supporting.
 
 ## Owns
-- Program mapping rules, and the program ID stamped on each balance
+- Program mapping rules, and each included balance's program memberships (up to two balance sheet programs may share a source row; decision 0027)
 - Ingested GL balances with their lineage (source system, batch, and the balance's key), and every batch received
 - Ingestion status and data quality issues
 - A small reference copy of the program catalog
-See docs/decisions/0006-data-source.md.
+See docs/decisions/0006-data-source.md and 0027-two-balance-sheet-programs.md.
 
 ## Answers
 - Included balances for a program, as-of date and scope (current batches only)

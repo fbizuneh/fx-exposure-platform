@@ -10,9 +10,10 @@ export function dataSourceQuestions(db: Db): DataSourceQuestions {
     async includedBalances(query) {
       let sel = q(db)
         .selectFrom("balances as b")
+        .innerJoin("balance_programs as p", (j) => j.onRef("p.tenant_id", "=", "b.tenant_id").onRef("p.balance_id", "=", "b.balance_id"))
         .innerJoin("batches as c", (j) => j.onRef("c.tenant_id", "=", "b.tenant_id").onRef("c.batch_id", "=", "b.batch_id"))
-        .select(["b.batch_id", "b.source_system", "b.record_key", "b.program_id", "b.as_of", "b.entity_id", "b.entity_code", "b.account_id", "b.chart_code", "b.account_number", "b.currency", "b.amount", "b.dimensions"])
-        .where("b.tenant_id", "=", query.tenantId).where("b.program_id", "=", query.programId).where("b.as_of", "=", query.asOf)
+        .select(["b.batch_id", "b.source_system", "b.record_key", "p.program_id", "b.as_of", "b.entity_id", "b.entity_code", "b.account_id", "b.chart_code", "b.account_number", "b.currency", "b.amount", "b.dimensions"])
+        .where("b.tenant_id", "=", query.tenantId).where("p.program_id", "=", query.programId).where("b.as_of", "=", query.asOf)
         .where("b.outcome", "=", "INCLUDED").where("c.superseded_by", "is", null).where("c.status", "<>", "FAILED");
       if (query.sourceSystem) sel = sel.where("b.source_system", "=", query.sourceSystem);
       if (query.entityIds) {

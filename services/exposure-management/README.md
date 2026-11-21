@@ -6,7 +6,7 @@ Tier: core.
 - Programs, their types and settings (netting level, display currency, exposure currency overrides, date buckets, schedule), with the combination rules
 - A tenant setting: segregation of duties, on by default; Approve Cycle attempts and their recovery (decision 0013)
 - The cycle record: stages (initiated, in progress, completed), outcomes (skipped, deleted), reruns, two approvals (exposure, then cycle), and the settings in force when it started
-See docs/decisions/0007-exposure-management.md.
+See docs/decisions/0007-exposure-management.md and 0027-two-balance-sheet-programs.md (up to two balance sheet programs per tenant).
 
 ## Answers
 - Program catalog

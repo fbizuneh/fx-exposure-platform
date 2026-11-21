@@ -90,6 +90,25 @@ dbTest("balances are stamped, excluded or blocked; only included ones are served
   assert.deepEqual(await ds.questions.includedBalances({ tenantId: t, programId: programId("BS"), asOf: D1, entityIds: [] }), []);
 });
 
+dbTest("two balance sheet programs share source rows but keep separate memberships and exclusions", async () => {
+  const t = newTenant();
+  for (const p of ["BS-ENT", "BS-REG"]) {
+    await ds.commands.upsertProgram(t, { programId: p, type: "BALANCE_SHEET", enabled: true });
+    await ds.commands.addMappingRule({ tenantId: t, programId: p, kind: "INCLUDE", target: { type: "NODE", chartCode: "C", nodeCode: "1" }, validFrom: "2026-01-01", validTo: null, by: "test" });
+  }
+  await ds.commands.addMappingRule({ tenantId: t, programId: "BS-REG", kind: "EXCLUDE", target: { type: "ACCOUNT", chartCode: "C", accountNumber: "1100" }, validFrom: "2026-01-01", validTo: null, by: "test" });
+  const batch = await send(t, [bal("1000", "100"), bal("1100", "40")]);
+  assert.deepEqual([batch.received, batch.included, batch.excluded, batch.blocked], [2, 2, 0, 0], "batch counts source rows, not program memberships");
+  const ent = await included(t, "BS-ENT");
+  const reg = await included(t, "BS-REG");
+  assert.deepEqual(ent.map((b) => b.accountNumber), ["1000", "1100"]);
+  assert.deepEqual(reg.map((b) => b.accountNumber), ["1000"]);
+  assert.equal(ent[0]!.lineage.recordId, reg[0]!.lineage.recordId, "both programs trace to the same source row");
+  assert.deepEqual([ent[0]!.programId, reg[0]!.programId], ["BS-ENT", "BS-REG"]);
+  assert.equal((await q(db).selectFrom("balances").select("balance_id").where("tenant_id", "=", t).execute()).length, 2);
+  assert.equal((await q(db).selectFrom("balance_programs").select("balance_id").where("tenant_id", "=", t).execute()).length, 3);
+});
+
 dbTest("each kind of bad row is blocked with its reason and the rest of the batch goes through", async () => {
   const t = newTenant();
   await setup(t);
@@ -280,7 +299,7 @@ dbTest("the database refuses an included balance without a program", async () =>
   await assert.rejects(
     q(db).insertInto("balances").values({
       tenant_id: t, balance_id: randomUUID(), batch_id: r.batchId, source_system: "erp", as_of: D1, row_number: 99, record_key: "x", entity_code: null, entity_id: null,
-      chart_code: "C", account_number: null, account_id: null, currency: null, amount: null, dimensions: "{}", outcome: "INCLUDED", program_id: null, matched_rule_ids: "[]", raw: null,
+      chart_code: "C", account_number: null, account_id: null, currency: null, amount: null, dimensions: "{}", outcome: "INCLUDED", matched_rule_ids: "[]", raw: null,
     }).execute(),
     /check/i,
   );

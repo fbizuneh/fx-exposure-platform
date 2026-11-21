@@ -122,9 +122,10 @@ dbTest("a program is defined only for a code Identity has enabled, by someone wh
 });
 
 dbTest("combination rules are enforced when programs are defined", async () => {
-  const t = newTenant("BS", "BS2", "CF", "B2C");
+  const t = newTenant("BS", "BS2", "BS3", "CF", "B2C");
   await define(t, "BS");
-  await assert.rejects(define(t, "BS2"), /only one balance sheet/);
+  await define(t, "BS2");
+  await assert.rejects(define(t, "BS3"), /at most two balance sheet/);
   await define(t, "CF", { type: "CASH_FLOW" });
   await assert.rejects(define(t, "B2C", { type: "BUDGET_TO_CASH" }), /Budget to Cash/);
   const t2 = newTenant("B2C", "CF");

@@ -102,7 +102,8 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
       const ruleRows = await q(tx).selectFrom("mapping_rules").selectAll().where("tenant_id", "=", tenant)
         .where("valid_from", "<=", batch.asOf).where((eb) => eb.or([eb("valid_to", "is", null), eb("valid_to", ">", batch.asOf)])).execute();
       const rules: MappingRule[] = ruleRows.map(toRule);
-      const programs = new Map((await q(tx).selectFrom("programs").select(["program_id", "enabled"]).where("tenant_id", "=", tenant).execute()).map((p) => [p.program_id, p.enabled]));
+      const programs = new Map((await q(tx).selectFrom("programs").select(["program_id", "program_type", "enabled"]).where("tenant_id", "=", tenant).execute()).map((p) => [p.program_id, p]));
+      const shareable = new Set([...programs.values()].filter((p) => p.program_type === "BALANCE_SHEET").map((p) => p.program_id));
 
       const keys = batch.rows.map((r) => recordKey(r));
       const complete = (r: GlBalanceRow) => !blank(r.entityCode) && !blank(r.accountNumber) && !blank(r.currency);
@@ -111,6 +112,7 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
 
       const batchId = randomUUID();
       const balances: Insertable<DataSourceDatabase["balances"]>[] = [];
+      const memberships: Insertable<DataSourceDatabase["balance_programs"]>[] = [];
       const issues: { balance_id: string; ruleCode: string; description: string }[] = [];
       let included = 0;
       let excluded = 0;
@@ -127,22 +129,22 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
         if (complete(r) && (seen.get(key) ?? 0) > 1) problems.push({ ruleCode: "GL_DUPLICATE_KEY", description: `${seen.get(key)} rows share the key ${key}; none can be trusted` });
 
         let outcome: "INCLUDED" | "EXCLUDED" | "BLOCKED" = "BLOCKED";
-        let programId: string | null = null;
+        let assignedPrograms: readonly string[] = [];
         let matched: readonly string[] = [];
         if (problems.length === 0 && entity && account) {
           const fact: MatchFact = {
             chartCode: batch.chartCode, accountNumber: account.accountNumber, hierarchyPath: account.hierarchyNodeCode ? (paths.get(account.hierarchyNodeCode) ?? []) : [],
             entityCode: entity.code, sourceSystem: batch.sourceSystem, dimensions: r.dimensions, asOf: batch.asOf,
           };
-          const m = matchProgram(rules, fact);
+          const m = matchProgram(rules, fact, shareable);
           matched = m.matchedRuleIds;
           if (m.outcome === "EXCLUDED") outcome = "EXCLUDED";
           else if (m.outcome === "UNMATCHED") problems.push({ ruleCode: "GL_PROGRAM_UNMATCHED", description: "No mapping rule assigns this balance to a program" });
           else if (m.outcome === "MULTI_MATCH") problems.push({ ruleCode: "GL_PROGRAM_MULTI_MATCH", description: `Programs ${m.claimingPrograms.join(", ")} all claim this balance` });
-          else if (programs.get(m.programId!) !== true) problems.push({ ruleCode: "GL_PROGRAM_NOT_ACTIVE", description: `Program ${m.programId} is unknown or disabled` });
           else {
-            outcome = "INCLUDED";
-            programId = m.programId;
+            assignedPrograms = m.claimingPrograms.filter((p) => programs.get(p)?.enabled === true);
+            if (assignedPrograms.length === 0) problems.push({ ruleCode: "GL_PROGRAM_NOT_ACTIVE", description: `Program ${m.claimingPrograms.join(", ")} is unknown or disabled` });
+            else outcome = "INCLUDED";
           }
         }
         if (problems.length > 0) outcome = "BLOCKED";
@@ -152,11 +154,15 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
 
         const balanceId = randomUUID();
         for (const p of problems) issues.push({ balance_id: balanceId, ruleCode: p.ruleCode, description: p.description });
+        if (outcome === "INCLUDED") for (const p of assignedPrograms) memberships.push({
+          tenant_id: tenant, balance_id: balanceId, program_id: p,
+          matched_rule_ids: JSON.stringify(rules.filter((rule) => rule.programId === p && matched.includes(rule.ruleId)).map((rule) => rule.ruleId)),
+        });
         balances.push({
           tenant_id: tenant, balance_id: balanceId, batch_id: batchId, source_system: batch.sourceSystem, as_of: batch.asOf, row_number: i + 1, record_key: key,
           entity_code: blank(r.entityCode) ? null : r.entityCode, entity_id: entity ? entity.entityId : null, chart_code: batch.chartCode,
           account_number: blank(r.accountNumber) ? null : r.accountNumber, account_id: account ? account.accountId : null,
-          currency: blank(r.currency) ? null : r.currency, amount, dimensions: JSON.stringify(r.dimensions), outcome, program_id: programId,
+          currency: blank(r.currency) ? null : r.currency, amount, dimensions: JSON.stringify(r.dimensions), outcome,
           matched_rule_ids: JSON.stringify(matched), raw: outcome === "BLOCKED" ? JSON.stringify(r) : null,
         });
       });
@@ -177,6 +183,7 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
       }
 
       for (const part of chunks(balances)) await q(tx).insertInto("balances").values(part).execute();
+      for (const part of chunks(memberships)) await q(tx).insertInto("balance_programs").values(part).execute();
       for (const part of chunks(issues)) {
         await q(tx).insertInto("data_quality_issues").values(part.map((p) => ({
           tenant_id: tenant, issue_id: randomUUID(), batch_id: batchId, balance_id: p.balance_id, rule_code: p.ruleCode, severity: "ERROR" as const,

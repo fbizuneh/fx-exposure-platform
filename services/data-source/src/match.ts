@@ -13,7 +13,7 @@ export interface MatchFact {
   readonly asOf: string;
 }
 
-export type MatchOutcome = "ASSIGNED" | "EXCLUDED" | "UNMATCHED" | "MULTI_MATCH";
+export type MatchOutcome = "ASSIGNED" | "SHARED" | "EXCLUDED" | "UNMATCHED" | "MULTI_MATCH";
 
 export interface MatchResult {
   readonly outcome: MatchOutcome;
@@ -39,7 +39,7 @@ export function ruleMatches(rule: MappingRule, fact: MatchFact): boolean {
   return rule.target.type === "ACCOUNT" ? rule.target.accountNumber === fact.accountNumber : fact.hierarchyPath.includes(rule.target.nodeCode);
 }
 
-export function matchProgram(rules: readonly MappingRule[], fact: MatchFact): MatchResult {
+export function matchProgram(rules: readonly MappingRule[], fact: MatchFact, shareablePrograms: ReadonlySet<string> = new Set()): MatchResult {
   const matched = rules.filter((r) => ruleMatches(r, fact));
   const programs = [...new Set(matched.map((r) => r.programId))].sort();
   const claiming: string[] = [];
@@ -58,6 +58,7 @@ export function matchProgram(rules: readonly MappingRule[], fact: MatchFact): Ma
       decisive.push(...includes.map((r) => r.ruleId));
     }
   }
+  if (claiming.length === 2 && claiming.every((p) => shareablePrograms.has(p))) return { outcome: "SHARED", programId: null, claimingPrograms: claiming, matchedRuleIds: decisive };
   if (claiming.length > 1) return { outcome: "MULTI_MATCH", programId: null, claimingPrograms: claiming, matchedRuleIds: decisive };
   if (claiming.length === 1) return { outcome: "ASSIGNED", programId: claiming[0]!, claimingPrograms: claiming, matchedRuleIds: decisive };
   if (excluded.length > 0) return { outcome: "EXCLUDED", programId: null, claimingPrograms: [], matchedRuleIds: decisive };
