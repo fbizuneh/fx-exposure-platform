@@ -1,8 +1,9 @@
 // Mapping rules and the program catalog. A rule is added and later ended, never edited.
 import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
-import type { AsOfDate, TenantId } from "@shared/kernel";
+import { programId as toProgramId, type AsOfDate, type TenantId } from "@shared/kernel";
 import type { MasterDataQuestionsLike } from "./ports.ts";
+import { byPerson, recordChange } from "./change-record.ts";
 import { q, type Db } from "./db.ts";
 import { firstSharedDate, scopesMeet } from "./match.ts";
 import type { MappingRule, RuleKind, RuleTarget } from "./rows.ts";
@@ -91,6 +92,7 @@ export function ruleCommands(db: Db, md: MasterDataQuestionsLike) {
         target_code: next.target.type === "ACCOUNT" ? next.target.accountNumber : next.target.nodeCode, valid_from: next.validFrom, valid_to: next.validTo,
         source_system: next.sourceSystem, entity_code: next.entityCode, dimensions: next.dimensions === null ? null : JSON.stringify(next.dimensions), created_by: input.by,
       }).execute();
+      if (byPerson(input.by)) await recordChange(tx, { tenantId: tenant, programId: toProgramId(next.programId), actor: input.by, action: "mapping-rule.added", targetType: "mapping-rule", targetId: ruleId, fields: [] });
       return ruleId;
     });
   }
@@ -99,13 +101,18 @@ export function ruleCommands(db: Db, md: MasterDataQuestionsLike) {
     addMappingRule,
 
     /** Stops a rule applying from `endsOn` (exclusive). Only ever shortens it. */
-    async endMappingRule(tenant: TenantId, ruleId: string, endsOn: string): Promise<void> {
+    async endMappingRule(tenant: TenantId, ruleId: string, endsOn: string, by: string): Promise<void> {
       if (!realDate(endsOn)) throw new RuleInvalid(["end date is not a date"]);
-      const r = await q(db).selectFrom("mapping_rules").select(["valid_from", "valid_to"]).where("tenant_id", "=", tenant).where("rule_id", "=", ruleId).executeTakeFirst();
-      if (!r) throw new RuleInvalid(["rule not found"]);
-      if (endsOn <= r.valid_from) throw new RuleInvalid(["the end date must be after the rule starts"]);
-      if (r.valid_to !== null && endsOn >= r.valid_to) throw new RuleInvalid(["a rule can only be shortened"]);
-      await q(db).updateTable("mapping_rules").set({ valid_to: endsOn }).where("tenant_id", "=", tenant).where("rule_id", "=", ruleId).execute();
+      return db.transaction().execute(async (tx) => {
+        // Serialized against addMappingRule and any other end of this tenant's rules, so the read, the shortening check and the write are atomic.
+        await sql`SELECT pg_advisory_xact_lock(hashtext(${`${tenant}:rules`}))`.execute(tx);
+        const r = await q(tx).selectFrom("mapping_rules").select(["program_id", "valid_from", "valid_to"]).where("tenant_id", "=", tenant).where("rule_id", "=", ruleId).executeTakeFirst();
+        if (!r) throw new RuleInvalid(["rule not found"]);
+        if (endsOn <= r.valid_from) throw new RuleInvalid(["the end date must be after the rule starts"]);
+        if (r.valid_to !== null && endsOn >= r.valid_to) throw new RuleInvalid(["a rule can only be shortened"]);
+        await q(tx).updateTable("mapping_rules").set({ valid_to: endsOn }).where("tenant_id", "=", tenant).where("rule_id", "=", ruleId).execute();
+        if (byPerson(by)) await recordChange(tx, { tenantId: tenant, programId: toProgramId(r.program_id), actor: by, action: "mapping-rule.ended", targetType: "mapping-rule", targetId: ruleId, fields: ["validTo"] });
+      });
     },
 
     /** The program catalog copy. The app feeds it from Exposure Management's events. */

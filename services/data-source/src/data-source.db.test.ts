@@ -471,6 +471,102 @@ dbTest("control totals answer well within budget at UAT size (20,000 rows, 40 cu
   assert.ok(elapsedMs < 500, `controlTotals took ${elapsedMs}ms, over the 500ms budget for a 20,000-row batch`);
 });
 
+dbTest("audit: a batch loaded by a person is recorded once; a connector feed and a duplicate record nothing", async () => {
+  const t = newTenant();
+  await setup(t);
+  const byUser = (rows: GlBalanceRow[], asOf: AsOfDate = D1) => ds.commands.submitGlBatch({ tenantId: t, sourceSystem: "erp", chartCode: "C", asOf, rows, by: "user:alice" });
+
+  const connector = await send(t, [bal("1000", "1")]); // by: "test" - not a person
+  assert.deepEqual(await recordsOf(t), [], "a connector feed is a routine load");
+
+  const r = await byUser([bal("1000", "2")], D2);
+  const rs = await recordsOf(t);
+  assert.equal(rs.length, 1);
+  assert.deepEqual([rs[0]!.programId, rs[0]!.actor, rs[0]!.action, rs[0]!.targetType, rs[0]!.targetId, rs[0]!.fields], [null, "user:alice", "batch.loaded", "batch", r.batchId, []]);
+
+  const dup = await ds.commands.submitGlBatch({ tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D2, rows: [bal("1000", "2")], by: "user:alice" });
+  assert.equal(dup.status, "DUPLICATE");
+  assert.equal((await recordsOf(t)).length, 1, "a repeat that changes nothing records nothing more");
+  assert.equal(connector.status, "APPLIED");
+});
+
+dbTest("audit: a refused batch records nothing", async () => {
+  const t = newTenant();
+  await setup(t);
+  await assert.rejects(ds.commands.submitGlBatch({ tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows: [], by: "user:alice" }), BatchRefused);
+  assert.deepEqual(await recordsOf(t), [], "a batch the service could not take is not a load");
+});
+
+dbTest("audit: mapping rules record who added and ended them; endMappingRule needs a by", async () => {
+  const t = newTenant();
+  await setup(t);
+  await ds.commands.addMappingRule({ tenantId: t, programId: "CF", kind: "INCLUDE", target: { type: "ACCOUNT", chartCode: "C", accountNumber: "2000" }, validFrom: "2026-01-01", validTo: null, by: "test" });
+  assert.deepEqual(await recordsOf(t), [], "added by a routine feed, not a person");
+
+  const added = await ds.commands.addMappingRule({ tenantId: t, programId: "CF", kind: "INCLUDE", target: { type: "ACCOUNT", chartCode: "C", accountNumber: "9000" }, validFrom: "2026-01-01", validTo: null, by: "user:alice" });
+  let rs = await recordsOf(t);
+  assert.equal(rs.length, 1);
+  assert.deepEqual([rs[0]!.programId, rs[0]!.actor, rs[0]!.action, rs[0]!.targetType, rs[0]!.targetId, rs[0]!.fields], ["CF", "user:alice", "mapping-rule.added", "mapping-rule", added, []]);
+
+  await ds.commands.endMappingRule(t, added, "2026-06-01", "user:bob");
+  rs = await recordsOf(t);
+  assert.equal(rs.length, 2);
+  assert.deepEqual([rs[1]!.programId, rs[1]!.actor, rs[1]!.action, rs[1]!.targetType, rs[1]!.targetId, rs[1]!.fields], ["CF", "user:bob", "mapping-rule.ended", "mapping-rule", added, ["validTo"]]);
+});
+
+dbTest("audit: ending a rule by a routine feed records nothing; a refused end records nothing", async () => {
+  const t = newTenant();
+  await setup(t);
+  const added = await ds.commands.addMappingRule({ tenantId: t, programId: "CF", kind: "INCLUDE", target: { type: "ACCOUNT", chartCode: "C", accountNumber: "9000" }, validFrom: "2026-01-01", validTo: null, by: "test" });
+  await ds.commands.endMappingRule(t, added, "2026-06-01", "test");
+  assert.deepEqual(await recordsOf(t), []);
+  await assert.rejects(ds.commands.endMappingRule(t, added, "2025-01-01", "user:alice"), RuleInvalid);
+  assert.deepEqual(await recordsOf(t), [], "a refused end is not a change");
+});
+
+dbTest("endMappingRule: two concurrent ends of the same rule are serialized; the final date is never silently widened", async () => {
+  // Run several times so both lock-acquisition orders are exercised, not just whichever happens to win once.
+  for (let i = 0; i < 8; i++) {
+    const t = newTenant();
+    await setup(t);
+    const ruleId = await ds.commands.addMappingRule({ tenantId: t, programId: "CF", kind: "INCLUDE", target: { type: "ACCOUNT", chartCode: "C", accountNumber: "9000" }, validFrom: "2026-01-01", validTo: null, by: "test" });
+    const [toMarch, toJune] = await Promise.allSettled([
+      ds.commands.endMappingRule(t, ruleId, "2026-03-01", "user:alice"), // always a valid shortening, whichever order the lock gives
+      ds.commands.endMappingRule(t, ruleId, "2026-06-01", "user:bob"), // valid only if it runs first, against the rule's still-open end
+    ]);
+    const row = await q(db).selectFrom("mapping_rules").select("valid_to").where("tenant_id", "=", t).where("rule_id", "=", ruleId).executeTakeFirstOrThrow();
+    assert.equal(row.valid_to, "2026-03-01", "the more aggressive, still-valid shortening always wins in the end, whichever call ran first");
+    assert.equal(toMarch!.status, "fulfilled", "2026-03-01 is a valid shortening whether it ran first or second");
+    if (toJune!.status === "rejected") assert.match((toJune as PromiseRejectedResult).reason.message, /only.*shortened/);
+    const ended = (await recordsOf(t)).filter((r) => r.action === "mapping-rule.ended");
+    const succeeded = [toMarch, toJune].filter((r) => r!.status === "fulfilled").length;
+    assert.equal(ended.length, succeeded, "one audit record per call that actually committed; none for the one the lock correctly refused");
+  }
+});
+
+dbTest("audit: the business write and the announcement commit or fail together; moving the announcement after the transaction breaks this", async () => {
+  const t = newTenant();
+  await setup(t);
+  const ruleId = await ds.commands.addMappingRule({ tenantId: t, programId: "CF", kind: "INCLUDE", target: { type: "ACCOUNT", chartCode: "C", accountNumber: "9000" }, validFrom: "2026-01-01", validTo: null, by: "test" });
+
+  const failOutboxInserts: KyselyPlugin = {
+    transformQuery: (args) => {
+      if (args.node.kind === "InsertQueryNode" && JSON.stringify(args.node).includes('"outbox"')) throw new Error("simulated: the outbox write failed");
+      return args.node;
+    },
+    async transformResult(args) {
+      return args.result;
+    },
+  };
+  const brokenDb = db.withPlugin(failOutboxInserts);
+  const broken = createDataSource(brokenDb, { masterData: md, now: () => clock });
+
+  await assert.rejects(broken.commands.endMappingRule(t, ruleId, "2026-06-01", "user:alice"), /simulated: the outbox write failed/);
+  const row = await q(db).selectFrom("mapping_rules").select("valid_to").where("tenant_id", "=", t).where("rule_id", "=", ruleId).executeTakeFirstOrThrow();
+  assert.equal(row.valid_to, null, "the rule was not shortened: the failed announcement rolled back the business write too");
+  assert.deepEqual(await recordsOf(t), [], "no change record exists for a change that did not commit");
+});
+
 dbTest("the database refuses an included balance without a program", async () => {
   const t = newTenant();
   await setup(t);

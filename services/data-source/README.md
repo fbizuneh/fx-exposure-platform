@@ -19,6 +19,8 @@ Each is defined in contract/.
 ## Announces
 - Batch stamped
 - Issues raised (this covers a blocked balance, since each is an issue)
+- Change records for Audit, when a person (not a connector feed) loads a batch or adds or ends a mapping
+  rule (decision 0012/0032): `batch.loaded`, `mapping-rule.added`, `mapping-rule.ended`
 Events carry identifiers only.
 
 ## Consumes

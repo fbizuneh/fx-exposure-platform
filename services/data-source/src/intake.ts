@@ -7,6 +7,7 @@ import type { BatchStatus, MasterDataQuestionsLike } from "./ports.ts";
 import { D, diffTotals, expectedTotalsProblems, type ExpectedTotal } from "./control-totals.ts";
 import { q, type Db } from "./db.ts";
 import type { DataSourceDatabase } from "./schema.ts";
+import { byPerson, recordChange } from "./change-record.ts";
 import { matchProgram, type MatchFact } from "./match.ts";
 import { announce } from "./outbox.ts";
 import type { GlBalanceRow, MappingRule } from "./rows.ts";
@@ -235,6 +236,7 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
 
       await announce(tx, { type: "data-source.batch-stamped", tenantId: tenant, batchId, sourceSystem: batch.sourceSystem, asOf: batch.asOf });
       if (issues.length > 0) await announce(tx, { type: "data-source.issues-raised", tenantId: tenant, batchId });
+      if (byPerson(batch.by)) await recordChange(tx, { tenantId: tenant, programId: null, actor: batch.by, action: "batch.loaded", targetType: "batch", targetId: batchId, fields: [] });
       return { status: "APPLIED", batchId, ingestion: status, received: batch.rows.length, included, excluded, blocked } as const;
     });
     if (result.status === "REFUSED") throw new BatchRefused(result.batchId, result.reason);

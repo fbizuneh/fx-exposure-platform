@@ -18,6 +18,8 @@ Each is defined in contract/.
 
 ## Announces
 - Run started, then run finished, both with the run ID (decision 0007). Nothing is announced while a run waits.
+- Nothing for Audit: every command here is called by the dispatcher reacting to another service's event, never
+  a person, so there is no change for a person to record (decision 0012/0032).
 Events carry identifiers only.
 
 ## Consumes
