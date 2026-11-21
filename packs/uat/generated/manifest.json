@@ -260,9 +260,14 @@
       "sha256": "9f813db9616ad02e8347a9b4ed957b512e16b7b4b805378a97cbb5bbdaa53c41"
     },
     {
-      "file": "executed-history.csv",
-      "rows": 262,
-      "sha256": "c1c62225ec419ad3fbd8f5ef511d00b9ba68c4172576a42798cc242f228a77b3"
+      "file": "executed-history-BS-ENT.csv",
+      "rows": 131,
+      "sha256": "5765ac1199bbd4614bafdcb68aa525aa80af6808e8712de1643d9fab8bad669d"
+    },
+    {
+      "file": "executed-history-BS-REG.csv",
+      "rows": 131,
+      "sha256": "fbecd67b653b0b25e5d74971fc2e2630d48de632c9ca713ce9ca91a2622882ea"
     },
     {
       "file": "exposure-currencies.csv",
