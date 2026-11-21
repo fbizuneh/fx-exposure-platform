@@ -2,6 +2,14 @@
 import type { ChangeRecordFields } from "@services/audit/contract";
 import type { ProgramId, TenantId } from "@shared/kernel";
 
+/** A tenant name is already reserved, including by a disabled tenant. */
+export class TenantNameTaken extends Error {
+  constructor(name: string) {
+    super(`tenant name ${name} already exists`);
+    this.name = "TenantNameTaken";
+  }
+}
+
 declare const brand: unique symbol;
 /** A user of one tenant. Defined here, not in the shared kernel. */
 export type UserId = string & { readonly [brand]: "UserId" };
