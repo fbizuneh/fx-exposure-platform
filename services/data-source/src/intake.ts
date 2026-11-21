@@ -1,9 +1,11 @@
 // The one write path for balances: a batch from one source system, chart and as-of date, validated and stamped
 // in one transaction with its events (docs/decisions/0006).
 import { createHash, randomUUID } from "node:crypto";
+import { Decimal } from "decimal.js";
 import { sql, type Insertable } from "kysely";
 import { asOfDate, type AsOfDate, type TenantId } from "@shared/kernel";
 import type { BatchStatus, MasterDataQuestionsLike } from "./ports.ts";
+import { diffTotals, type ExpectedTotal } from "./control-totals.ts";
 import { q, type Db } from "./db.ts";
 import type { DataSourceDatabase } from "./schema.ts";
 import { matchProgram, type MatchFact } from "./match.ts";
@@ -19,6 +21,8 @@ export interface GlBatch {
   readonly rows: readonly GlBalanceRow[];
   /** Who or what sent it: a user id or a connector name. */
   readonly by: string;
+  /** What the sender expects to have sent, by currency. When given, it is checked against what intake received; any difference refuses the batch (decision #J1). */
+  readonly expectedTotals?: readonly ExpectedTotal[];
 }
 
 export interface BatchResult {
@@ -76,7 +80,7 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
       throw new BatchRefused(id, reason);
     }
 
-    return db.transaction().execute(async (tx) => {
+    const result = await db.transaction().execute(async (tx) => {
       await sql`SELECT pg_advisory_xact_lock(hashtext(${`${tenant}:${batch.sourceSystem}:${batch.asOf}`}))`.execute(tx);
 
       const dup = await q(tx).selectFrom("batches").select(["batch_id", "status", "received_count", "included_count", "excluded_count", "blocked_count"])
@@ -112,6 +116,7 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
       const batchId = randomUUID();
       const balances: Insertable<DataSourceDatabase["balances"]>[] = [];
       const issues: { balance_id: string; ruleCode: string; description: string }[] = [];
+      const receivedTotals = new Map<string, { rows: number; sum: Decimal }>();
       let included = 0;
       let excluded = 0;
       let blocked = 0;
@@ -119,6 +124,9 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
       batch.rows.forEach((r, i) => {
         const key = keys[i]!;
         const { amount, issues: found } = checkRow(r, batch.asOf);
+        const currencyKey = blank(r.currency) ? "" : r.currency!;
+        const priorTotal = receivedTotals.get(currencyKey) ?? { rows: 0, sum: new Decimal(0) };
+        receivedTotals.set(currencyKey, { rows: priorTotal.rows + 1, sum: amount === null ? priorTotal.sum : priorTotal.sum.plus(amount) });
         const problems: RowIssue[] = [...found];
         const entity = blank(r.entityCode) ? undefined : entities.get(r.entityCode!);
         const account = blank(r.accountNumber) ? undefined : accounts.get(r.accountNumber!);
@@ -161,6 +169,19 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
         });
       });
 
+      if (batch.expectedTotals) {
+        const received = new Map([...receivedTotals].map(([currency, t]) => [currency, { rows: t.rows, sum: t.sum.toFixed(4) }]));
+        const diffs = diffTotals(received, batch.expectedTotals);
+        if (diffs.length > 0) {
+          const reason = `control totals do not match: ${diffs.join("; ")}`;
+          await q(tx).insertInto("batches").values({
+            tenant_id: tenant, batch_id: batchId, source_system: batch.sourceSystem, as_of: batch.asOf, chart_code: batch.chartCode, content_hash: hash,
+            status: "FAILED", failure_reason: reason, received_count: batch.rows.length, received_by: batch.by,
+          }).execute();
+          return { status: "REFUSED", batchId, reason } as const;
+        }
+      }
+
       const status: BatchStatus = blocked > 0 ? "COMPLETED_WITH_ISSUES" : "COMPLETED";
       await q(tx).insertInto("batches").values({
         tenant_id: tenant, batch_id: batchId, source_system: batch.sourceSystem, as_of: batch.asOf, chart_code: batch.chartCode, content_hash: hash, status,
@@ -188,6 +209,8 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
       if (issues.length > 0) await announce(tx, { type: "data-source.issues-raised", tenantId: tenant, batchId });
       return { status: "APPLIED", batchId, ingestion: status, received: batch.rows.length, included, excluded, blocked } as const;
     });
+    if (result.status === "REFUSED") throw new BatchRefused(result.batchId, result.reason);
+    return result;
   }
   return { submitGlBatch };
 }

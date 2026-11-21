@@ -15,7 +15,11 @@ Shared kernel, checks, Identity (done) -> Master Data (done) -> FX Rate (done) -
 `docs/uat/data-design.md` is the E1 design for review. Fikre confirmed two tenants, one balance sheet program each, loading the same generated files; unique tenant names; rate-derived simulated settlement amounts; and Close-out+New rolling for `BS-REG` (decision 0025). The 12 Release 1 scenarios are recorded, with 2026-10-27 designated as the late GL load. D1 file layouts have merged; E2–E7 are separate work.
 
 ## Known gaps (recorded, not built)
-Control totals by currency; contract versioning; platform-level versus tenant-level NDF list; Audit retention and purge, trail export, Data Source and Exposure Analysis records (decision 0012); an operator screen for stuck events (decision 0019 gives the list and retry as functions only, with no permission model).
+Contract versioning; platform-level versus tenant-level NDF list; Audit retention and purge, trail export, Data Source and Exposure Analysis records (decision 0012); an operator screen for stuck events (decision 0019 gives the list and retry as functions only, with no permission model).
+
+## Release 1 stream J
+
+J1 control totals by currency is merged (decision 0029): `controlTotals(tenant, batchId)` on Data Source's contract, computed on read (measured at 13–16 ms for 20,000 rows and 40 currencies, well under the 500 ms budget), and an optional `expectedTotals` on `GlBatch` that refuses a batch whose totals do not match. D7 can start. J2 and J3 are not yet started.
 
 ## Release 1 stream E prerequisite
 

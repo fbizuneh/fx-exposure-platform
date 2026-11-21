@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { diffTotals } from "./control-totals.ts";
 import { firstSharedDate, matchProgram, scopesMeet, type MatchFact } from "./match.ts";
 import { checkRow, normalizeAmount, recordKey } from "./validate.ts";
 import type { GlBalanceRow, MappingRule } from "./rows.ts";
@@ -95,4 +96,18 @@ test("a balance is identified by entity, account, currency and dimensions, whate
   assert.notEqual(recordKey(row()), recordKey(row({ currency: "EUR" })));
   assert.notEqual(recordKey(row()), recordKey(row({ dimensions: { costCenter: "A" } })));
   assert.equal(recordKey(row()), "US1|1000|USD|");
+});
+
+test("control totals: matching totals have no differences", () => {
+  const received = new Map([["USD", { rows: 2, sum: "140.5000" }]]);
+  assert.deepEqual(diffTotals(received, [{ currency: "USD", rowCount: 2, sum: "140.50" }]), [], "the same amount, written with a different scale, still matches");
+});
+
+test("control totals: a different sum, a different row count, and a currency missing on either side each produce a difference", () => {
+  const received = new Map([["USD", { rows: 2, sum: "140.5000" }]]);
+  assert.equal(diffTotals(received, [{ currency: "USD", rowCount: 2, sum: "999.00" }]).length, 1, "sum differs");
+  assert.equal(diffTotals(received, [{ currency: "USD", rowCount: 5, sum: "140.50" }]).length, 1, "row count differs");
+  assert.match(diffTotals(received, [{ currency: "USD", rowCount: 2, sum: "140.50" }, { currency: "GBP", rowCount: 1, sum: "1.00" }])[0]!, /GBP: received 0 rows/, "expected a currency that was not received");
+  assert.match(diffTotals(received, [])[0]!, /USD: received 2 rows.*not expected/, "received a currency that was not expected");
+  assert.match(diffTotals(new Map(), [{ currency: "", rowCount: 1, sum: "3.00" }])[0]!, /\(no currency\)/, "the no-currency bucket is named, not the empty string, in a message");
 });
