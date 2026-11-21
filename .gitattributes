@@ -1,0 +1,2 @@
+packs/uat/generated/** text eol=lf
+packs/uat/expected/*.csv text eol=lf

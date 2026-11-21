@@ -13,6 +13,10 @@
     "db:up": "docker compose up -d",
     "db:migrate": "node scripts/migrate.mjs",
     "start": "node app/src/server.ts",
+    "uat:configure": "node scripts/uat/configure.ts",
+    "uat:reset": "node scripts/uat/reset.ts",
+    "uat:generate": "node scripts/uat/generate.ts",
+    "uat:expected": "node scripts/uat/expected.ts",
     "uat:simulate": "node scripts/uat/simulate.ts"
   },
   "devDependencies": {

@@ -3,6 +3,8 @@
 Read this with AGENTS.md at the start of a session. Update it when a service is finished or a decision is added.
 
 ## Order and status
+Release 1 stream E: E1 data design, E2 configuration and E5 simulator are in draft PRs. E3 generator and E4 independent expected results are in stacked draft PRs. E6 data guide maps all 12 UAT scenarios to files, dates and expected results. Loader-backed verification awaits D3+ and a UAT/test database; E7 remains.
+
 Shared kernel, checks, Identity (done) -> Master Data (done) -> FX Rate (done) -> Data Source (done) -> Exposure Management (done) -> **Exposure Analysis (done, incl. net exposure)** -> **FX Trade (done; the demo simulator is a separate tool outside the services)** -> **Hedge Recommendation (done: hedge-ratio-adjustment, decision 0011)** -> **Audit (built: change records, append-only hash chain, decision 0012)**.
 
 ## app/ (composition)
@@ -11,9 +13,17 @@ Shared kernel, checks, Identity (done) -> Master Data (done) -> FX Rate (done) -
 ## Known gaps (recorded, not built)
 Control totals by currency; contract versioning; platform-level versus tenant-level NDF list; Audit retention and purge, trail export, Data Source and Exposure Analysis records (decision 0012); an operator screen for stuck events (decision 0019 gives the list and retry as functions only, with no permission model).
 
-## Release 1 stream E
+## Release 1 stream E prerequisite
 
-The E5 demo execution simulator is implemented in `scripts/uat/simulate.ts`. It reads released pre-trades and generated-rate-layout CSV, derives settlement amounts with `decimal.js`, and writes the FX Trade executed layout. Unit tests run; its real-service import path is wired into `app/src/end-to-end.db.test.ts` and needs `TEST_DATABASE_URL` to execute. E1 is in draft PR #18; E2–E4 and E6–E7 remain to be built, and E3 waits for D1 file layouts to merge.
+Identity now reserves exact tenant names with a unique index and answers `tenantByName`, including disabled tenants (decision 0027). E2 uses the question to refuse an existing tenant name.
+
+## Release 1 stream E configuration
+
+`scripts/uat/configure.ts` and `packs/uat/config.json` define the two fictional UAT tenants through real commands; `scripts/uat/reset.ts` only drops schemas in a database ending `_uat` or `_test`. The sample policies and reset guard have unit tests. The two-run database test needs `TEST_DATABASE_URL`; it has not run.
+
+## Release 1 stream E simulator
+
+`scripts/uat/simulate.ts` reads released pre-trades and generated-rate-layout CSV, derives settlement amounts with `decimal.js`, and writes the FX Trade executed layout. Its real-service import path is wired into `app/src/end-to-end.db.test.ts` and needs `TEST_DATABASE_URL` to execute.
 
 ## Decisions (docs/decisions)
 0001-0003 Identity; 0023 Runtime (one server process, scheduler as a real platform user, `activeTenants`); 0004 Master Data (also holds the currency reference with the NDF flag); 0005 FX Rate; 0006 Data Source; 0007 Exposure Management (cycles, run events with run IDs, settings incl. netting level, display currency, exposure currency overrides); 0008 Exposure Analysis (workbook rules, run lifecycle, netting levels, exposure currency order); 0009 FX Trade (two record types, legs, standard file, matching, release gate); 0010 net exposure (hedge rows from executed trades, gross/hedges/net per group); 0012 Audit (change records announced by each service, append-only hash chain, audit:read for approvers and admins); 0011 Hedge Recommendation (ratio adjustment, policy, decisions, follow-up, and the two approval gates: Approve Exposure locks the run, Approve Cycle releases pre-trades); 0022 roll-based strategy, Close-out+New (the rule runs on the hedges that remain after the window's close-outs; its result is the new trades, parts with role NEW); 0021 roll-based strategy, Adjust+Swap (per-cycle roll dates; maturing hedges closed by value date and rolled to a far date, plus the adjustment from the ratio or threshold rule, accepted as one package; recommendation ID is the roll ID); 0020 amount-threshold strategy (a program picks its strategy; net exposure at or above the threshold is hedged in full, threshold in the display currency with an override per netting level; rounding, minimum and split shared by all strategies); 0019 delivery retry (a failed event is retried after 1, 2, 4, 8 minutes, then stuck with its last error; it holds only its tenant's later events from that service; operator retry; delivery stays at-least-once); 0018 composite keys that carry the program (within a service; `tenant-program` check; four cases left open in the record); 0017 closed-out follow-up (a split recommendation with every part executed or cancelled, some of each, is EXECUTED_REST_CANCELLED); 0016 maximum hedge amount (display currency, per-netting-level override, even or threshold-plus-remainder split; one recommendation, one pre-trade per part); 0015 pair-to-exposure-currency mapping per program (Master Data, beneath the program override); 0014 business-day calendars per currency (Master Data holds them; value and fixing dates use the pair's joint calendar, modified following, gaps flagged); 0013 segregation of duties (per-tenant switch, on by default; starter cannot Approve Exposure, decider cannot Approve Cycle).
