@@ -10,6 +10,7 @@ import type { NetExposureGroup } from "@services/exposure-analysis/contract";
 import { migrate } from "../migrate.mjs";
 import { composeApp, type App } from "../../app/src/compose.ts";
 import { drain } from "../../app/src/dispatch.ts";
+import { deliveryProblemSummary, listDeliveryProblems, retryDeliveryProblem } from "../../app/src/operations.ts";
 import { loadAccountsFile, loadCalendarsFile, loadCurrenciesFile, loadEntitiesFile, loadExecutedFile, loadExposureCurrenciesFile, loadGlFile, loadHierarchyFile, loadRatesFile, type LoadOutcome } from "../../app/src/loaders/index.ts";
 import { configureWithActors, type UatConfig } from "./configure.ts";
 import { generate } from "./generate.ts";
@@ -163,7 +164,7 @@ export async function finishReleasedTrade(app: App, config: UatConfig, tenantId:
   const importedIds = new Set(executed.trimEnd().split(/\r?\n/).slice(1).map((line) => line.split(",")[0]!));
   const used = (await app.exposureAnalysis.questions.hedgeRows(tenantId, nextRun.runId)).filter((row) => importedIds.has(row.tradeId));
   if (used.length < 2 || !used.some((row) => row.valueDate === "2026-11-27") || !used.some((row) => row.valueDate === "2027-02-23")) throw new Error(`scenario 9: next run used ${used.length} new hedge legs; expected November 27 and February 23`);
-  await app.exposureManagement.commands.skipCycle({ tenantId, cycleId: next, reason: "E7 next-cycle hedge check complete", actor: starter });
+  await app.exposureManagement.commands.skipCycle({ tenantId, cycleId: next, reason: "E7 next-cycle hedge check complete", actor: exporter });
   await drain(app);
   console.log(`scenario 8–9: ${exported.preTradeIds.length} matched executions, ${used.length} new hedge legs in next run`);
 }
@@ -220,6 +221,40 @@ export async function checkDirtyFixtures(app: App, config: UatConfig, tenants: r
   }
 }
 
+/** Exercise J3 through its guarded operator contract with a real failed cycle event. */
+export async function checkOperatorRetry(app: App, tenantId: TenantId, actor: Actor): Promise<void> {
+  const original = app.exposureAnalysis.commands.onCycleInitiated;
+  const commands = app.exposureAnalysis.commands as { onCycleInitiated: typeof original };
+  const started = await app.exposureManagement.commands.startCycle({ tenantId, programId: "BS-ENT", asOf: "2026-11-13", actor });
+  const base = Date.now() + 1000;
+  try {
+    commands.onCycleInitiated = async () => { throw new Error("E7 simulated delivery outage"); };
+    for (const minute of [0, 1, 3, 7, 15]) await drain(app, { now: new Date(base + minute * 60_000) });
+  } finally { commands.onCycleInitiated = original; }
+  const problems = await listDeliveryProblems(app, actor, { tenantId });
+  const stuck = problems.find((p) => p.service === "exposure-management" && p.type === "exposure-management.cycle-initiated" && p.stuckAt !== null && p.lastError === "E7 simulated delivery outage");
+  if (!stuck || stuck.attempts !== 5) throw new Error(`scenario 12: expected a stuck cycle event after five failures: ${JSON.stringify(problems)}`);
+  const summary = await deliveryProblemSummary(app, actor);
+  if (summary.byService["exposure-management"]?.stuck !== 1) throw new Error(`scenario 12: wrong operator summary: ${JSON.stringify(summary)}`);
+  await retryDeliveryProblem(app, actor, { service: stuck.service, tenantId, eventId: stuck.eventId });
+  await drain(app, { now: new Date(base + 16 * 60_000) });
+  if ((await listDeliveryProblems(app, actor, { tenantId })).some((p) => p.eventId === stuck.eventId)) throw new Error("scenario 12: retried event is still undelivered");
+  const run = await app.exposureAnalysis.questions.currentRun(tenantId, started);
+  if (run?.status !== "FINISHED") throw new Error(`scenario 12: retried cycle did not finish: ${run?.status ?? "none"}`);
+  await app.exposureManagement.commands.skipCycle({ tenantId, cycleId: started, reason: "E7 operator retry check complete", actor });
+  await drain(app);
+  console.log(`scenario 12: retried ${stuck.eventId} after ${stuck.attempts} failed deliveries`);
+}
+
+async function checkAuditChains(app: App, tenants: readonly TenantId[], actors: readonly ReadonlyMap<string, Actor>[], adminUser: string): Promise<void> {
+  for (const [i, tenantId] of tenants.entries()) {
+    const actor = actors[i]!.get(adminUser)!;
+    const chain = await app.audit.questions.verify(tenantId, actor);
+    if (!chain.ok || chain.checked === 0) throw new Error(`scenario 11: audit chain failed for tenant ${i + 1}: ${JSON.stringify(chain)}`);
+    console.log(`scenario 11 tenant ${i + 1}: ${chain.checked} audit records verified`);
+  }
+}
+
 export async function rehearse(url: string): Promise<void> {
   await emptyDatabase(url);
   const config = JSON.parse(await readFile(CONFIG, "utf8")) as UatConfig;
@@ -238,6 +273,8 @@ export async function rehearse(url: string): Promise<void> {
     await stage("compare 20 dated runs for both programs", async () => { await compareDatedRuns(app, config, tenants, actors, days); });
     await stage("approve, simulate, import and check next cycle", async () => { await tradeAndNextCycle(app, config, tenants[0]!, actors[0]!); });
     await stage("check malformed and dirty GL fixtures", async () => { await checkDirtyFixtures(app, config, tenants); });
+    await stage("fail delivery and operator retry", async () => { await checkOperatorRetry(app, tenants[0]!, actors[0]!.get(config.adminUser)!); });
+    await stage("verify tenant audit chains", async () => { await checkAuditChains(app, tenants, actors, config.adminUser); });
   } finally { await app.close(); }
 }
 
