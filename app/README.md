@@ -22,6 +22,7 @@ The one deployable. It wires the services together, delivers events between them
 
 ## Files
 - `compose.ts`: builds every service over one database. `dispatch.ts`: `drain` (delivers events), `deliveryProblems`, `retryStuckEvent`, `startDueCycles`.
+- `loaders/`: one function per file kind (entities, hierarchy, accounts, currencies, calendars, exposure currencies, GL, rates, executed). Each parses, returns `INVALID_FILE` without calling the service when the file has problems, otherwise calls the owning service command and maps refusals and results to `LoadOutcome`.
 - `config.ts`, `log.ts`: settings and JSON logging (no row contents, secrets redacted).
 - `ticks.ts`: the two passes and the loop that never overlaps itself. `runtime.ts`: starts and stops everything. `http.ts`, `ready.ts`, `server.ts`: routes, readiness, entry point.
 
