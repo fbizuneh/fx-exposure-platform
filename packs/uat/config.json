@@ -81,7 +81,17 @@
             "target": {
               "type": "NODE",
               "chartCode": "UAT",
-              "nodeCode": "FX"
+              "nodeCode": "BS"
+            },
+            "validFrom": "2025-11-20",
+            "validTo": null
+          },
+          {
+            "kind": "EXCLUDE",
+            "target": {
+              "type": "NODE",
+              "chartCode": "UAT",
+              "nodeCode": "NONFX"
             },
             "validFrom": "2025-11-20",
             "validTo": null
@@ -156,7 +166,17 @@
             "target": {
               "type": "NODE",
               "chartCode": "UAT",
-              "nodeCode": "FX"
+              "nodeCode": "BS"
+            },
+            "validFrom": "2025-11-20",
+            "validTo": null
+          },
+          {
+            "kind": "EXCLUDE",
+            "target": {
+              "type": "NODE",
+              "chartCode": "UAT",
+              "nodeCode": "NONFX"
             },
             "validFrom": "2025-11-20",
             "validTo": null
