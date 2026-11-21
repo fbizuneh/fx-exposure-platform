@@ -36,7 +36,8 @@ function csvSyntaxProblems(text: string): FileProblem[] {
   });
 }
 
-function requiredHeaderProblems(text: string): FileProblem[] {
+/** Missing required columns and duplicate normalized headers (same rules as parseExecutedFile). */
+function headerProblems(text: string): FileProblem[] {
   const [header] = splitCsv(text);
   if (!header) {
     return REQUIRED_COLUMNS.map((column) => ({
@@ -45,8 +46,19 @@ function requiredHeaderProblems(text: string): FileProblem[] {
       message: `missing required column ${column}`,
     }));
   }
-  const names = new Set(header.map(normalizeHeader).filter((n) => n !== ""));
   const problems: FileProblem[] = [];
+  const seen = new Set<string>();
+  const names = new Set<string>();
+  for (const raw of header) {
+    const name = normalizeHeader(raw);
+    if (name === "") continue;
+    if (seen.has(name)) {
+      problems.push({ rowNo: null, column: name, message: `duplicate column ${name}` });
+      continue;
+    }
+    seen.add(name);
+    names.add(name);
+  }
   for (const column of REQUIRED_COLUMNS) {
     if (!names.has(column)) {
       problems.push({ rowNo: null, column, message: `missing required column ${column}` });
@@ -59,7 +71,7 @@ export async function loadExecutedFile(app: App, opts: ExecutedLoadOptions): Pro
   const syntax = csvSyntaxProblems(opts.text);
   if (syntax.length > 0) return { kind: "INVALID_FILE", problems: syntax };
 
-  const headers = requiredHeaderProblems(opts.text);
+  const headers = headerProblems(opts.text);
   if (headers.length > 0) return { kind: "INVALID_FILE", problems: headers };
 
   const rows = parseExecutedFile(opts.text);

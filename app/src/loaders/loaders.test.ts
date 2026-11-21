@@ -158,6 +158,31 @@ describe("loaders INVALID_FILE (no service call)", () => {
       assert.ok(out.problems.some((p) => p.column === "deal_amount"));
     }
   });
+
+  it("executed: duplicate deal_amount header is INVALID_FILE (no service call)", async () => {
+    const text = [
+      "trade_id,execution_platform_id,trading_entity,counterparty,trade_date,value_date,deal_currency,deal_amount,deal_amount,settlement_currency,settlement_amount,fixing_date,instrument,buy_sell,portfolio,hedging_program_id,pre_trade_reference,leg",
+      "SIM-1,SIMFX,US1,Bank,2026-03-09,2026-06-09,EUR,100,200,USD,1090,,FORWARD,BUY,BOOK-A,BS-ENT,,",
+    ].join("\n");
+    const out = await loadExecutedFile(app, { tenantId: tenant, text, by });
+    assert.equal(out.kind, "INVALID_FILE");
+    if (out.kind === "INVALID_FILE") {
+      assert.ok(out.problems.some((p) => p.column === "deal_amount" && p.rowNo === null && /duplicate/.test(p.message)));
+    }
+  });
+});
+
+describe("loaders accept distinct executed custom columns", () => {
+  it("extra custom headers still reach the importer", async () => {
+    const { app, called } = trackingApp();
+    const text = [
+      "trade_id,execution_platform_id,trading_entity,counterparty,trade_date,value_date,deal_currency,deal_amount,settlement_currency,settlement_amount,fixing_date,instrument,buy_sell,portfolio,hedging_program_id,pre_trade_reference,leg,desk,book_note",
+      "SIM-1,SIMFX,US1,Bank,2026-03-09,2026-06-09,EUR,1000000.0000,USD,1090000.0000,,FORWARD,BUY,BOOK-A,BS-ENT,,,DESK-A,note",
+    ].join("\n");
+    const out = await loadExecutedFile(app, { tenantId: tenant, text, by });
+    assert.equal(out.kind, "DONE");
+    assert.equal(called.executed, true);
+  });
 });
 
 describe("loaders accept blank GL as_of and call the service", () => {
