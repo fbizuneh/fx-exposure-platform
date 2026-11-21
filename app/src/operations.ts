@@ -90,6 +90,10 @@ export interface RetryTarget {
  * Retries a stuck event, after checking access for its named tenant and looking the event up within that tenant only — so one
  * tenant's admin can never reach another tenant's event by guessing an ID. Refuses an event that is not stuck, naming its state.
  * The retry itself is recorded to Audit as `event.retried` (decision 0030); `checkAccess` already records a platform role's use.
+ * KNOWN GAP (DECISION REQUIRED, decision 0030): this record is written after the reset below has already committed, not in the
+ * same transaction, so it can be lost to a crash or an Audit outage between the two steps, with the event then no longer stuck
+ * and so never retried through this path again. The durable fix (each service's own outbox announces the retry, in the same
+ * transaction as the reset) touches every service's outbox.ts and awaits the product owner's confirmation.
  */
 export async function retryDeliveryProblem(app: App, actor: Actor, target: RetryTarget): Promise<void> {
   await checkTenant(app, actor, target.tenantId);

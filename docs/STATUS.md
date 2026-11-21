@@ -19,7 +19,7 @@ Control totals by currency; contract versioning; platform-level versus tenant-le
 
 ## Release 1 stream J
 
-J3 stuck-event permissions are merged (decision 0030): `operations:manage-events` (TREASURY_ADMIN, platform role), and `listDeliveryProblems`/`deliveryProblemSummary`/`retryDeliveryProblem` in `app/src/operations.ts`, guarding `dispatch.ts`'s unguarded primitives. Every retry is recorded to Audit as `event.retried`; a platform role's use is recorded automatically by `checkAccess`, as for any other permission. `app/`'s `/status` route is unchanged (no actor yet; stream C). J1 and J2 are separate PRs.
+J3 stuck-event permissions are proposed (decision 0030): `operations:manage-events` (TREASURY_ADMIN, platform role), and `listDeliveryProblems`/`deliveryProblemSummary`/`retryDeliveryProblem` in `app/src/operations.ts`, guarding `dispatch.ts`'s unguarded primitives. Every retry is recorded to Audit as `event.retried`; a platform role's use is recorded automatically by `checkAccess`, as for any other permission. **Known gap, DECISION REQUIRED (decision 0030):** that `event.retried` record is written by a direct call after the reset commits, not in the same transaction, so it can be lost to a crash or an Audit outage between the two steps; the recommended fix (each service's own outbox announces it, durably, in the same transaction as the reset) touches every service and awaits confirmation. `app/`'s `/status` route is unchanged (no actor yet; stream C). J1 and J2 are separate PRs.
 
 ## Release 1 stream E prerequisite
 
