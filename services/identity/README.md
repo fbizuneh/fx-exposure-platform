@@ -17,6 +17,7 @@ See docs/decisions/0001, 0002 and 0003 (identity-model, roles-and-permissions, u
 - Which programs a tenant has enabled
 - Which tenants are active (platform level, no tenant; only the runtime asks, decision 0023)
 - The tenant ID for an exact name, including disabled tenants (decision 0027)
+`createTenant` throws `TenantNameTaken` for a reserved name. The unique-name migration names pre-existing duplicates before it refuses to apply.
 Each is defined in contract/.
 
 ## Announces
