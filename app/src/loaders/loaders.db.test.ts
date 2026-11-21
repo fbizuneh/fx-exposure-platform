@@ -690,47 +690,42 @@ dbTest("gl: 20,000-row load under 60 seconds (report stage if slower)", async ()
   });
 
   const text = buildGlValid20k();
-  const stages: { stage: string; ms: number }[] = [];
-  const timed = async <T>(stage: string, fn: () => Promise<T>): Promise<T> => {
-    const t0 = performance.now();
-    const out = await fn();
-    stages.push({ stage, ms: performance.now() - t0 });
-    return out;
-  };
 
-  const t0 = performance.now();
-  const parsed = await timed("parse", async () => parseGlFile(text));
+  // Diagnostics: parser alone (no DB). Service/database ≈ full path minus parse.
+  const parseStarted = performance.now();
+  const parsed = parseGlFile(text);
+  const parseMs = performance.now() - parseStarted;
   assert.equal(parsed.problems.length, 0);
   assert.equal(parsed.rows.length, 20_000);
 
-  const batch = await timed("service/database (submitGlBatch)", () =>
-    app.dataSource.commands.submitGlBatch({
-      tenantId,
-      sourceSystem: "erp",
-      chartCode: "MAIN",
-      asOf: D1,
-      rows: parsed.rows,
-      by,
-    }),
-  );
-  const totalMs = performance.now() - t0;
-  stages.push({ stage: "total", ms: totalMs });
+  // D6 limit is on the real loader path, not its pieces alone.
+  const loadStarted = performance.now();
+  const out = await loadGlFile(app, {
+    tenantId,
+    text,
+    chartCode: "MAIN",
+    asOf: D1,
+    sourceSystem: "erp",
+    by,
+  });
+  const loadMs = performance.now() - loadStarted;
+  const serviceMs = Math.max(0, loadMs - parseMs);
   console.log(
-    "D6 20k GL TIMINGS (ms):\n" + stages.map((s) => `  ${s.stage}: ${s.ms.toFixed(1)}`).join("\n"),
+    "D6 20k GL TIMINGS (ms):\n" +
+      `  parse (diagnostic): ${parseMs.toFixed(1)}\n` +
+      `  service/database (diagnostic ≈ load − parse): ${serviceMs.toFixed(1)}\n` +
+      `  loadGlFile (full path): ${loadMs.toFixed(1)}`,
   );
 
-  assert.equal(batch.status, "APPLIED");
-  assert.equal(batch.received, 20_000);
-
-  if (totalMs >= 60_000) {
-    const slowest = [...stages].filter((s) => s.stage !== "total").sort((a, b) => b.ms - a.ms)[0]!;
-    // Report stages only — do not open GitHub issues from the test runner.
-    assert.fail(
-      `20k GL load took ${(totalMs / 1000).toFixed(1)}s (limit 60s); stages: ${stages
-        .map((s) => `${s.stage}=${s.ms.toFixed(1)}ms`)
-        .join(", ")}; slowest: ${slowest.stage} (${slowest.ms.toFixed(1)}ms). File an issue with these measurements; do not tune Data Source in stream D.`,
-    );
+  assert.equal(out.kind, "DONE");
+  if (out.kind === "DONE") {
+    assert.equal(out.status, "APPLIED");
+    assert.equal(out.counts.received, 20_000);
   }
+  assert.ok(
+    loadMs < 60_000,
+    `20k loadGlFile took ${(loadMs / 1000).toFixed(1)}s (limit 60s); parse=${parseMs.toFixed(1)}ms, service/database≈${serviceMs.toFixed(1)}ms, loadGlFile=${loadMs.toFixed(1)}ms. File an issue with these measurements; do not tune Data Source in stream D.`,
+  );
 }, { timeout: 180_000 });
 
 // --- rates ---
