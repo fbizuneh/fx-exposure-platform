@@ -6,6 +6,7 @@ import { check as schemaAccess } from "./schema-access.mjs";
 import { check as contract } from "./contract.mjs";
 import { check as replay } from "./replay.mjs";
 import { check as tenantProgram } from "./tenant-program.mjs";
+import { check as csvCopies } from "./csv-copies.mjs";
 
 export const CHECKS = {
   "import-boundary": importBoundary,
@@ -13,6 +14,7 @@ export const CHECKS = {
   contract,
   replay,
   "tenant-program": tenantProgram,
+  "csv-copies": csvCopies,
 };
 
 export function runAll(root, only) {

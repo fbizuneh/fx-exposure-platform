@@ -6,7 +6,7 @@ export function splitCsv(text: string): string[][] {
   let row: string[] = [];
   let cell = "";
   let quoted = false;
-  const t = text.replace(/^\uFEFF/, "");
+  const t = text.replace(/^﻿/, "");
   for (let i = 0; i < t.length; i++) {
     const c = t[i]!;
     if (quoted) {
@@ -26,3 +26,4 @@ export function splitCsv(text: string): string[][] {
   if (row.some((x) => x.trim() !== "")) rows.push(row);
   return rows;
 }
+

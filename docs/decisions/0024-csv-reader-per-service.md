@@ -10,7 +10,7 @@ Master Data, Data Source and FX Rate need the same CSV reader FX Trade already h
 2. **A new `shared/csv` package.** Shared code outside the seven identifiers; needs an architecture decision that amends AGENTS.md.
 
 ## Decided
-**Option A**, confirmed by Fikre on 2026-11-20 (Release 1 instructions row #10). Each of master-data, data-source, fx-rate and fx-trade keeps its own reader. Every copy carries a one-line comment that it is one of four and a change is made in all four. The same test cases run in each copy so drift fails a test.
+**Option A**, confirmed by Fikre on 2026-11-20 (Release 1 instructions row #10). Each of master-data, data-source, fx-rate and fx-trade keeps its own reader. Every standalone copy carries a one-line comment that it is one of four and a change is made in all four. The same test cases run in each standalone copy. `scripts/checks/csv-copies.mjs` compares the four reader bodies so editing one copy alone fails `npm run check`.
 
 ## Cost
-Four places to change when the reader changes; a forgotten copy shows up as a failing test rather than a shared package. Avoids amending AGENTS.md for a fifth shared thing. A later move into `shared/csv` remains open if the cost of four copies becomes too high.
+Four places to change when the reader changes; a forgotten copy fails the csv-copies check rather than a shared package. Avoids amending AGENTS.md for a fifth shared thing. A later move into `shared/csv` remains open if the cost of four copies becomes too high. The one-line comment on FX Trade's embedded copy is deferred (its reader still lives in `file.ts`).
