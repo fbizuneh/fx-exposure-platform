@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { ChangeSetInvalid } from "../../../services/master-data/src/index.ts";
 import type { App } from "../compose.ts";
 import type { LoadOutcome } from "../loaders/outcome.ts";
@@ -13,6 +14,8 @@ import {
   runLoad,
   type Kind,
 } from "./load.ts";
+
+const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
 const TENANT = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeee0001";
 const MARKER = "SYNTHETIC_MARKER_XYZ_7c29";
@@ -341,7 +344,7 @@ describe("INVALID_FILE diagnostics never print CSV values", () => {
       process.exitCode = result.exitCode;
     `;
     const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
-      cwd: new URL("../../..", import.meta.url).pathname,
+      cwd: REPO_ROOT,
       env: process.env,
     });
     let stdout = "";
@@ -396,7 +399,7 @@ describe("refusal output never prints CSV values", () => {
       process.exitCode = out.exitCode;
     `;
     const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
-      cwd: new URL("../../..", import.meta.url).pathname,
+      cwd: REPO_ROOT,
       env: process.env,
     });
     let stdout = "";
