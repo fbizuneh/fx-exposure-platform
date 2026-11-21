@@ -1075,10 +1075,17 @@ dbTest("CLI child process: gl --control match exits 0; mismatch exits 2 REFUSED"
     env,
   );
   assert.equal(mismatched.code, 2, mismatched.stdout + mismatched.stderr);
-  assert.match(mismatched.stdout, /REFUSED/);
-  // Control-totals mismatches may name currency / row count / sum (safe); not GL row contents.
-  assert.match(mismatched.stdout, /USD:.*expected 1 rows \/ 999\.00/);
-  assert.ok(!mismatched.stdout.includes("US1"), "never prints GL row contents");
+  assert.match(mismatched.stdout, /REFUSED \(control totals do not match\)/);
+  assert.ok(!mismatched.stdout.includes("999.00"), "CLI must not echo exact control/GL amounts");
+  assert.ok(!mismatched.stderr.includes("999.00"));
+  assert.ok(!mismatched.stdout.includes("100.00") && !mismatched.stderr.includes("100.00"));
+  const failed = await app.dataSource.questions.ingestionStatus(tenantId, {
+    sourceSystem: "erp-cli-control-bad",
+    asOf: D1,
+  });
+  assert.equal(failed[0]?.status, "FAILED");
+  assert.match(failed[0]?.failureReason ?? "", /999\.00/);
+  assert.match(failed[0]?.failureReason ?? "", /100\.0000|100\.00/);
 });
 
 dbTest("CLI child process: E3 gl-malformed.csv exits 1, names all 40 problems, stores nothing", async () => {

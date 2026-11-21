@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { BatchRefused } from "../../../services/data-source/src/index.ts";
 import { ChangeSetInvalid } from "../../../services/master-data/src/index.ts";
 import type { App } from "../compose.ts";
 import type { LoadOutcome } from "../loaders/outcome.ts";
@@ -104,14 +105,17 @@ describe("formatOutput", () => {
     assert.equal(refused.lines.length, 1);
     assert.ok(refused.lines.every((l) => !l.includes(MARKER)));
 
+    const receivedSum = "10.0000";
+    const expectedSum = "99.00";
     const totals = formatOutput("gl", {
       kind: "REFUSED",
-      message: "control totals do not match: USD: received 1 rows / 10.0000, expected 1 rows / 99; EUR: received 1 rows / 5.0000, not expected",
+      message: `control totals do not match: USD: received 1 rows / ${receivedSum}, expected 1 rows / ${expectedSum}`,
     });
     assert.equal(totals.exitCode, 2);
-    assert.equal(totals.lines[0], "gl: REFUSED");
-    assert.equal(totals.lines[1], "USD: received 1 rows / 10.0000, expected 1 rows / 99");
-    assert.equal(totals.lines[2], "EUR: received 1 rows / 5.0000, not expected");
+    assert.equal(totals.lines[0], "gl: REFUSED (control totals do not match)");
+    assert.equal(totals.lines.length, 1);
+    assert.ok(!totals.lines[0]!.includes(receivedSum));
+    assert.ok(!totals.lines[0]!.includes(expectedSum));
 
     assert.equal(
       formatOutput("entities", { kind: "HELD", batchId: "b1", reason: "ends too many" }).exitCode,
@@ -241,6 +245,57 @@ describe("runLoad dry-run", () => {
     );
     assert.equal(result.exitCode, 0);
     assert.equal(result.lines[0], "gl: OK (dry-run)");
+  });
+
+  it("single-row control mismatch exits 2 without echoing either amount", async () => {
+    const glAmount = "12345.67";
+    const wrongTotal = "99999.00";
+    const files = new Map<string, string>([
+      [
+        "balances.csv",
+        `entity_code,account_number,currency,balance,debit,credit,as_of\nUS1,1000,USD,${glAmount},,,2026-03-09\n`,
+      ],
+      ["totals.csv", `currency,row_count,sum\nUSD,1,${wrongTotal}\n`],
+    ]);
+    const result = await runLoad(
+      ["gl", "balances.csv", "--tenant", TENANT, "--chart", "MAIN", "--as-of", "2026-03-09", "--source", "erp", "--control", "totals.csv"],
+      { DATABASE_URL: "postgres://test/db" },
+      {
+        defaultBy: "cli:test",
+        readFile: async (path) => {
+          const text = files.get(path);
+          if (text === undefined) throw new Error(`missing ${path}`);
+          return text;
+        },
+        composeApp: () =>
+          ({
+            dataSource: {
+              commands: {
+                submitGlBatch: async () => {
+                  throw new BatchRefused(
+                    "batch-failed",
+                    `control totals do not match: USD: received 1 rows / ${glAmount}00, expected 1 rows / ${wrongTotal}`,
+                  );
+                },
+              },
+              outbox: { pending: async () => [] },
+            },
+            identity: { outbox: { pending: async () => [] } },
+            masterData: { outbox: { pending: async () => [] } },
+            fxRate: { outbox: { pending: async () => [] } },
+            exposureManagement: { outbox: { pending: async () => [] } },
+            exposureAnalysis: { outbox: { pending: async () => [] } },
+            fxTrade: { outbox: { pending: async () => [] } },
+            hedgeRecommendation: { outbox: { pending: async () => [] } },
+            close: async () => {},
+          }) as unknown as App,
+      },
+    );
+    assert.equal(result.exitCode, 2);
+    assert.equal(result.lines[0], "gl: REFUSED (control totals do not match)");
+    const joined = result.lines.join("\n");
+    assert.equal(joined.includes(glAmount), false);
+    assert.equal(joined.includes(wrongTotal), false);
   });
 
   it("unclosed quote in --control exits 1 INVALID_FILE without opening the database", async () => {

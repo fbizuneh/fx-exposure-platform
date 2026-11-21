@@ -388,18 +388,11 @@ export function formatOutput(
   }
 
   if (outcome.kind === "REFUSED") {
-    // Safe summary only: most service refusal text can name rejected row values (entity/account codes, pairs).
-    // Control-total mismatches (decision 0031) name only currency, row count and sum — safe to show.
-    const lines = [`${kind}: REFUSED${drainSuffix}`];
-    const msg = outcome.message;
-    const totalsPrefix = "control totals do not match: ";
-    if (msg.startsWith(totalsPrefix)) {
-      const detail = msg.slice(totalsPrefix.length);
-      for (const part of detail.split("; ")) {
-        if (part !== "") lines.push(part);
-      }
-    }
-    return { exitCode: 2, lines };
+    // Safe summary only: service refusal text can name rejected row values or exact amounts (D5).
+    // Control-totals mismatches keep their detail on the FAILED batch (decision 0031); CLI names the class only.
+    const totalsMismatch = /control totals do not match/i.test(outcome.message);
+    const label = totalsMismatch ? "REFUSED (control totals do not match)" : "REFUSED";
+    return { exitCode: 2, lines: [`${kind}: ${label}${drainSuffix}`] };
   }
 
   if (outcome.kind === "HELD") {
