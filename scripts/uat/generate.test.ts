@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { toBusinessCalendar, valueDateFor } from "../../services/hedge-recommendation/src/calc.ts";
+import { parseGlFile } from "../../services/data-source/src/file.ts";
 import { generate } from "./generate.ts";
 
 test("one seed produces identical complete UAT files and a manifest that covers their bytes", async () => {
@@ -34,6 +35,11 @@ test("one seed produces identical complete UAT files and a manifest that covers 
     assert.equal(manifest.malformedProblems.length, 40);
     assert.equal(new Set(manifest.malformedProblems.map((p) => p.row)).size, 40);
     assert.deepEqual(manifest.malformedProblems.map((p) => p.row), Array.from({ length: 40 }, (_, i) => i + 1));
+    const malformedExpectation = JSON.parse(await readFile("packs/uat/expected/gl-malformed-problems.json", "utf8")) as { problems: { row: number; column: string; kind: string }[] };
+    assert.deepEqual(malformedExpectation.problems, manifest.malformedProblems);
+    const malformed = parseGlFile(await readFile(join(first, "gl-malformed.csv"), "utf8"));
+    assert.deepEqual(malformed.rows, []);
+    assert.deepEqual(malformed.problems.map((p) => [p.rowNo, p.column]), manifest.malformedProblems.map((p) => [p.row, p.column]));
     for (const entry of manifest.files) {
       const bytes = await readFile(join(first, entry.file));
       assert.equal(bytes.toString("utf8").trimEnd().split("\n").length - 1, entry.rows, entry.file);
