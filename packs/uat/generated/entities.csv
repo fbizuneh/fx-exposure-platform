@@ -1,0 +1,51 @@
+code,name,type,parent_code,country_code,functional_currency,is_legal_entity,is_treasury_entity,is_hedge_execution_entity
+G,Northstar Meridian Group (fictional),GROUP,,,,false,false,false
+AMER,AMER Region,REGION,G,,,false,false,false
+EMEA,EMEA Region,REGION,G,,,false,false,false
+APAC,APAC Region,REGION,G,,,false,false,false
+LATAM,LATAM Region,REGION,G,,,false,false,false
+LE01,Northstar Meridian LE01 (fictional),LEGAL_ENTITY,AMER,,USD,true,false,false
+LE02,Northstar Meridian LE02 (fictional),LEGAL_ENTITY,EMEA,,EUR,true,false,false
+LE03,Northstar Meridian LE03 (fictional),LEGAL_ENTITY,APAC,,GBP,true,false,false
+LE04,Northstar Meridian LE04 (fictional),LEGAL_ENTITY,LATAM,,JPY,true,false,false
+LE05,Northstar Meridian LE05 (fictional),LEGAL_ENTITY,AMER,,CHF,true,false,false
+LE06,Northstar Meridian LE06 (fictional),LEGAL_ENTITY,EMEA,,CAD,true,false,false
+LE07,Northstar Meridian LE07 (fictional),LEGAL_ENTITY,APAC,,AUD,true,false,false
+LE08,Northstar Meridian LE08 (fictional),LEGAL_ENTITY,LATAM,,NZD,true,false,false
+LE09,Northstar Meridian LE09 (fictional),LEGAL_ENTITY,AMER,,SGD,true,false,false
+LE10,Northstar Meridian LE10 (fictional),LEGAL_ENTITY,EMEA,,HKD,true,false,false
+LE11,Northstar Meridian LE11 (fictional),LEGAL_ENTITY,APAC,,CNY,true,false,false
+LE12,Northstar Meridian LE12 (fictional),LEGAL_ENTITY,LATAM,,CNH,true,false,false
+LE13,Northstar Meridian LE13 (fictional),LEGAL_ENTITY,AMER,,SEK,true,false,false
+LE14,Northstar Meridian LE14 (fictional),LEGAL_ENTITY,EMEA,,NOK,true,false,false
+LE15,Northstar Meridian LE15 (fictional),LEGAL_ENTITY,APAC,,DKK,true,false,false
+LE16,Northstar Meridian LE16 (fictional),LEGAL_ENTITY,LATAM,,PLN,true,false,false
+LE17,Northstar Meridian LE17 (fictional),LEGAL_ENTITY,AMER,,CZK,true,false,false
+LE18,Northstar Meridian LE18 (fictional),LEGAL_ENTITY,EMEA,,HUF,true,false,false
+LE19,Northstar Meridian LE19 (fictional),LEGAL_ENTITY,APAC,,RON,true,false,false
+LE20,Northstar Meridian LE20 (fictional),LEGAL_ENTITY,LATAM,,TRY,true,false,false
+LE21,Northstar Meridian LE21 (fictional),LEGAL_ENTITY,AMER,,ZAR,true,false,false
+LE22,Northstar Meridian LE22 (fictional),LEGAL_ENTITY,EMEA,,MXN,true,false,false
+LE23,Northstar Meridian LE23 (fictional),LEGAL_ENTITY,APAC,,BRL,true,false,false
+LE24,Northstar Meridian LE24 (fictional),LEGAL_ENTITY,LATAM,,INR,true,false,false
+LE25,Northstar Meridian LE25 (fictional),LEGAL_ENTITY,AMER,,KRW,true,false,false
+LE26,Northstar Meridian LE26 (fictional),LEGAL_ENTITY,EMEA,,TWD,true,false,false
+LE27,Northstar Meridian LE27 (fictional),LEGAL_ENTITY,APAC,,IDR,true,false,false
+LE28,Northstar Meridian LE28 (fictional),LEGAL_ENTITY,LATAM,,PHP,true,false,false
+LE29,Northstar Meridian LE29 (fictional),LEGAL_ENTITY,AMER,,CLP,true,false,false
+LE30,Northstar Meridian LE30 (fictional),LEGAL_ENTITY,EMEA,,COP,true,false,false
+LE31,Northstar Meridian LE31 (fictional),LEGAL_ENTITY,APAC,,PEN,true,false,false
+LE32,Northstar Meridian LE32 (fictional),LEGAL_ENTITY,LATAM,,AED,true,false,false
+LE33,Northstar Meridian LE33 (fictional),LEGAL_ENTITY,AMER,,SAR,true,false,false
+LE34,Northstar Meridian LE34 (fictional),LEGAL_ENTITY,EMEA,,ILS,true,false,false
+LE35,Northstar Meridian LE35 (fictional),LEGAL_ENTITY,APAC,,THB,true,false,false
+LE36,Northstar Meridian LE36 (fictional),LEGAL_ENTITY,LATAM,,MYR,true,false,false
+LE37,Northstar Meridian LE37 (fictional),LEGAL_ENTITY,AMER,,VND,true,false,false
+LE38,Northstar Meridian LE38 (fictional),LEGAL_ENTITY,EMEA,,EGP,true,false,false
+LE39,Northstar Meridian LE39 (fictional),LEGAL_ENTITY,APAC,,NGN,true,false,false
+LE40,Northstar Meridian LE40 (fictional),LEGAL_ENTITY,LATAM,,KES,true,false,false
+LE41,Northstar Meridian LE41 (fictional),LEGAL_ENTITY,AMER,,USD,true,false,false
+LE45,Northstar Meridian LE45 (fictional),LEGAL_ENTITY,EMEA,,EUR,true,false,false
+EX01,Northstar Meridian EX01 (fictional),LEGAL_ENTITY,APAC,,GBP,true,true,true
+EX02,Northstar Meridian EX02 (fictional),LEGAL_ENTITY,LATAM,,JPY,true,true,true
+TR01,Northstar Meridian TR01 (fictional),LEGAL_ENTITY,AMER,,CHF,true,true,false

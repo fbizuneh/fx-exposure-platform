@@ -1,0 +1,1709 @@
+{
+  "seed": 20261120,
+  "config": "packs/uat/config.json",
+  "dates": {
+    "ratesFrom": "2025-11-20",
+    "ratesThrough": "2026-11-20",
+    "glFrom": "2026-10-26",
+    "glThrough": "2026-11-20"
+  },
+  "planted": {
+    "missing": {
+      "date": "2026-11-12",
+      "currency": "EUR"
+    },
+    "stale": {
+      "date": "2026-11-13",
+      "currency": "GBP"
+    },
+    "outlier": {
+      "date": "2026-11-16",
+      "currency": "AUD"
+    },
+    "holiday": {
+      "date": "2027-02-22",
+      "currency": "EUR",
+      "adjustedForwardDate": "2027-02-23"
+    },
+    "lateGl": {
+      "date": "2026-10-27",
+      "file": "gl/gl-2026-10-27.csv",
+      "loadAfterCycleStart": true
+    },
+    "flip": {
+      "currency": "EUR",
+      "from": "2026-11-19",
+      "to": "2026-11-20"
+    },
+    "excludedEntity": "LE45"
+  },
+  "malformedProblems": [
+    {
+      "row": 1,
+      "column": "balance",
+      "kind": "balance_with_debit"
+    },
+    {
+      "row": 2,
+      "column": "balance",
+      "kind": "no_amount"
+    },
+    {
+      "row": 3,
+      "column": "as_of",
+      "kind": "bad_date"
+    },
+    {
+      "row": 4,
+      "column": "currency",
+      "kind": "bad_currency"
+    },
+    {
+      "row": 5,
+      "column": "balance",
+      "kind": "non_numeric"
+    },
+    {
+      "row": 6,
+      "column": "entity_code",
+      "kind": "missing_entity"
+    },
+    {
+      "row": 7,
+      "column": "balance",
+      "kind": "balance_with_debit"
+    },
+    {
+      "row": 8,
+      "column": "balance",
+      "kind": "no_amount"
+    },
+    {
+      "row": 9,
+      "column": "as_of",
+      "kind": "bad_date"
+    },
+    {
+      "row": 10,
+      "column": "currency",
+      "kind": "bad_currency"
+    },
+    {
+      "row": 11,
+      "column": "balance",
+      "kind": "non_numeric"
+    },
+    {
+      "row": 12,
+      "column": "entity_code",
+      "kind": "missing_entity"
+    },
+    {
+      "row": 13,
+      "column": "balance",
+      "kind": "balance_with_debit"
+    },
+    {
+      "row": 14,
+      "column": "balance",
+      "kind": "no_amount"
+    },
+    {
+      "row": 15,
+      "column": "as_of",
+      "kind": "bad_date"
+    },
+    {
+      "row": 16,
+      "column": "currency",
+      "kind": "bad_currency"
+    },
+    {
+      "row": 17,
+      "column": "balance",
+      "kind": "non_numeric"
+    },
+    {
+      "row": 18,
+      "column": "entity_code",
+      "kind": "missing_entity"
+    },
+    {
+      "row": 19,
+      "column": "balance",
+      "kind": "balance_with_debit"
+    },
+    {
+      "row": 20,
+      "column": "balance",
+      "kind": "no_amount"
+    },
+    {
+      "row": 21,
+      "column": "as_of",
+      "kind": "bad_date"
+    },
+    {
+      "row": 22,
+      "column": "currency",
+      "kind": "bad_currency"
+    },
+    {
+      "row": 23,
+      "column": "balance",
+      "kind": "non_numeric"
+    },
+    {
+      "row": 24,
+      "column": "entity_code",
+      "kind": "missing_entity"
+    },
+    {
+      "row": 25,
+      "column": "balance",
+      "kind": "balance_with_debit"
+    },
+    {
+      "row": 26,
+      "column": "balance",
+      "kind": "no_amount"
+    },
+    {
+      "row": 27,
+      "column": "as_of",
+      "kind": "bad_date"
+    },
+    {
+      "row": 28,
+      "column": "currency",
+      "kind": "bad_currency"
+    },
+    {
+      "row": 29,
+      "column": "balance",
+      "kind": "non_numeric"
+    },
+    {
+      "row": 30,
+      "column": "entity_code",
+      "kind": "missing_entity"
+    },
+    {
+      "row": 31,
+      "column": "balance",
+      "kind": "balance_with_debit"
+    },
+    {
+      "row": 32,
+      "column": "balance",
+      "kind": "no_amount"
+    },
+    {
+      "row": 33,
+      "column": "as_of",
+      "kind": "bad_date"
+    },
+    {
+      "row": 34,
+      "column": "currency",
+      "kind": "bad_currency"
+    },
+    {
+      "row": 35,
+      "column": "balance",
+      "kind": "non_numeric"
+    },
+    {
+      "row": 36,
+      "column": "entity_code",
+      "kind": "missing_entity"
+    },
+    {
+      "row": 37,
+      "column": "balance",
+      "kind": "balance_with_debit"
+    },
+    {
+      "row": 38,
+      "column": "balance",
+      "kind": "no_amount"
+    },
+    {
+      "row": 39,
+      "column": "as_of",
+      "kind": "bad_date"
+    },
+    {
+      "row": 40,
+      "column": "currency",
+      "kind": "bad_currency"
+    }
+  ],
+  "dirtyChanges": {
+    "unknownEntity": 10,
+    "unknownAccount": 10,
+    "excludedAccount": 10
+  },
+  "files": [
+    {
+      "file": "accounts.csv",
+      "rows": 40,
+      "sha256": "440177e29cfedb83d12fe1c9a911548fa258f3fb28e3dbbdafc601bfc854e521"
+    },
+    {
+      "file": "calendars.csv",
+      "rows": 40,
+      "sha256": "0d1d4a5da26557ec05a0b9873db2e70444c2cf40c5fe70b14f3881056e689167"
+    },
+    {
+      "file": "currencies.csv",
+      "rows": 40,
+      "sha256": "d2b4f1f5931e97d0b1cf1a8625a0aa74ae8e683df64385ee0501225bfbd33c56"
+    },
+    {
+      "file": "entities.csv",
+      "rows": 50,
+      "sha256": "9f813db9616ad02e8347a9b4ed957b512e16b7b4b805378a97cbb5bbdaa53c41"
+    },
+    {
+      "file": "executed-history-BS-ENT.csv",
+      "rows": 131,
+      "sha256": "5765ac1199bbd4614bafdcb68aa525aa80af6808e8712de1643d9fab8bad669d"
+    },
+    {
+      "file": "executed-history-BS-REG.csv",
+      "rows": 131,
+      "sha256": "fbecd67b653b0b25e5d74971fc2e2630d48de632c9ca713ce9ca91a2622882ea"
+    },
+    {
+      "file": "exposure-currencies.csv",
+      "rows": 39,
+      "sha256": "4e8408c9df6006e6a267b409bad8cae7592b768add61b743826c570b9dbb84e8"
+    },
+    {
+      "file": "gl-dirty.csv",
+      "rows": 20000,
+      "sha256": "4d5632bfe11436b9aff2fb0b7b3c9ee22715dd369fb46017045e4f67f8b76bdb"
+    },
+    {
+      "file": "gl-malformed.csv",
+      "rows": 20000,
+      "sha256": "e4b9a48dacc98a2d956930f7e7465f286c6cd76dec8c081d2dbd6a7d6a9aaeb2"
+    },
+    {
+      "file": "gl/gl-2026-10-26.csv",
+      "rows": 20000,
+      "sha256": "907c20fb944c92b5d3399710a8b2c60989fed2476bc12c3647c5832e36657ca0"
+    },
+    {
+      "file": "gl/gl-2026-10-27.csv",
+      "rows": 20000,
+      "sha256": "4d36484d220724faf5140dc51d0a9db4df0bd6b9075bdf5dae6beee46b4fb8d1"
+    },
+    {
+      "file": "gl/gl-2026-10-28.csv",
+      "rows": 20000,
+      "sha256": "0f49d0b3df1fcc78fa98aa5d3a009aa925cc75ece00b6d36da03c791ec4ed415"
+    },
+    {
+      "file": "gl/gl-2026-10-29.csv",
+      "rows": 20000,
+      "sha256": "24539f094c610b0f40b18fcdd965cb0a2f78038b912f5bfac71e33964298b0af"
+    },
+    {
+      "file": "gl/gl-2026-10-30.csv",
+      "rows": 20000,
+      "sha256": "88c3a096f86e1ce3eb48e8f81442e2c68bbae7f139bba6a0c02c1bafc22e792d"
+    },
+    {
+      "file": "gl/gl-2026-11-02.csv",
+      "rows": 20000,
+      "sha256": "8d345fe8b9793e760b4639fd455ddba7b465aed40a5f8a08871eb41d87a0b410"
+    },
+    {
+      "file": "gl/gl-2026-11-03.csv",
+      "rows": 20000,
+      "sha256": "69b8143d032e0dec4194b4cc67d43f4d6dd8271eb800d2434a8d2d69006bbf81"
+    },
+    {
+      "file": "gl/gl-2026-11-04.csv",
+      "rows": 20000,
+      "sha256": "fd7b8be817a180af06836f6dbb9395ab2b16f22a856b51d8952bcb63ddaecb3c"
+    },
+    {
+      "file": "gl/gl-2026-11-05.csv",
+      "rows": 20000,
+      "sha256": "458284b2a1493ffdbbda28c8b0a372d4a83418f02663feceef6ef63e6a27e465"
+    },
+    {
+      "file": "gl/gl-2026-11-06.csv",
+      "rows": 20000,
+      "sha256": "b0d61346b1ce0a8fc1283b04979eef41bc07b45ff39e56f6263c9252225f29b5"
+    },
+    {
+      "file": "gl/gl-2026-11-09.csv",
+      "rows": 20000,
+      "sha256": "69c8f51514bf82dc0269138ba7748d6782a1fe556392928c5ae68f8cdb178c91"
+    },
+    {
+      "file": "gl/gl-2026-11-10.csv",
+      "rows": 20000,
+      "sha256": "2e1718cbaad19db61d9c00005307067414abf9701835e8e40302d1e3b2908be4"
+    },
+    {
+      "file": "gl/gl-2026-11-11.csv",
+      "rows": 20000,
+      "sha256": "c1d569d3ed60ef26a12e05d148368b4ba8792350ab200004cef1ebf677caded2"
+    },
+    {
+      "file": "gl/gl-2026-11-12.csv",
+      "rows": 20000,
+      "sha256": "4ba6664be081b1963cc7708137a2d984cb25dac9860fa6b3e1c8275c7a1a440d"
+    },
+    {
+      "file": "gl/gl-2026-11-13.csv",
+      "rows": 20000,
+      "sha256": "8e1901cd5b7a9b9d8dd2cebca31640ef8ae1b1e957b84ec1f80582037bc5eca1"
+    },
+    {
+      "file": "gl/gl-2026-11-16.csv",
+      "rows": 20000,
+      "sha256": "de0a4327e76f1acb423ff59d0be813e30427188302083de1a8f12f49a90718bf"
+    },
+    {
+      "file": "gl/gl-2026-11-17.csv",
+      "rows": 20000,
+      "sha256": "cf79e0ad92a78d17b630455633be18d32763a1123cf008c6a029e4eb44f75628"
+    },
+    {
+      "file": "gl/gl-2026-11-18.csv",
+      "rows": 20000,
+      "sha256": "e8bd293dd31bf47614246d5cd3fd4ad86c25f549dd9bc212181768764661e883"
+    },
+    {
+      "file": "gl/gl-2026-11-19.csv",
+      "rows": 20000,
+      "sha256": "4cdae6a9ff2a7966253520bf4356aad2747b2e39363b96757f97ff5264796df9"
+    },
+    {
+      "file": "gl/gl-2026-11-20.csv",
+      "rows": 20000,
+      "sha256": "804976ddec2b43765265c7080a13be17eeec8f6764eee6c0db151bc1b8d7f899"
+    },
+    {
+      "file": "hierarchy.csv",
+      "rows": 25,
+      "sha256": "ebd334d9c41c6b9d60b6a2fe1ba5121ec41d9f2dbd40fbaabee0e321dd5d930e"
+    },
+    {
+      "file": "rates/rates-2025-11-20.csv",
+      "rows": 195,
+      "sha256": "959c9d304be1727aebc7f8da700321b351eb4a5fcd9ff3b7f528f704b3618335"
+    },
+    {
+      "file": "rates/rates-2025-11-21.csv",
+      "rows": 195,
+      "sha256": "229aaf3f3bb68db724619f58a7b5f038488991c6221852d1a7d6e1786abf4981"
+    },
+    {
+      "file": "rates/rates-2025-11-24.csv",
+      "rows": 195,
+      "sha256": "e87b65cba0e1abd94b96c496cd50b475f291daff5d2ad9b0b39045a92a777897"
+    },
+    {
+      "file": "rates/rates-2025-11-25.csv",
+      "rows": 195,
+      "sha256": "933dea872e20afd5e7daa07221ce454634ec4332b1783722b4236ae69ee26f20"
+    },
+    {
+      "file": "rates/rates-2025-11-26.csv",
+      "rows": 195,
+      "sha256": "00e22961ce6451b484c9e55a3319668c3e2461ba4721c9a75541ab7c9648c85a"
+    },
+    {
+      "file": "rates/rates-2025-11-27.csv",
+      "rows": 195,
+      "sha256": "199d276168bec71aaa60a3f3715ae22da4accf058cf5bcd786495f171844c151"
+    },
+    {
+      "file": "rates/rates-2025-11-28.csv",
+      "rows": 195,
+      "sha256": "378f7acfa0b6869ccf55dafd27bbe26b8e7cb56f2306394078241ff6013eaa13"
+    },
+    {
+      "file": "rates/rates-2025-12-01.csv",
+      "rows": 195,
+      "sha256": "0ee78d382c50516944f0bf3f8895d760d490296dbb48e562fd1d550f8c3aaede"
+    },
+    {
+      "file": "rates/rates-2025-12-02.csv",
+      "rows": 195,
+      "sha256": "71fbd0a5924d02100cce1ec152aa1f05a2c716d3647e5fc746b087b5972ebca7"
+    },
+    {
+      "file": "rates/rates-2025-12-03.csv",
+      "rows": 195,
+      "sha256": "34fdd6ee4d22e9405464b2d79db812d126f8742019330f7affbabe1e87ce5657"
+    },
+    {
+      "file": "rates/rates-2025-12-04.csv",
+      "rows": 195,
+      "sha256": "47a30e1d383fdd6a468e1f96710e578e0c401650db6cb5b08509ff45c791a8d2"
+    },
+    {
+      "file": "rates/rates-2025-12-05.csv",
+      "rows": 195,
+      "sha256": "e1c70cd4772f47bea0d473abb34da829456bfdb6d28d722f07222d355a04dd5e"
+    },
+    {
+      "file": "rates/rates-2025-12-08.csv",
+      "rows": 195,
+      "sha256": "37db63333f733d1d04818c2801d76b57a9fc4abe4a4a8cbd60104f7826c79c96"
+    },
+    {
+      "file": "rates/rates-2025-12-09.csv",
+      "rows": 195,
+      "sha256": "0b176efe038b735bd34578e4115b94460dc0fa26bdc98559936e6ff88ee0a06c"
+    },
+    {
+      "file": "rates/rates-2025-12-10.csv",
+      "rows": 195,
+      "sha256": "fbd130527b037de34d456c9b4c2df5b976345fd78ef436e696b3a7d9eecf1c6e"
+    },
+    {
+      "file": "rates/rates-2025-12-11.csv",
+      "rows": 195,
+      "sha256": "cce27361d40b42b331a17002cc190cd71770b8f329f8adbbda076aaa7a2d93eb"
+    },
+    {
+      "file": "rates/rates-2025-12-12.csv",
+      "rows": 195,
+      "sha256": "539f15d07192e3a90ef8f13468c1a5f6d72768fdc5ec0313a8ddc480d02b615d"
+    },
+    {
+      "file": "rates/rates-2025-12-15.csv",
+      "rows": 195,
+      "sha256": "bd780db915c46366edfb21c4984f640647ca575787b3d9e8e85b544bb6911d12"
+    },
+    {
+      "file": "rates/rates-2025-12-16.csv",
+      "rows": 195,
+      "sha256": "129d3d487b8ab8678ca18482ad7dfe03b76eb41c83ef843c9759535336223a5d"
+    },
+    {
+      "file": "rates/rates-2025-12-17.csv",
+      "rows": 195,
+      "sha256": "d62882fa335c059164397eb995aa16179dee3d40f30e551af06a32d670f0309d"
+    },
+    {
+      "file": "rates/rates-2025-12-18.csv",
+      "rows": 195,
+      "sha256": "27503d96dc127da985aeed8782a4ef948a1d24e3a91c179fc2a907f8d10b0da1"
+    },
+    {
+      "file": "rates/rates-2025-12-19.csv",
+      "rows": 195,
+      "sha256": "730e226f032667425e0d3a4d3f19f31f6f043dceae1f22bbcefba533a6370efd"
+    },
+    {
+      "file": "rates/rates-2025-12-22.csv",
+      "rows": 195,
+      "sha256": "0022d361ca946626bfe7d986ca5662f79262df4157e9ba44c76b32ab25c30d9b"
+    },
+    {
+      "file": "rates/rates-2025-12-23.csv",
+      "rows": 195,
+      "sha256": "c9460f0d545734233dea7f031bb15104e4dbfa684d59ee2ebdf4d77efa167705"
+    },
+    {
+      "file": "rates/rates-2025-12-24.csv",
+      "rows": 195,
+      "sha256": "8243212feff4ceb47cc31413d97a6709dc6faa3aa123c83d2c5be1dcd8e42bec"
+    },
+    {
+      "file": "rates/rates-2025-12-25.csv",
+      "rows": 195,
+      "sha256": "c9f941de5454ed7384bcd25c1950e048d378a8515c92e5ff19c53ede3143ad86"
+    },
+    {
+      "file": "rates/rates-2025-12-26.csv",
+      "rows": 195,
+      "sha256": "bdca580fe97ca55af682c5573061dfe4c789979ae1321ecd864eb41e0638c081"
+    },
+    {
+      "file": "rates/rates-2025-12-29.csv",
+      "rows": 195,
+      "sha256": "a1f2252dda04873a4590f3c9c8f403e042eb839f4fc0baedb456b14c8b25cb59"
+    },
+    {
+      "file": "rates/rates-2025-12-30.csv",
+      "rows": 195,
+      "sha256": "5b34bddaf58b8749d2da48b17502b444abe2ce967905dd70e076300604501f7d"
+    },
+    {
+      "file": "rates/rates-2025-12-31.csv",
+      "rows": 195,
+      "sha256": "273be0e6dbc3b9e12e5dd496c001abacea1130d3c158f3d37ca23d4c43d30b5e"
+    },
+    {
+      "file": "rates/rates-2026-01-01.csv",
+      "rows": 195,
+      "sha256": "7108ce7ca44f65b19b5829f3effb371052d9a69658979b951725b4219ee14e64"
+    },
+    {
+      "file": "rates/rates-2026-01-02.csv",
+      "rows": 195,
+      "sha256": "4ba8d7e3e613de2a49857ed92e23caa64df4f4cb08b868cf5acee13f996a5ba9"
+    },
+    {
+      "file": "rates/rates-2026-01-05.csv",
+      "rows": 195,
+      "sha256": "21ae41296845fd1f4e4dc4fa25ee070b301a98e58bcdacfe9fcecb4ad48e3249"
+    },
+    {
+      "file": "rates/rates-2026-01-06.csv",
+      "rows": 195,
+      "sha256": "11bf1c990ff3eb6c5934da93e2d9c4e9be1c1c9f9d5c6dea2714d768323345fc"
+    },
+    {
+      "file": "rates/rates-2026-01-07.csv",
+      "rows": 195,
+      "sha256": "6db92af5a1362f7db81369fcad5f5c280aec9167087bb5cafcb90ddb373a93e1"
+    },
+    {
+      "file": "rates/rates-2026-01-08.csv",
+      "rows": 195,
+      "sha256": "47159bbfb8f770cb55a671aad7f3b8de8a840de512420a3fc04016d4bdf35565"
+    },
+    {
+      "file": "rates/rates-2026-01-09.csv",
+      "rows": 195,
+      "sha256": "bad408c95b893a0da6e150404a1ab31bcb4bc61600e003e0ddffe9719c2b17bb"
+    },
+    {
+      "file": "rates/rates-2026-01-12.csv",
+      "rows": 195,
+      "sha256": "962c668567c85ea6b7adc9ed2695f81d231131dd28785da9039190182b892de7"
+    },
+    {
+      "file": "rates/rates-2026-01-13.csv",
+      "rows": 195,
+      "sha256": "c10b8e0f1ea82d43f52ada3e95186347a8a3187a1f7b946c42f1505f45dc7437"
+    },
+    {
+      "file": "rates/rates-2026-01-14.csv",
+      "rows": 195,
+      "sha256": "7934bbea460dff5a7ff5153934ea51d221129de2597c4479d985446c40a9fdd1"
+    },
+    {
+      "file": "rates/rates-2026-01-15.csv",
+      "rows": 195,
+      "sha256": "57a3fae93ac7b9e975ffed88c1728d0c8fd58674b8294b60930c62e1e1f1419e"
+    },
+    {
+      "file": "rates/rates-2026-01-16.csv",
+      "rows": 195,
+      "sha256": "fb6c4c96ad1afde5920556c9d38073f055dd3806225908bf76640f61b1a0d652"
+    },
+    {
+      "file": "rates/rates-2026-01-19.csv",
+      "rows": 195,
+      "sha256": "6f1a4e186c13a0e82e81e6fadd1cab942563c8e9abca5409ca0314f2fe866351"
+    },
+    {
+      "file": "rates/rates-2026-01-20.csv",
+      "rows": 195,
+      "sha256": "c8077a1e99174fd6cb8ce10b35ff638dc7bba039b563c6f913bea04d010a632e"
+    },
+    {
+      "file": "rates/rates-2026-01-21.csv",
+      "rows": 195,
+      "sha256": "c3e5a6e58c8a26edb7bb225bd302efe2e213fb30b1b2c80411e4a253ba802006"
+    },
+    {
+      "file": "rates/rates-2026-01-22.csv",
+      "rows": 195,
+      "sha256": "795bdc1bd2889255da7916c9328bb626c85eefa2c3311c4ca30f9b206bbadc42"
+    },
+    {
+      "file": "rates/rates-2026-01-23.csv",
+      "rows": 195,
+      "sha256": "b5741acc9cb63963db0f04a102ce236539bcdc3f6307e6ff3d76a26e8b82cb8b"
+    },
+    {
+      "file": "rates/rates-2026-01-26.csv",
+      "rows": 195,
+      "sha256": "15e7a58c91bc0f52788f99b312961f64f8919d2e936257b73f7a9b57defa0d7d"
+    },
+    {
+      "file": "rates/rates-2026-01-27.csv",
+      "rows": 195,
+      "sha256": "8b7e2e6f5fa3379c7978c6a13e8581fef744006b50062149a6d7f09745aceaca"
+    },
+    {
+      "file": "rates/rates-2026-01-28.csv",
+      "rows": 195,
+      "sha256": "539116af75192f274d08cbf9f0262fc424bcde93dc3928b689c69db1776651c1"
+    },
+    {
+      "file": "rates/rates-2026-01-29.csv",
+      "rows": 195,
+      "sha256": "fe9e1b25ad41532ac44a334e1034d8c461765358a745806f1ffec19251bc9a57"
+    },
+    {
+      "file": "rates/rates-2026-01-30.csv",
+      "rows": 195,
+      "sha256": "26b540a3db9456d807feb1014b6a5172d3826848fd120ead9dc0f9d6edd093a0"
+    },
+    {
+      "file": "rates/rates-2026-02-02.csv",
+      "rows": 195,
+      "sha256": "f2a72443083a441401d5a88c6b3f939a41b1b1a55c12f766544930a2f8805d94"
+    },
+    {
+      "file": "rates/rates-2026-02-03.csv",
+      "rows": 195,
+      "sha256": "ddfc282131914d2ca2d96918d302e571312e62d98831ec2578add4228678486a"
+    },
+    {
+      "file": "rates/rates-2026-02-04.csv",
+      "rows": 195,
+      "sha256": "85e586a12f3e4279cad9e9a13578ddc2a598ff043d9dd9890416baf6abdf817d"
+    },
+    {
+      "file": "rates/rates-2026-02-05.csv",
+      "rows": 195,
+      "sha256": "74d99c4bbe747778195ab38bdb96a811ff47f708dce7c387becfac400e5bb7ae"
+    },
+    {
+      "file": "rates/rates-2026-02-06.csv",
+      "rows": 195,
+      "sha256": "5447c9c5752fe3e8c110476870919030427a0eec52e9bab2f0a4c1a16b28910f"
+    },
+    {
+      "file": "rates/rates-2026-02-09.csv",
+      "rows": 195,
+      "sha256": "9243c7958307ca5fccd51e0ab64db9b77001d5b84418b2a06d782be1bf4444c3"
+    },
+    {
+      "file": "rates/rates-2026-02-10.csv",
+      "rows": 195,
+      "sha256": "05f5e53a227ddde120b523f2f5f82dc8c0610f59516c204ada4d0002afbf2620"
+    },
+    {
+      "file": "rates/rates-2026-02-11.csv",
+      "rows": 195,
+      "sha256": "db3bea8f67a4dfe499af7b9c55de23604dec371284db712c83cc64cd75c20e61"
+    },
+    {
+      "file": "rates/rates-2026-02-12.csv",
+      "rows": 195,
+      "sha256": "2861b6f7ef586526ca7ce6fabd20e0c4d72de9641c0ce0e594ef32d14f393156"
+    },
+    {
+      "file": "rates/rates-2026-02-13.csv",
+      "rows": 195,
+      "sha256": "2d55abdd3da0d511c578c06ab8e2d47203abe670f4b0d9122aadfb89644fa931"
+    },
+    {
+      "file": "rates/rates-2026-02-16.csv",
+      "rows": 195,
+      "sha256": "ed8a028476ac032d6e725a1bf18c3aa0db3138c73e363967a20297e05b9ad1ba"
+    },
+    {
+      "file": "rates/rates-2026-02-17.csv",
+      "rows": 195,
+      "sha256": "b503fe88ffc770a6d41fa128554042ff9f3513fb9d20e26b8335af90e2b69e17"
+    },
+    {
+      "file": "rates/rates-2026-02-18.csv",
+      "rows": 195,
+      "sha256": "0f3119c4b7667627c49079cc2ae0071ecad100faf5084d90661490ca33c090ef"
+    },
+    {
+      "file": "rates/rates-2026-02-19.csv",
+      "rows": 195,
+      "sha256": "917f5c78c88590eade116662ae6eb1455e5de080f96ada5790b46a4d59c57125"
+    },
+    {
+      "file": "rates/rates-2026-02-20.csv",
+      "rows": 195,
+      "sha256": "c0e9c7a46b4d3ef004b76d57d0756f12c2245ab9e7aa83354a1e319dcd090bdc"
+    },
+    {
+      "file": "rates/rates-2026-02-23.csv",
+      "rows": 195,
+      "sha256": "cd09609c328e1cc59513c1ffdfc0a0bfea7d77384f0739b80011d4058a566000"
+    },
+    {
+      "file": "rates/rates-2026-02-24.csv",
+      "rows": 195,
+      "sha256": "5abacc64b38c3a9aeb1e3f94dc92dafe7050599f16e95211a7b77ed0ad786816"
+    },
+    {
+      "file": "rates/rates-2026-02-25.csv",
+      "rows": 195,
+      "sha256": "1455982102a4c309cd0b346381843ec8c94b7bdea1621f0bc277f6f00b015b16"
+    },
+    {
+      "file": "rates/rates-2026-02-26.csv",
+      "rows": 195,
+      "sha256": "fa67367b49ec16113a140adb5244b1e8e34645e29060accbe15eb70912f89a19"
+    },
+    {
+      "file": "rates/rates-2026-02-27.csv",
+      "rows": 195,
+      "sha256": "2a36c98a66f79de6c3cae9324d84eba1ddd631ef08295483e694abcb45fa77dc"
+    },
+    {
+      "file": "rates/rates-2026-03-02.csv",
+      "rows": 195,
+      "sha256": "21732f42a3160df285cf7a7c1583ba8f010584a51e994748cebb38df17b856e3"
+    },
+    {
+      "file": "rates/rates-2026-03-03.csv",
+      "rows": 195,
+      "sha256": "f2970783ea61329f9f34078e9dde88271b3572655e0267921d38844a626be276"
+    },
+    {
+      "file": "rates/rates-2026-03-04.csv",
+      "rows": 195,
+      "sha256": "0fc12e0083372f59d97f62a51f56ac213217be618880c44f9f044cd76c1c7923"
+    },
+    {
+      "file": "rates/rates-2026-03-05.csv",
+      "rows": 195,
+      "sha256": "882aa0119bc4d42633b7234d8c0a7ce3c43aa3619d93e16f44c2ec0858407fba"
+    },
+    {
+      "file": "rates/rates-2026-03-06.csv",
+      "rows": 195,
+      "sha256": "84d856b65a5db4fb125aa1519b1fbc4a1838d4edb4bc83dd4b1bde6f4c8cfe6e"
+    },
+    {
+      "file": "rates/rates-2026-03-09.csv",
+      "rows": 195,
+      "sha256": "da96e52fcdc5baed5d469b9be29a9328b9e8e48c081e4120fa52a7e684bbaef4"
+    },
+    {
+      "file": "rates/rates-2026-03-10.csv",
+      "rows": 195,
+      "sha256": "f6786e83bf033458f96e5e8c528781e3bfbe18cf28bb28b6ef141470ae04f3dd"
+    },
+    {
+      "file": "rates/rates-2026-03-11.csv",
+      "rows": 195,
+      "sha256": "d86bab879a0d044563a4ede05767db90b86559ed36b3367c7c16119d9f59e602"
+    },
+    {
+      "file": "rates/rates-2026-03-12.csv",
+      "rows": 195,
+      "sha256": "75089650d280869e406194376b7b4f17531a06b5ccad5b3dc5fcd60f895e7b60"
+    },
+    {
+      "file": "rates/rates-2026-03-13.csv",
+      "rows": 195,
+      "sha256": "6b7f74eea262881f735b6c7a5a8087d12bd47904a96c3657f5e5eff6f502fcc2"
+    },
+    {
+      "file": "rates/rates-2026-03-16.csv",
+      "rows": 195,
+      "sha256": "104d136f1dd216f221b4fd2ec108163385de7a87cf30c4db1a948d0dc5d01fec"
+    },
+    {
+      "file": "rates/rates-2026-03-17.csv",
+      "rows": 195,
+      "sha256": "ef2468fc23a5ff6bbc410173a2c6b081fc212818b992234571a2d0a69724e24c"
+    },
+    {
+      "file": "rates/rates-2026-03-18.csv",
+      "rows": 195,
+      "sha256": "bd26f467893a58ae77732a551df575eeef13dbc4342e6a1248906b83213d53fa"
+    },
+    {
+      "file": "rates/rates-2026-03-19.csv",
+      "rows": 195,
+      "sha256": "9f46e2d011d204a348ffb93cd5344987070c4548d72a857d9f17cfb18ab6639f"
+    },
+    {
+      "file": "rates/rates-2026-03-20.csv",
+      "rows": 195,
+      "sha256": "9d55c2ebb4d267dad06ecff50921fe0bfc575a4555fd0a38be92dca6b0ec5282"
+    },
+    {
+      "file": "rates/rates-2026-03-23.csv",
+      "rows": 195,
+      "sha256": "86384fddaf88c015f3fabb4ae867811ca7cab643936c267cf45c11bd34c49d78"
+    },
+    {
+      "file": "rates/rates-2026-03-24.csv",
+      "rows": 195,
+      "sha256": "87c9165e336a2cafce1ff460655328fa1b4ecb1f3cc02285d1c6e468cc4367d7"
+    },
+    {
+      "file": "rates/rates-2026-03-25.csv",
+      "rows": 195,
+      "sha256": "803633af3209c5bd22c20e1c4c059efdd7b1ae1d875fb1e16e6e904a0ff07833"
+    },
+    {
+      "file": "rates/rates-2026-03-26.csv",
+      "rows": 195,
+      "sha256": "5f8afc38f8cf4f26c0d9a0b0cb957ed534a04df93d74063eb0d533a115150530"
+    },
+    {
+      "file": "rates/rates-2026-03-27.csv",
+      "rows": 195,
+      "sha256": "c81ed327a6c99ded89b12975038deb3e92140c0431ffeedd87eea106684d61ed"
+    },
+    {
+      "file": "rates/rates-2026-03-30.csv",
+      "rows": 195,
+      "sha256": "14c778fe608fb5c48d934b46f0e4de7f6d3cca363e2e41d91001540ca74a8ddb"
+    },
+    {
+      "file": "rates/rates-2026-03-31.csv",
+      "rows": 195,
+      "sha256": "33162df1925d7f9ae7d94aa655b4af8791a294588d9da8b4f56f2cdfb311fe96"
+    },
+    {
+      "file": "rates/rates-2026-04-01.csv",
+      "rows": 195,
+      "sha256": "960c452b6412ae3464424f21f09e72400f0fd8cdaa2116a543d82ee154f47bec"
+    },
+    {
+      "file": "rates/rates-2026-04-02.csv",
+      "rows": 195,
+      "sha256": "337776d22accb30353d7082504eba2d8436447749fb6e266eb7d413e89cb67e3"
+    },
+    {
+      "file": "rates/rates-2026-04-03.csv",
+      "rows": 195,
+      "sha256": "5a334f59eddbd5fbe7ce0ffec2ad20cf5f4dbfacb6e625651c81c81c3655424e"
+    },
+    {
+      "file": "rates/rates-2026-04-06.csv",
+      "rows": 195,
+      "sha256": "5beee9bdf10cad6636ed411869224fc3aed1d1bfccefff248128c98ae67e4b86"
+    },
+    {
+      "file": "rates/rates-2026-04-07.csv",
+      "rows": 195,
+      "sha256": "50de7be59d6287dcc0ecd82e3aba09d9c825b702c74365168084d42bff3586b9"
+    },
+    {
+      "file": "rates/rates-2026-04-08.csv",
+      "rows": 195,
+      "sha256": "3bc9ff39751a454a851cfb4ec6c8e6485c803e7df37c68c2bcf1d23efa9e9ae6"
+    },
+    {
+      "file": "rates/rates-2026-04-09.csv",
+      "rows": 195,
+      "sha256": "e59749514b8d955e7f013a6e99e601968cfd10eb4854fbbccb5d990134178e85"
+    },
+    {
+      "file": "rates/rates-2026-04-10.csv",
+      "rows": 195,
+      "sha256": "5672273dd59063683c1a6b2d56856b8613c04c154a794bd2b1c659dc7dda1809"
+    },
+    {
+      "file": "rates/rates-2026-04-13.csv",
+      "rows": 195,
+      "sha256": "36894ede75cf1179673a3542cd9ff7b49e8dd21d538690b4ac59cc3b753813f2"
+    },
+    {
+      "file": "rates/rates-2026-04-14.csv",
+      "rows": 195,
+      "sha256": "1c25105c5ed11eb0e2e1d6f40333566ceb3602f36ceb84fa0c938e9bee7f8319"
+    },
+    {
+      "file": "rates/rates-2026-04-15.csv",
+      "rows": 195,
+      "sha256": "6441ce067fa47e6e131c1baa28085d39b788e8e95edd6ba429846ceec451d321"
+    },
+    {
+      "file": "rates/rates-2026-04-16.csv",
+      "rows": 195,
+      "sha256": "05a10dc4baeba8146d5c9ffd91f59c3a5116a3a8ccb87e9724f5a1bbc14d272f"
+    },
+    {
+      "file": "rates/rates-2026-04-17.csv",
+      "rows": 195,
+      "sha256": "de6915c57c53a3219662136cfcf0fc56feb522f8a8697f7eb4562c525ab4523a"
+    },
+    {
+      "file": "rates/rates-2026-04-20.csv",
+      "rows": 195,
+      "sha256": "fa2e6fa23f9f2e98e81f0f2a21107bfb93b0d13e33b4a8c959d3c4cfbae9617f"
+    },
+    {
+      "file": "rates/rates-2026-04-21.csv",
+      "rows": 195,
+      "sha256": "88211f6ba113607f99c19d496cee3f2c5646524150220e3310e74438f6f495d7"
+    },
+    {
+      "file": "rates/rates-2026-04-22.csv",
+      "rows": 195,
+      "sha256": "fee83b46e7fd4577c3807f0c05cdddad0dd26828973b1f857c70da12b5a888da"
+    },
+    {
+      "file": "rates/rates-2026-04-23.csv",
+      "rows": 195,
+      "sha256": "6851718868bdfbe5658d0ae819c3d7ac13cdd1d92bc61ef6b7e8f6a5be178004"
+    },
+    {
+      "file": "rates/rates-2026-04-24.csv",
+      "rows": 195,
+      "sha256": "a87a468773016259d7781cec62b6ffea19596ded2301f4e246442f3de47ad199"
+    },
+    {
+      "file": "rates/rates-2026-04-27.csv",
+      "rows": 195,
+      "sha256": "3c9ea9cc72575be58d9179ce00fc51df12729c85f98dc81c984ea9e3f9ff84cd"
+    },
+    {
+      "file": "rates/rates-2026-04-28.csv",
+      "rows": 195,
+      "sha256": "ed7e7134d97ca67de1a840473cf1ca1bf9adbb4bcb26c4ae154fd35a222b9294"
+    },
+    {
+      "file": "rates/rates-2026-04-29.csv",
+      "rows": 195,
+      "sha256": "bebdabb65ca0b94257c594f5ba19401f21a851f3b348788465977cc0bf4b8f2b"
+    },
+    {
+      "file": "rates/rates-2026-04-30.csv",
+      "rows": 195,
+      "sha256": "db4d9473d719ca7706285c385e0706e60567761ba9f2316a101553df3c34f888"
+    },
+    {
+      "file": "rates/rates-2026-05-01.csv",
+      "rows": 195,
+      "sha256": "adac7c2bffea2a921078bc001b9058e86bf438b1fd8e4c8df531f840a7686f14"
+    },
+    {
+      "file": "rates/rates-2026-05-04.csv",
+      "rows": 195,
+      "sha256": "f7ab31f9c29a15277ef2cfc705990ff2bf7b28680b3811c02f50dfa9cd7ec804"
+    },
+    {
+      "file": "rates/rates-2026-05-05.csv",
+      "rows": 195,
+      "sha256": "f86afd7d1e2d040e0e4b982ed1b1e6cba2ff20ac8e1d102058dfbc19cbec1e89"
+    },
+    {
+      "file": "rates/rates-2026-05-06.csv",
+      "rows": 195,
+      "sha256": "5cba708280ec054eaf9b049c151c6f533b24f2b598cd076220ac285bf432063f"
+    },
+    {
+      "file": "rates/rates-2026-05-07.csv",
+      "rows": 195,
+      "sha256": "046befa4e9d38bae5b18197f71b7bcc208901f2b198c276f635209d9dbfcc532"
+    },
+    {
+      "file": "rates/rates-2026-05-08.csv",
+      "rows": 195,
+      "sha256": "750e301df8bf90195828266588c64ab07ac9a84139655fe6b2a290b1e9f7ba97"
+    },
+    {
+      "file": "rates/rates-2026-05-11.csv",
+      "rows": 195,
+      "sha256": "46ca65983770be329b36611baf98cd953308ce59458659a8120bd1e37e1f005b"
+    },
+    {
+      "file": "rates/rates-2026-05-12.csv",
+      "rows": 195,
+      "sha256": "35c76d354cff57b773423fcb7d46798920307d47bb2f1ea14d65aa3de48bdf63"
+    },
+    {
+      "file": "rates/rates-2026-05-13.csv",
+      "rows": 195,
+      "sha256": "1f94afe14f7407bf9c43f159362da26d7cef5d8540e84571c93c642ed0ad4fe8"
+    },
+    {
+      "file": "rates/rates-2026-05-14.csv",
+      "rows": 195,
+      "sha256": "56dea695e586404dcc188f44bf3cffeea398be061177d1e19e39fb899219c528"
+    },
+    {
+      "file": "rates/rates-2026-05-15.csv",
+      "rows": 195,
+      "sha256": "f4676f29acd4f5ce58a90d8b66978af1ebdf761867092f81eae56f0c6f231b3b"
+    },
+    {
+      "file": "rates/rates-2026-05-18.csv",
+      "rows": 195,
+      "sha256": "5ddb808f9615a8e0669ebc91d231853a5c29c9c758be2033f1fa58c2156dd346"
+    },
+    {
+      "file": "rates/rates-2026-05-19.csv",
+      "rows": 195,
+      "sha256": "257d7b29263ee0a0b25530a73b2d8643d70e62eb8306a5f0109fbab1e8516dc8"
+    },
+    {
+      "file": "rates/rates-2026-05-20.csv",
+      "rows": 195,
+      "sha256": "b6f73411b80921964e214cecd4b5fcb23c21fea608a77e28fed34181cf94eb71"
+    },
+    {
+      "file": "rates/rates-2026-05-21.csv",
+      "rows": 195,
+      "sha256": "32b318ca17d32c86b5aa72a5ee85a033ecd8299693a49bdf90ec4aa2615ba866"
+    },
+    {
+      "file": "rates/rates-2026-05-22.csv",
+      "rows": 195,
+      "sha256": "996fec77ded634d472e1c93e6c9a54d11ff48041c47a7bf2586ad0b0ab7207c2"
+    },
+    {
+      "file": "rates/rates-2026-05-25.csv",
+      "rows": 195,
+      "sha256": "be24ba764b576b520876d8177592a6edeeb805fa2ff52e3fe3df922c08b03cde"
+    },
+    {
+      "file": "rates/rates-2026-05-26.csv",
+      "rows": 195,
+      "sha256": "70033b39b755de45de5dc7f298092ce3c55a7bc539d27616408e1704c73451e9"
+    },
+    {
+      "file": "rates/rates-2026-05-27.csv",
+      "rows": 195,
+      "sha256": "664b9cc4737c2a086781dfb315bd621fb48f0f92cf150c337a693e6c43c7bdcf"
+    },
+    {
+      "file": "rates/rates-2026-05-28.csv",
+      "rows": 195,
+      "sha256": "d2d650f14d5512ea4ff2564b3f2bb8b01ff3e325e60173f5ba6bc9a5d6f63483"
+    },
+    {
+      "file": "rates/rates-2026-05-29.csv",
+      "rows": 195,
+      "sha256": "44b004d55b1d9fa4eca23ce9423073b14d68b5e733f792688ef79bb6b58c4f13"
+    },
+    {
+      "file": "rates/rates-2026-06-01.csv",
+      "rows": 195,
+      "sha256": "04f5f89147177ee683e712f01d4a667293bec0711d02289d9a0ac4106f718e69"
+    },
+    {
+      "file": "rates/rates-2026-06-02.csv",
+      "rows": 195,
+      "sha256": "2c3223a0fca13ced44eed0690aca94e8705a5924d50616d55f49bd29c69447c1"
+    },
+    {
+      "file": "rates/rates-2026-06-03.csv",
+      "rows": 195,
+      "sha256": "31ea73bfc5bd0f1e3acf8e5a58c56e9edd962c1a5d2bbeeadaab9d679e926487"
+    },
+    {
+      "file": "rates/rates-2026-06-04.csv",
+      "rows": 195,
+      "sha256": "397c54072de0350bc120b8a02c02c92af9c92e6f7561a9cff4af6134127495cf"
+    },
+    {
+      "file": "rates/rates-2026-06-05.csv",
+      "rows": 195,
+      "sha256": "59dd53427596c333e6bf1a262fa2714c0c4c3b5fa8ce9eec7ac52d6c18784ebe"
+    },
+    {
+      "file": "rates/rates-2026-06-08.csv",
+      "rows": 195,
+      "sha256": "65faa78f85f4139293e77afc1e5fcf23f89861fdf0d0e817ad920f935c2d5e48"
+    },
+    {
+      "file": "rates/rates-2026-06-09.csv",
+      "rows": 195,
+      "sha256": "e545265db7852fab1e5aabba9f5b98421528546e8422327d7cbc2268d685da20"
+    },
+    {
+      "file": "rates/rates-2026-06-10.csv",
+      "rows": 195,
+      "sha256": "a24fb92fe0f78c5a478fc9986cff02f23d4c5e74cee69dae2c68700dbfcee117"
+    },
+    {
+      "file": "rates/rates-2026-06-11.csv",
+      "rows": 195,
+      "sha256": "f884a39a208e0704e87f1e5b631753865b9b319c7d740e43d48bc20446869041"
+    },
+    {
+      "file": "rates/rates-2026-06-12.csv",
+      "rows": 195,
+      "sha256": "dfc785ab824a4939343f7489f91d50113e8f65798112e34ce7a4e274625a9ed7"
+    },
+    {
+      "file": "rates/rates-2026-06-15.csv",
+      "rows": 195,
+      "sha256": "ba8ae19d5953b19db3d779809dd480bfec3d6b5c3cc72a662a54c4606fcac886"
+    },
+    {
+      "file": "rates/rates-2026-06-16.csv",
+      "rows": 195,
+      "sha256": "fa4e54b5ecff78b810dd2fbfb99540f3cbb058a757393048f770e0c0ffacdcd5"
+    },
+    {
+      "file": "rates/rates-2026-06-17.csv",
+      "rows": 195,
+      "sha256": "2d35979589e280d67ddf1a8b01fdedbd27fe579c653f74e4a5b90065a5eb823b"
+    },
+    {
+      "file": "rates/rates-2026-06-18.csv",
+      "rows": 195,
+      "sha256": "52ae9d7b76286005e51f6b689eb891fc0756af0e8cb983c4e8dcd38fcad7517a"
+    },
+    {
+      "file": "rates/rates-2026-06-19.csv",
+      "rows": 195,
+      "sha256": "92b1a33c6bc5c211300a5824fb6e91a322a818be70fd7fa8f16545f0b62fdc8e"
+    },
+    {
+      "file": "rates/rates-2026-06-22.csv",
+      "rows": 195,
+      "sha256": "c5c040cb0c21db4d55a7056c1a4b455cc5cb1d8a2c16cb2741ce413014f58179"
+    },
+    {
+      "file": "rates/rates-2026-06-23.csv",
+      "rows": 195,
+      "sha256": "c4e0b0a719a10171fe25dfdce249d186ac323919dd5fc326d4511efdb1412157"
+    },
+    {
+      "file": "rates/rates-2026-06-24.csv",
+      "rows": 195,
+      "sha256": "89e31e375b928411e428036f2e76d2153a14215377c1d0b0a7723dfc660aca78"
+    },
+    {
+      "file": "rates/rates-2026-06-25.csv",
+      "rows": 195,
+      "sha256": "8061ed1352d42f9547c05d3e030bdb35d29cf150f1ab42f8848f9afe45ac39e5"
+    },
+    {
+      "file": "rates/rates-2026-06-26.csv",
+      "rows": 195,
+      "sha256": "e9cf65d94fb6982eeec0cfe0e1bfebbeb79421719119f4d2588c273b56ab282d"
+    },
+    {
+      "file": "rates/rates-2026-06-29.csv",
+      "rows": 195,
+      "sha256": "cef4bc4cffc14bdea48429fad5b7e4635a6c1aea2f954359c5744621408d6f4f"
+    },
+    {
+      "file": "rates/rates-2026-06-30.csv",
+      "rows": 195,
+      "sha256": "853f1b0a57cedc27db3be01185cfe6a9385393894558dc685bd433842e4eab5d"
+    },
+    {
+      "file": "rates/rates-2026-07-01.csv",
+      "rows": 195,
+      "sha256": "b69ad4d98b1f2808a789392d7f229527eb5c4b0edd2aa90bf6c1d8e876181a3e"
+    },
+    {
+      "file": "rates/rates-2026-07-02.csv",
+      "rows": 195,
+      "sha256": "7edf9a4252dce52aa216be828fbda56f78f150ec23747dcee29a33a479d8e795"
+    },
+    {
+      "file": "rates/rates-2026-07-03.csv",
+      "rows": 195,
+      "sha256": "f4e39c99d6e94cffcd433ee97724630511ae958aa432a58f94fce349ce7f3ee9"
+    },
+    {
+      "file": "rates/rates-2026-07-06.csv",
+      "rows": 195,
+      "sha256": "31c876dacc9edce1ae32bc8f54309491168f7df8c891b22466353fe62d1327f1"
+    },
+    {
+      "file": "rates/rates-2026-07-07.csv",
+      "rows": 195,
+      "sha256": "ef9832fc58354687063b44a2aa970387834e883c68e07eada3177e2f09cfe9e7"
+    },
+    {
+      "file": "rates/rates-2026-07-08.csv",
+      "rows": 195,
+      "sha256": "94bcb96c2f368f933ddb974dbf5f23f7d75118c9a3c04884e9bc1c1a30e513ff"
+    },
+    {
+      "file": "rates/rates-2026-07-09.csv",
+      "rows": 195,
+      "sha256": "3064c3b7707c1853049cad93f2f9ecee46607aaf3451d4a615bf5afd469eaec6"
+    },
+    {
+      "file": "rates/rates-2026-07-10.csv",
+      "rows": 195,
+      "sha256": "ad0d60b0dd70a6be6452cc042a7ffadde067726fd4a14dcfd2bcde88c0cc9409"
+    },
+    {
+      "file": "rates/rates-2026-07-13.csv",
+      "rows": 195,
+      "sha256": "c2589a8cd5a96495ddc7c78358060ad8dfedee7f96a979e6613812664b90c326"
+    },
+    {
+      "file": "rates/rates-2026-07-14.csv",
+      "rows": 195,
+      "sha256": "90b76651be6b9428aff3766c0e35515d15bba633717c4ce787d097f75d51ab03"
+    },
+    {
+      "file": "rates/rates-2026-07-15.csv",
+      "rows": 195,
+      "sha256": "e1d1ba20788acb28a2912e9aef329347d063a784dd6e1a18371b22f1df794cc3"
+    },
+    {
+      "file": "rates/rates-2026-07-16.csv",
+      "rows": 195,
+      "sha256": "cf14599f08f18e3ba318912ade4a9b5daa87933b48750d565f5da77f14d13ba7"
+    },
+    {
+      "file": "rates/rates-2026-07-17.csv",
+      "rows": 195,
+      "sha256": "b2d295684b7788aea5e0c85b9e3312107f7593844e22db8c02a621b90951246f"
+    },
+    {
+      "file": "rates/rates-2026-07-20.csv",
+      "rows": 195,
+      "sha256": "8c68c8428894439aa141492331f5535065bdaab181df09f43a0df2b529d3a75b"
+    },
+    {
+      "file": "rates/rates-2026-07-21.csv",
+      "rows": 195,
+      "sha256": "4c602738f992f4c31547e3a7b438ba7052efcb915b5acfbb330a74bf4628bb80"
+    },
+    {
+      "file": "rates/rates-2026-07-22.csv",
+      "rows": 195,
+      "sha256": "f072a3c9fe7469b9f217e34e7b52fa06bf51368829dae881b48a8fb928210d08"
+    },
+    {
+      "file": "rates/rates-2026-07-23.csv",
+      "rows": 195,
+      "sha256": "cd9d54fcfb1e2d52398bdc861a758a0eeee3c31d5aad619686ded1f2a520a0ae"
+    },
+    {
+      "file": "rates/rates-2026-07-24.csv",
+      "rows": 195,
+      "sha256": "1b3814684fe5b28ebe35443842746af08a571fc1730c39d89baa77015e548bda"
+    },
+    {
+      "file": "rates/rates-2026-07-27.csv",
+      "rows": 195,
+      "sha256": "4876c3b057418e58fd9449cd6937f3173a01e4c48a670935c88a0e34f6d55232"
+    },
+    {
+      "file": "rates/rates-2026-07-28.csv",
+      "rows": 195,
+      "sha256": "ced29c98c358ed96f7d80a1c4bf05b6783d9057e6151d01e60e390c45300787e"
+    },
+    {
+      "file": "rates/rates-2026-07-29.csv",
+      "rows": 195,
+      "sha256": "e6d6687c72218b56fca479ba74039985a1da208fca9745ca15797a8ab13bf043"
+    },
+    {
+      "file": "rates/rates-2026-07-30.csv",
+      "rows": 195,
+      "sha256": "5d5370fa542457589aa799902753fd0813be30bbf192dd644f67c3944df98515"
+    },
+    {
+      "file": "rates/rates-2026-07-31.csv",
+      "rows": 195,
+      "sha256": "4c1d15e501868dbaf94c13935137a93357148615d35316dfbc237d74a3f1c630"
+    },
+    {
+      "file": "rates/rates-2026-08-03.csv",
+      "rows": 195,
+      "sha256": "f9533ce99aec51d6264f145f9c54f7db7d77926df66e7844bc38d26e2fedabdd"
+    },
+    {
+      "file": "rates/rates-2026-08-04.csv",
+      "rows": 195,
+      "sha256": "6a856d42ba25bc844d5a42f5ee2eacc32a4e0c778d76ca231ff184e0d7463a72"
+    },
+    {
+      "file": "rates/rates-2026-08-05.csv",
+      "rows": 195,
+      "sha256": "9b7f9e4d9dd469846afc5240c9bd2de35fb40d20dda7a279546539a8738ee928"
+    },
+    {
+      "file": "rates/rates-2026-08-06.csv",
+      "rows": 195,
+      "sha256": "ca94c8d1800089329ba7589b213ad44557d36086d1b2097dda9f45df72af30ff"
+    },
+    {
+      "file": "rates/rates-2026-08-07.csv",
+      "rows": 195,
+      "sha256": "927a0616e4afc423253d143588569003946bdabe8130c01b9a600bf2f9d59ebf"
+    },
+    {
+      "file": "rates/rates-2026-08-10.csv",
+      "rows": 195,
+      "sha256": "8556a40b00a872af2f36c7126f4f53b3bbc2a27320c7f3e38958b3ef83cdd99e"
+    },
+    {
+      "file": "rates/rates-2026-08-11.csv",
+      "rows": 195,
+      "sha256": "726736d9e20d2e9e908a297b15a56ddc08ac9ca9ad213f961db7bbaf3ea936fd"
+    },
+    {
+      "file": "rates/rates-2026-08-12.csv",
+      "rows": 195,
+      "sha256": "12cc534716529cb96ce854af12fd4c433584864d5ac8bc7abafffc1cd04bf23e"
+    },
+    {
+      "file": "rates/rates-2026-08-13.csv",
+      "rows": 195,
+      "sha256": "eb8220b704b93eb077a61de7a2fc7dfc94dff7984d4d86a2049c27a03088f690"
+    },
+    {
+      "file": "rates/rates-2026-08-14.csv",
+      "rows": 195,
+      "sha256": "ed4521b6b757f6b2011c892d26134112100ffe394c423c369ad9b33494cc5be5"
+    },
+    {
+      "file": "rates/rates-2026-08-17.csv",
+      "rows": 195,
+      "sha256": "b97abd5c8fd12f9b7d635c4246e3256115761d27c85af551dfe3c3280c48ecbf"
+    },
+    {
+      "file": "rates/rates-2026-08-18.csv",
+      "rows": 195,
+      "sha256": "caa04412e6f199c2fb5e28668572d4ce7d53d4eaf101022826f1601e225a34a9"
+    },
+    {
+      "file": "rates/rates-2026-08-19.csv",
+      "rows": 195,
+      "sha256": "cfbc517bcac27371bf3c03277771902a5a01d6b9338dd4a471d403d6c7660e13"
+    },
+    {
+      "file": "rates/rates-2026-08-20.csv",
+      "rows": 195,
+      "sha256": "190511d532d045072d54faa39d0f20d828b3bce1d6e9e10a5856e08cfc3f1e26"
+    },
+    {
+      "file": "rates/rates-2026-08-21.csv",
+      "rows": 195,
+      "sha256": "16617dd0901b2ecc3273d1e5ba4c2b684cc1e28d686ca3124704c2317787ebf2"
+    },
+    {
+      "file": "rates/rates-2026-08-24.csv",
+      "rows": 195,
+      "sha256": "bac21475989ad32f74d63f70a2f0fe5bd7afbbdea134cb7e832d1c23d2b7db6e"
+    },
+    {
+      "file": "rates/rates-2026-08-25.csv",
+      "rows": 195,
+      "sha256": "36ff52a14053d45a16f5a2faeff3bcf3fc425634202b1fb2eb9d24fdbe4e57d0"
+    },
+    {
+      "file": "rates/rates-2026-08-26.csv",
+      "rows": 195,
+      "sha256": "195f8ea531c7c7e5ea5cd26ae543001ac3ca73ba7e92f247c0b83e74b31a4e74"
+    },
+    {
+      "file": "rates/rates-2026-08-27.csv",
+      "rows": 195,
+      "sha256": "4c068122f0f4294e4a45bc9d19c98d51f6b768427b680894df80216222d2d5da"
+    },
+    {
+      "file": "rates/rates-2026-08-28.csv",
+      "rows": 195,
+      "sha256": "dac6c335e4cb148769ecf70e54b99f8d782e1c870fe606c88f0b24285e885f1c"
+    },
+    {
+      "file": "rates/rates-2026-08-31.csv",
+      "rows": 195,
+      "sha256": "4e048f3c13e1a2562925c629d121fd07b17ec9200e8341be148508db1ea19752"
+    },
+    {
+      "file": "rates/rates-2026-09-01.csv",
+      "rows": 195,
+      "sha256": "c9ea39bae7602a5b073d8c2255e2eb44f18da163052fa99c13597abb392284af"
+    },
+    {
+      "file": "rates/rates-2026-09-02.csv",
+      "rows": 195,
+      "sha256": "282ae8ad18cb96e81fa4b6a098ef5d1e14bff5a23467062469c8ac9cb4b6d680"
+    },
+    {
+      "file": "rates/rates-2026-09-03.csv",
+      "rows": 195,
+      "sha256": "d2def22295f89d8d43d0f8862d5b1c4da2074c62523030be3900b9ab802acc6a"
+    },
+    {
+      "file": "rates/rates-2026-09-04.csv",
+      "rows": 195,
+      "sha256": "5a0bffc6f4be0c1b5bce79650e8a6e2e5d300c9906536d4252dbf3103a1ff653"
+    },
+    {
+      "file": "rates/rates-2026-09-07.csv",
+      "rows": 195,
+      "sha256": "5590f6c49f7f0216efe56860dc78f2795d4d3d243c537cd37c2794fd97323023"
+    },
+    {
+      "file": "rates/rates-2026-09-08.csv",
+      "rows": 195,
+      "sha256": "e0b9567591314594616cc662fefe9171b0504bba3abffc1d273697402ce95628"
+    },
+    {
+      "file": "rates/rates-2026-09-09.csv",
+      "rows": 195,
+      "sha256": "e5a4b918ede8a04a31296aadd08031237098678d42777ab486ed8bff3c9418d1"
+    },
+    {
+      "file": "rates/rates-2026-09-10.csv",
+      "rows": 195,
+      "sha256": "04db0d79b63afe12b42d0c9083e71560442e9acf3e579f2e5c169b6dcd1ca110"
+    },
+    {
+      "file": "rates/rates-2026-09-11.csv",
+      "rows": 195,
+      "sha256": "52270ef4147cc053cb7abefa5d7ea1040bbdc32434c101190f075a69bec8dfd7"
+    },
+    {
+      "file": "rates/rates-2026-09-14.csv",
+      "rows": 195,
+      "sha256": "be9f16341f2763b8e5f9aa2ba1eb88ec6b70eeecc81f901cca81f259baec2763"
+    },
+    {
+      "file": "rates/rates-2026-09-15.csv",
+      "rows": 195,
+      "sha256": "1702b868ba45f877631ce0fc19c65a16047d023c0fe31fa681f50c44c502f0db"
+    },
+    {
+      "file": "rates/rates-2026-09-16.csv",
+      "rows": 195,
+      "sha256": "51ad70a1d56506c9ccb1afed314d772fc248dca52fed43da0add84c5deb38338"
+    },
+    {
+      "file": "rates/rates-2026-09-17.csv",
+      "rows": 195,
+      "sha256": "3d48d518ff492ae4a78fb822cf5f2fcd59666e7c7fd0981bba88007de30dc01b"
+    },
+    {
+      "file": "rates/rates-2026-09-18.csv",
+      "rows": 195,
+      "sha256": "af8aba6d2b0d3e79f0f7e98f72086bd7318c79d481aa63aa18abf2fa7a4bff45"
+    },
+    {
+      "file": "rates/rates-2026-09-21.csv",
+      "rows": 195,
+      "sha256": "f284996c483a28cc59faae3b6e34172e966c1bab017e11400f37470cf0acce4d"
+    },
+    {
+      "file": "rates/rates-2026-09-22.csv",
+      "rows": 195,
+      "sha256": "442e8a638b182b948a363cacbf79d5db302a5c341bc8b4eab3b3ddeefcbed28f"
+    },
+    {
+      "file": "rates/rates-2026-09-23.csv",
+      "rows": 195,
+      "sha256": "f4955f0a703f007cb81504b2dbc34478c14813f37d5921365dddf05d1b48021e"
+    },
+    {
+      "file": "rates/rates-2026-09-24.csv",
+      "rows": 195,
+      "sha256": "0a68ebd40dcbbbb94b36f6dde8cf46ec34e7a77c2c93b996cb4f7de5eece54af"
+    },
+    {
+      "file": "rates/rates-2026-09-25.csv",
+      "rows": 195,
+      "sha256": "ec39d184f7581c4d7b4f513a7a11154e19abfb1bde9eb6c380abe7051e4052b8"
+    },
+    {
+      "file": "rates/rates-2026-09-28.csv",
+      "rows": 195,
+      "sha256": "4c1c7eea54556e97e0efb61ff8b7449d8324f742ff03eb75b82ca3222b6bb1f8"
+    },
+    {
+      "file": "rates/rates-2026-09-29.csv",
+      "rows": 195,
+      "sha256": "caed2edd59126dde584e2894f792091e72ed0eeba4de901d843c83015553a874"
+    },
+    {
+      "file": "rates/rates-2026-09-30.csv",
+      "rows": 195,
+      "sha256": "946f6017622684d0e7ea8fef9b3e99e20fcdc9f1c9192914fbd078b5819ec6c1"
+    },
+    {
+      "file": "rates/rates-2026-10-01.csv",
+      "rows": 195,
+      "sha256": "f39231ca1032ad00d9f121df826442011f360886979cd3100a4ec35e603425f8"
+    },
+    {
+      "file": "rates/rates-2026-10-02.csv",
+      "rows": 195,
+      "sha256": "41a578b0fe76ca4694c01e1eb647b75a58029fe75116d8d78bbf98a0e0b05819"
+    },
+    {
+      "file": "rates/rates-2026-10-05.csv",
+      "rows": 195,
+      "sha256": "aa0d8b787fb11c9045888d3711129ae6ecf9f821b59cdb19c26eb4d537a93c18"
+    },
+    {
+      "file": "rates/rates-2026-10-06.csv",
+      "rows": 195,
+      "sha256": "45424cfb4b48a2de6ad0f69e3696059d2367f5d14b2c926b0075e7706b490525"
+    },
+    {
+      "file": "rates/rates-2026-10-07.csv",
+      "rows": 195,
+      "sha256": "7bc5055886809e761dfb503fe64c72197fd8d8e15350523522179e80761e3818"
+    },
+    {
+      "file": "rates/rates-2026-10-08.csv",
+      "rows": 195,
+      "sha256": "7fbfb82d4aa3df84df2c3f5bd8bc3035be01225b27e7faaee27d56e86f09d468"
+    },
+    {
+      "file": "rates/rates-2026-10-09.csv",
+      "rows": 195,
+      "sha256": "5fe3cdad6c465ac85ad19a3c3196a4bb4f355d30e647f0a82b6431a90ba95362"
+    },
+    {
+      "file": "rates/rates-2026-10-12.csv",
+      "rows": 195,
+      "sha256": "5069657a09a5508db1a060b279e87def0e072ed9d5f57bb24bccf8806e0a7390"
+    },
+    {
+      "file": "rates/rates-2026-10-13.csv",
+      "rows": 195,
+      "sha256": "6c1d011db627f489938da1819517c55ebc99b9455ec0be505d910be8dc27e191"
+    },
+    {
+      "file": "rates/rates-2026-10-14.csv",
+      "rows": 195,
+      "sha256": "8353041ed2c5b9697ea99c67ed57ba1766ace87e5d21def75cf003ca1c81ad11"
+    },
+    {
+      "file": "rates/rates-2026-10-15.csv",
+      "rows": 195,
+      "sha256": "bfb59293b11e197f98916d27f72076f52da88c660b4d5c25f4109de4d594db38"
+    },
+    {
+      "file": "rates/rates-2026-10-16.csv",
+      "rows": 195,
+      "sha256": "f1a7d9a7515d83bac3d0ef821e73990456f17ad9a225aa695d6387afcdf95887"
+    },
+    {
+      "file": "rates/rates-2026-10-19.csv",
+      "rows": 195,
+      "sha256": "647ad394330eff03235a6b19e2084543e101f843c195f49a1345eed924814dc7"
+    },
+    {
+      "file": "rates/rates-2026-10-20.csv",
+      "rows": 195,
+      "sha256": "350192acedc238d79b078d6cfb44bdfa7e9785db7abb4c98e06c0176c9e632cb"
+    },
+    {
+      "file": "rates/rates-2026-10-21.csv",
+      "rows": 195,
+      "sha256": "8401fec6cf859b9b4701acdf950e2ad5f5d422988fdd40d522e0e32faa87b1cc"
+    },
+    {
+      "file": "rates/rates-2026-10-22.csv",
+      "rows": 195,
+      "sha256": "5c60c4932099db8f15ac75c4ab6fee60589357d9815fbd43118bf867286cfd1f"
+    },
+    {
+      "file": "rates/rates-2026-10-23.csv",
+      "rows": 195,
+      "sha256": "0e21a88a1a49c0f1d4532370fd79dc1d6000a3612a54f05a1688f1393d0a2cd1"
+    },
+    {
+      "file": "rates/rates-2026-10-26.csv",
+      "rows": 195,
+      "sha256": "4d48f3f9e1b7f5909f682dc6c444018d1ab24ee1f43cf75585e880860ac27ca1"
+    },
+    {
+      "file": "rates/rates-2026-10-27.csv",
+      "rows": 195,
+      "sha256": "539cbad3dd4f5d0b6a3ebb8bdf0357060428dfb17e8cf938884f6a31f7e6ffb0"
+    },
+    {
+      "file": "rates/rates-2026-10-28.csv",
+      "rows": 195,
+      "sha256": "3b1ccacefb906c8abcffc7f8c401d025f84f0546358b42840d4ae7d0c8dde28b"
+    },
+    {
+      "file": "rates/rates-2026-10-29.csv",
+      "rows": 195,
+      "sha256": "848ecf249a6d1243c58aafa6e5730ff9ccb95cae5b9a091e4d94a50891652dbd"
+    },
+    {
+      "file": "rates/rates-2026-10-30.csv",
+      "rows": 195,
+      "sha256": "bb55f9f113dcdc7fb4171be9860704c9d75f1b7620418a522d156bb7e0e9d293"
+    },
+    {
+      "file": "rates/rates-2026-11-02.csv",
+      "rows": 195,
+      "sha256": "d2244ffb61487b3dde0367abf654f2f375021332c08dda76a97cd22c7a93f146"
+    },
+    {
+      "file": "rates/rates-2026-11-03.csv",
+      "rows": 195,
+      "sha256": "138ff89064137dbf33bd47f0b6b3d4bd90628222c5dbb3ef2adfdc27ab7bb125"
+    },
+    {
+      "file": "rates/rates-2026-11-04.csv",
+      "rows": 195,
+      "sha256": "5dc0f4ed1f6b0faada9adbec9e6e0271f16c4e4bbe405526f3f6db238308fff4"
+    },
+    {
+      "file": "rates/rates-2026-11-05.csv",
+      "rows": 195,
+      "sha256": "02c75b652f81f02b8c5ede1fad2adc2f575f4ff4dcbb4c02f462d406ce80d14b"
+    },
+    {
+      "file": "rates/rates-2026-11-06.csv",
+      "rows": 195,
+      "sha256": "e8c1aed064c90989aad01f7da4935ae70d3bf537a53768ea53e32165eda5cc82"
+    },
+    {
+      "file": "rates/rates-2026-11-09.csv",
+      "rows": 195,
+      "sha256": "8410748235a27f2d0c59229e9f2a6dd5a32bc69707e18d5a5865d77d6aaa47d8"
+    },
+    {
+      "file": "rates/rates-2026-11-10.csv",
+      "rows": 195,
+      "sha256": "e1700ea8bb07a8db34649993273d9055099bf81ea2708be6cc7918a34ce8fb39"
+    },
+    {
+      "file": "rates/rates-2026-11-11.csv",
+      "rows": 195,
+      "sha256": "214dbf6edfacb36813fcf686ad0f6fd7e7dd8eac17b152075c22df5e657a19a9"
+    },
+    {
+      "file": "rates/rates-2026-11-12.csv",
+      "rows": 190,
+      "sha256": "5f7284f1f0ebcf736ab0b2f343c4ab45f4414e381a993360c0da6017466bc1e1"
+    },
+    {
+      "file": "rates/rates-2026-11-13.csv",
+      "rows": 195,
+      "sha256": "d78e0c9b69e15280ddec594d2e9531ea24fd373454c009b0b92bd61b9af9b43d"
+    },
+    {
+      "file": "rates/rates-2026-11-16.csv",
+      "rows": 195,
+      "sha256": "50b31e3aa4a9c7cc0f6afe84165528e49e7dd7766d73b1d19f7cd1ba615dd86a"
+    },
+    {
+      "file": "rates/rates-2026-11-17.csv",
+      "rows": 195,
+      "sha256": "3764895c8a1613a512cd4f357d420f26fec33b3a05f7cbfe11f0b7040c64d809"
+    },
+    {
+      "file": "rates/rates-2026-11-18.csv",
+      "rows": 195,
+      "sha256": "8ef46061940902d5cc32ba2f23d37f6f870702185d6e5e1a32cc2419deb7ec6b"
+    },
+    {
+      "file": "rates/rates-2026-11-19.csv",
+      "rows": 195,
+      "sha256": "8ebdeea74bdfeb4d9f9df1835a54aeea7312a3f41838fe783f2f4f1b125dcaeb"
+    },
+    {
+      "file": "rates/rates-2026-11-20.csv",
+      "rows": 195,
+      "sha256": "fa91bcbb995886983a9ef069183c9629724f93f97421a64659f3b99a1d480a45"
+    }
+  ]
+}

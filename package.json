@@ -8,11 +8,14 @@
   },
   "scripts": {
     "check": "node scripts/checks/run-all.mjs",
-    "test": "node --test --test-concurrency=1 \"scripts/checks/tests/*.test.mjs\" \"shared/kernel/src/*.test.ts\" \"services/**/*.test.ts\" \"app/**/*.test.ts\"",
+    "test": "node --test --test-concurrency=1 \"scripts/checks/tests/*.test.mjs\" \"scripts/uat/*.test.ts\" \"shared/kernel/src/*.test.ts\" \"services/**/*.test.ts\" \"app/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "db:up": "docker compose up -d",
     "db:migrate": "node scripts/migrate.mjs",
-    "start": "node app/src/server.ts"
+    "start": "node app/src/server.ts",
+    "uat:configure": "node scripts/uat/configure.ts",
+    "uat:reset": "node scripts/uat/reset.ts",
+    "uat:generate": "node scripts/uat/generate.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
