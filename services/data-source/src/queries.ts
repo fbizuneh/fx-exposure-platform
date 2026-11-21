@@ -1,8 +1,8 @@
 // The questions Data Source answers.
-import { Decimal } from "decimal.js";
 import { sql } from "kysely";
 import { accountId, entityId, lineageRef, programId, type AsOfDate } from "@shared/kernel";
 import type { CurrencyControlTotal, DataSourceQuestions } from "../contract/index.ts";
+import { D } from "./control-totals.ts";
 import { q, type Db } from "./db.ts";
 
 const asDims = (v: unknown): Record<string, string> => (typeof v === "string" ? JSON.parse(v) : (v as Record<string, string>)) ?? {};
@@ -75,13 +75,13 @@ export function dataSourceQuestions(db: Db): DataSourceQuestions {
         .groupBy(["currency", "outcome"])
         .execute();
 
-      type Bucket = { rows: number; sum: Decimal };
-      const zero = (): Bucket => ({ rows: 0, sum: new Decimal(0) });
+      type Bucket = { rows: number; sum: InstanceType<typeof D> };
+      const zero = (): Bucket => ({ rows: 0, sum: new D(0) });
       const byCurrency = new Map<string, { included: Bucket; excluded: Bucket; blocked: Bucket }>();
       for (const r of rows) {
         const currency = r.currency ?? "";
         const entry = byCurrency.get(currency) ?? { included: zero(), excluded: zero(), blocked: zero() };
-        const bucket: Bucket = { rows: Number(r.row_count), sum: new Decimal(r.sum) };
+        const bucket: Bucket = { rows: Number(r.row_count), sum: new D(r.sum) };
         if (r.outcome === "INCLUDED") entry.included = bucket;
         else if (r.outcome === "EXCLUDED") entry.excluded = bucket;
         else entry.blocked = bucket;

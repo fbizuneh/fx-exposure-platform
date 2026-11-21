@@ -357,7 +357,7 @@ dbTest("expectedTotals: each kind of difference refuses the batch and stores it 
     assert.deepEqual([s.status, s.current], ["FAILED", false]);
     assert.match(s.failureReason ?? "", /control totals do not match/);
   }
-  assert.match(statuses.find((s) => s.batchId === expectedButNotReceived)!.failureReason!, /GBP: received 0 rows/);
+  assert.match(statuses.find((s) => s.batchId === expectedButNotReceived)!.failureReason!, /GBP: expected 1 rows.*not received/);
   assert.match(statuses.find((s) => s.batchId === receivedButNotExpected)!.failureReason!, /USD: received 2 rows.*not expected/);
   assert.deepEqual(await events(t), [], "nothing is announced for a refused batch");
   assert.deepEqual(await ds.questions.dataQualityIssues(t), [], "no balances or issues are stored for a refused batch");
@@ -365,6 +365,79 @@ dbTest("expectedTotals: each kind of difference refuses the batch and stores it 
   // the same rows, sent with no expectedTotals, behave exactly as before this task
   const plain = await send(t, rows, D1);
   assert.deepEqual([plain.status, plain.included], ["APPLIED", 2]);
+});
+
+dbTest("expectedTotals: a currency never received is a difference even when claimed as an explicit zero", async () => {
+  const t = newTenant();
+  await setup(t);
+  const rows = [bal("1000", "100.50"), bal("1100", "40")]; // USD only
+  const err: unknown = await ds.commands.submitGlBatch({
+    tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows, by: "test",
+    expectedTotals: [{ currency: "USD", rowCount: 2, sum: "140.50" }, { currency: "EUR", rowCount: 0, sum: "0.00" }],
+  }).catch((e: unknown) => e);
+  assert.ok(err instanceof BatchRefused && err.batchId !== null);
+  const s = (await ds.questions.ingestionStatus(t, { asOf: D1 })).find((x) => x.batchId === err.batchId)!;
+  assert.equal(s.status, "FAILED");
+  assert.match(s.failureReason!, /EUR: expected 0 rows \/ 0\.00, not received/);
+  assert.deepEqual(await ds.questions.dataQualityIssues(t), [], "no balances stored for the refused batch");
+});
+
+dbTest("expectedTotals: a duplicate currency, a bad rowCount or a malformed sum refuses the batch before anything is received", async () => {
+  const t = newTenant();
+  await setup(t);
+  const rows = [bal("1000", "1")];
+  const refuse = async (expectedTotals: unknown) => {
+    const err: unknown = await ds.commands.submitGlBatch({ tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows, by: "test", expectedTotals: expectedTotals as never }).catch((e: unknown) => e);
+    assert.ok(err instanceof BatchRefused && err.batchId !== null);
+    return (await ds.questions.ingestionStatus(t, { asOf: D1 })).find((x) => x.batchId === err.batchId)!.failureReason!;
+  };
+  assert.match(await refuse([{ currency: "USD", rowCount: 1, sum: "1" }, { currency: "USD", rowCount: 2, sum: "2" }]), /USD is listed more than once/);
+  assert.match(await refuse([{ currency: "USD", rowCount: -1, sum: "1" }]), /rowCount must be a whole number/);
+  assert.match(await refuse([{ currency: "USD", rowCount: 1, sum: "not-a-number" }]), /sum must be a decimal amount/);
+  assert.deepEqual(await ds.questions.dataQualityIssues(t), []);
+});
+
+dbTest("expectedTotals: a resend behind an unchanged content hash is still checked; matching totals stay DUPLICATE, a mismatch refuses a new attempt without touching the original", async () => {
+  const t = newTenant();
+  await setup(t);
+  const rows = [bal("1000", "100.50"), bal("1100", "40")]; // USD: 2 rows, 140.50
+  const first = await ds.commands.submitGlBatch({ tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows, by: "test" }); // no expectedTotals the first time
+  assert.equal(first.status, "APPLIED");
+
+  const dup = await ds.commands.submitGlBatch({
+    tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows: [...rows].reverse(), by: "test",
+    expectedTotals: [{ currency: "USD", rowCount: 2, sum: "140.50" }],
+  });
+  assert.deepEqual([dup.status, dup.batchId], ["DUPLICATE", first.batchId], "matching totals: still the same duplicate batch");
+
+  const err: unknown = await ds.commands.submitGlBatch({
+    tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows, by: "test",
+    expectedTotals: [{ currency: "USD", rowCount: 2, sum: "999.00" }],
+  }).catch((e: unknown) => e);
+  assert.ok(err instanceof BatchRefused && err.batchId !== null && err.batchId !== first.batchId, "a mismatch is a new, separate FAILED attempt");
+
+  const statuses = await ds.questions.ingestionStatus(t, { asOf: D1 });
+  const originalAfter = statuses.find((s) => s.batchId === first.batchId)!;
+  assert.deepEqual([originalAfter.status, originalAfter.current], ["COMPLETED", true], "the original batch is untouched: not superseded, still current");
+  const failedAttempt = statuses.find((s) => s.batchId === err.batchId)!;
+  assert.deepEqual([failedAttempt.status, failedAttempt.current], ["FAILED", false]);
+  assert.deepEqual((await events(t)).map((e) => e.type), ["data-source.batch-stamped"], "nothing new is announced for either the duplicate or the refused resend");
+});
+
+dbTest("control totals reconcile to 4 decimals across many rows of large signed amounts", async () => {
+  const t = newTenant();
+  await setup(t);
+  // Near the 20-integer-digit limit, where decimal.js's default 20-significant-digit precision would round a sum.
+  const amounts = ["12345678901234567890.1234", "1.0001", "-11111111111111111111.1234", "0.0001"];
+  const rows = amounts.map((a, i) => bal("1000", a, { dimensions: { row: String(i) } }));
+  const r = await ds.commands.submitGlBatch({
+    tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows, by: "test",
+    expectedTotals: [{ currency: "USD", rowCount: 4, sum: "1234567790123456780.0002" }],
+  });
+  assert.equal(r.status, "APPLIED", "the expected sum, computed with exact decimal arithmetic, is accepted");
+  const [usd] = await ds.questions.controlTotals(t, r.batchId);
+  assert.deepEqual([usd!.receivedRows, usd!.receivedSum], [4, "1234567790123456780.0002"]);
+  assert.equal(usd!.receivedSum, usd!.includedSum, "all four rows included; the group sums still reconcile exactly");
 });
 
 dbTest("control totals answer well within budget at UAT size (20,000 rows, 40 currencies)", async () => {

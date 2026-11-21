@@ -19,7 +19,7 @@ Contract versioning; platform-level versus tenant-level NDF list; Audit retentio
 
 ## Release 1 stream J
 
-J1 control totals by currency is merged (decision 0029): `controlTotals(tenant, batchId)` on Data Source's contract, computed on read (measured at 13–16 ms for 20,000 rows and 40 currencies, well under the 500 ms budget), and an optional `expectedTotals` on `GlBatch` that refuses a batch whose totals do not match. D7 can start. J2 and J3 are not yet started.
+J1 control totals by currency is merged (decision 0031): `controlTotals(tenant, batchId)` on Data Source's contract, computed on read (measured at 13–16 ms for 20,000 rows and 40 currencies, well under the 500 ms budget), and an optional `expectedTotals` on `GlBatch` that refuses a batch whose totals do not match. D7 can start. J2 and J3 are not yet started.
 
 ## Release 1 stream E prerequisite
 

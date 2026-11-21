@@ -1,11 +1,10 @@
 // The one write path for balances: a batch from one source system, chart and as-of date, validated and stamped
 // in one transaction with its events (docs/decisions/0006).
 import { createHash, randomUUID } from "node:crypto";
-import { Decimal } from "decimal.js";
 import { sql, type Insertable } from "kysely";
 import { asOfDate, type AsOfDate, type TenantId } from "@shared/kernel";
 import type { BatchStatus, MasterDataQuestionsLike } from "./ports.ts";
-import { diffTotals, type ExpectedTotal } from "./control-totals.ts";
+import { D, diffTotals, expectedTotalsProblems, type ExpectedTotal } from "./control-totals.ts";
 import { q, type Db } from "./db.ts";
 import type { DataSourceDatabase } from "./schema.ts";
 import { matchProgram, type MatchFact } from "./match.ts";
@@ -21,7 +20,13 @@ export interface GlBatch {
   readonly rows: readonly GlBalanceRow[];
   /** Who or what sent it: a user id or a connector name. */
   readonly by: string;
-  /** What the sender expects to have sent, by currency. When given, it is checked against what intake received; any difference refuses the batch (decision #J1). */
+  /**
+   * What the sender expects to have sent, by currency. When given, it is checked against what intake received; any
+   * difference — a different sum, a different row count, or a currency present on only one side (a currency the
+   * batch received no rows under is a difference even if named here with an explicit zero) — refuses the batch
+   * (decision 0031). An empty array declares zero currencies are expected, so a batch with any rows at all is a
+   * difference. Omit the field entirely to skip the check, not `[]`.
+   */
   readonly expectedTotals?: readonly ExpectedTotal[];
 }
 
@@ -69,7 +74,12 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
     }
     const tenant = batch.tenantId;
     const today = clock().toISOString().slice(0, 10);
-    const reason = batch.rows.length === 0 ? "the batch has no rows" : batch.rows.length > MAX_ROWS ? `the batch has more than ${MAX_ROWS} rows` : batch.asOf > today ? `as-of date ${batch.asOf} is in the future` : null;
+    const totalsProblems = batch.expectedTotals ? expectedTotalsProblems(batch.expectedTotals) : [];
+    const reason = batch.rows.length === 0 ? "the batch has no rows"
+      : batch.rows.length > MAX_ROWS ? `the batch has more than ${MAX_ROWS} rows`
+      : batch.asOf > today ? `as-of date ${batch.asOf} is in the future`
+      : totalsProblems.length > 0 ? `expectedTotals is invalid: ${totalsProblems.join("; ")}`
+      : null;
     const hash = createHash("sha256").update(stable([batch.chartCode, batch.rows.map((r) => stable(r)).sort()])).digest("hex");
     if (reason !== null) {
       const id = randomUUID();
@@ -80,6 +90,20 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
       throw new BatchRefused(id, reason);
     }
 
+    // Pure (no master data, no database): each row's check and the totals it feeds, computed once and reused below,
+    // on the duplicate path as much as the normal one, so a resend cannot dodge expectedTotals by matching an
+    // earlier, unchecked attempt's content hash.
+    const checked = batch.rows.map((r) => checkRow(r, batch.asOf));
+    const receivedTotals = new Map<string, { rows: number; sum: InstanceType<typeof D> }>();
+    batch.rows.forEach((r, i) => {
+      const currencyKey = blank(r.currency) ? "" : r.currency!;
+      const prior = receivedTotals.get(currencyKey) ?? { rows: 0, sum: new D(0) };
+      const amount = checked[i]!.amount;
+      receivedTotals.set(currencyKey, { rows: prior.rows + 1, sum: amount === null ? prior.sum : prior.sum.plus(amount) });
+    });
+    const receivedForCompare = new Map([...receivedTotals].map(([currency, t]) => [currency, { rows: t.rows, sum: t.sum.toFixed(4) }]));
+    const totalsDiff = batch.expectedTotals ? diffTotals(receivedForCompare, batch.expectedTotals) : null;
+
     const result = await db.transaction().execute(async (tx) => {
       await sql`SELECT pg_advisory_xact_lock(hashtext(${`${tenant}:${batch.sourceSystem}:${batch.asOf}`}))`.execute(tx);
 
@@ -87,6 +111,15 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
         .where("tenant_id", "=", tenant).where("source_system", "=", batch.sourceSystem).where("as_of", "=", batch.asOf)
         .where("content_hash", "=", hash).where("superseded_by", "is", null).where("status", "<>", "FAILED").executeTakeFirst();
       if (dup) {
+        if (totalsDiff && totalsDiff.length > 0) {
+          const id = randomUUID();
+          const totalsReason = `control totals do not match: ${totalsDiff.join("; ")}`;
+          await q(tx).insertInto("batches").values({
+            tenant_id: tenant, batch_id: id, source_system: batch.sourceSystem, as_of: batch.asOf, chart_code: batch.chartCode, content_hash: hash,
+            status: "FAILED", failure_reason: totalsReason, received_count: batch.rows.length, received_by: batch.by,
+          }).execute();
+          return { status: "REFUSED", batchId: id, reason: totalsReason } as const;
+        }
         return {
           status: "DUPLICATE", batchId: dup.batch_id, ingestion: dup.status as BatchStatus, received: dup.received_count,
           included: dup.included_count, excluded: dup.excluded_count, blocked: dup.blocked_count,
@@ -116,17 +149,13 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
       const batchId = randomUUID();
       const balances: Insertable<DataSourceDatabase["balances"]>[] = [];
       const issues: { balance_id: string; ruleCode: string; description: string }[] = [];
-      const receivedTotals = new Map<string, { rows: number; sum: Decimal }>();
       let included = 0;
       let excluded = 0;
       let blocked = 0;
 
       batch.rows.forEach((r, i) => {
         const key = keys[i]!;
-        const { amount, issues: found } = checkRow(r, batch.asOf);
-        const currencyKey = blank(r.currency) ? "" : r.currency!;
-        const priorTotal = receivedTotals.get(currencyKey) ?? { rows: 0, sum: new Decimal(0) };
-        receivedTotals.set(currencyKey, { rows: priorTotal.rows + 1, sum: amount === null ? priorTotal.sum : priorTotal.sum.plus(amount) });
+        const { amount, issues: found } = checked[i]!;
         const problems: RowIssue[] = [...found];
         const entity = blank(r.entityCode) ? undefined : entities.get(r.entityCode!);
         const account = blank(r.accountNumber) ? undefined : accounts.get(r.accountNumber!);
@@ -169,17 +198,13 @@ export function intakeCommands(db: Db, md: MasterDataQuestionsLike, clock: () =>
         });
       });
 
-      if (batch.expectedTotals) {
-        const received = new Map([...receivedTotals].map(([currency, t]) => [currency, { rows: t.rows, sum: t.sum.toFixed(4) }]));
-        const diffs = diffTotals(received, batch.expectedTotals);
-        if (diffs.length > 0) {
-          const reason = `control totals do not match: ${diffs.join("; ")}`;
-          await q(tx).insertInto("batches").values({
-            tenant_id: tenant, batch_id: batchId, source_system: batch.sourceSystem, as_of: batch.asOf, chart_code: batch.chartCode, content_hash: hash,
-            status: "FAILED", failure_reason: reason, received_count: batch.rows.length, received_by: batch.by,
-          }).execute();
-          return { status: "REFUSED", batchId, reason } as const;
-        }
+      if (totalsDiff && totalsDiff.length > 0) {
+        const reason = `control totals do not match: ${totalsDiff.join("; ")}`;
+        await q(tx).insertInto("batches").values({
+          tenant_id: tenant, batch_id: batchId, source_system: batch.sourceSystem, as_of: batch.asOf, chart_code: batch.chartCode, content_hash: hash,
+          status: "FAILED", failure_reason: reason, received_count: batch.rows.length, received_by: batch.by,
+        }).execute();
+        return { status: "REFUSED", batchId, reason } as const;
       }
 
       const status: BatchStatus = blocked > 0 ? "COMPLETED_WITH_ISSUES" : "COMPLETED";

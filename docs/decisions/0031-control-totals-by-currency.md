@@ -1,4 +1,4 @@
-# 0029 — Control totals by currency
+# 0031 — Control totals by currency
 
 Date: 2026-11-21. Service: data-source. Source: `docs/release-1/J-backend-gaps.md` (J1), confirmed as decision row #6 (Overview table) by Fikre on 2026-11-20.
 
@@ -17,4 +17,11 @@ Date: 2026-11-21. Service: data-source. Source: `docs/release-1/J-backend-gaps.m
 - If a future program needs totals broken down further (e.g. by source system within a batch), that is a new question, not an extension of this one; `controlTotals` stays at the grain J1 asked for.
 
 ## Not done here
-Nothing stores or exposes control totals across batches (e.g. a running total for a source system); D7 (the loader side, which hands `expectedTotals` to `submitGlBatch`) is a separate piece of work this hands over to.
+Nothing stores or exposes control totals across batches (e.g. a running total for a source system); D7 (the loader side, which hands `expectedTotals` to `submitGlBatch`) is a separate piece of work this hands over to. The loader outcome does not carry the `batchId` yet — D7 will need it from `ingestionStatus`, or the outcome type should carry it ([Claude]'s review of this PR).
+
+## Addendum: fixes from review ([Claude] and [Buddy] on PR #38, 2026-11-21)
+
+6. **A duplicate submission still checks `expectedTotals`.** The per-row check (`checkRow`) and the totals it feeds are now computed once, before the transaction even opens (they need no master data), and reused on both paths. A resend that matches the stored content hash still returns `DUPLICATE` when its `expectedTotals` matches what the original batch received; when it does not, a *new*, separate `FAILED` batch is recorded — the original is untouched (not superseded, still current) — and nothing is announced. Before this fix, the `DUPLICATE` branch returned before `expectedTotals` was ever consulted, so a resend with a wrong total silently succeeded.
+7. **Decimal precision: a clone at 40 significant digits (`D` in `control-totals.ts`), not the bare `decimal.js` import.** A balance can carry up to 20 integer digits and 4 decimals — 24 significant digits for one row alone — while decimal.js's default global precision is 20. Summing even two valid rows under the default could silently round the result (verified: `12345678901234567890.1234 + 1.0001` rounds to `...567891.0000` at the default precision instead of the exact `...567891.1235`). `D` matches the precision this repository's other `calc.ts` files already use for the same reason. `intake.ts` and `queries.ts` both now import `D` from `control-totals.ts` instead of constructing their own `Decimal`.
+8. **A currency absent from what was received is a difference even when `expectedTotals` states it as an explicit zero.** `diffTotals` now checks membership (is the currency a key at all) before it compares values, rather than defaulting an absent currency to `{ rows: 0, sum: "0.0000" }` and letting it match a claimed zero. A sender's `expectedTotals` should name only the currencies its own file actually carries.
+9. **`expectedTotals`'s own shape is validated before anything else**, as a new `expectedTotalsProblems` export: a currency listed twice, a `rowCount` that is not a whole number of 0 or more, or a `sum` that is not a valid decimal string, each refuse the batch up front (folded into the same pre-transaction `reason` check as an empty batch or a future as-of date, so it is recorded as `FAILED` the same way). `expectedTotals: []` is unchanged and now documented explicitly: it declares zero currencies are expected, so any batch with rows at all is a difference (every currency it actually carries is "received but not expected").
