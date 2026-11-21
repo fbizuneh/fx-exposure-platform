@@ -36,7 +36,7 @@ interface TenantConfig {
 }
 
 /** Configures two independent UAT tenants through the same commands used by the app. */
-export async function configure(app: App, config: UatConfig): Promise<readonly TenantId[]> {
+export async function configureWithActors(app: App, config: UatConfig): Promise<{ tenantIds: readonly TenantId[]; actors: readonly ReadonlyMap<string, Actor>[] }> {
   if (config.tenants.length !== 2 || new Set(config.tenants.map((t) => t.tenantName)).size !== 2 || new Set(config.tenants.map((t) => t.program.id)).size !== 2) throw new Error("UAT config needs two tenants with distinct names and programs");
   const admin = config.users.find((u) => u.name === config.adminUser);
   if (!admin || !admin.roles.includes("TREASURY_ADMIN")) throw new Error("adminUser must name a TREASURY_ADMIN");
@@ -50,6 +50,7 @@ export async function configure(app: App, config: UatConfig): Promise<readonly T
   }
 
   const tenantIds = [] as TenantId[];
+  const configuredActors = [] as ReadonlyMap<string, Actor>[];
   for (const tenant of config.tenants) tenantIds.push(await app.identity.commands.createTenant(tenant.tenantName));
   const platformId = await app.identity.commands.ensurePlatformUser(config.platformUser);
   for (const [i, tenant] of config.tenants.entries()) {
@@ -61,6 +62,7 @@ export async function configure(app: App, config: UatConfig): Promise<readonly T
       const userId = await app.identity.commands.addUser(tenantId, { issuer: config.OIDC_ISSUER, externalSubject: user.externalSubject, displayName: user.name, roles: user.roles }, platformId);
       actors.set(user.name, { kind: "user", userId });
     }
+    configuredActors.push(actors);
     const adminActor = actors.get(config.adminUser)!;
     await app.exposureManagement.commands.defineProgram({ tenantId, programId: p.id, name: p.name, type: p.type, effectiveFrom: p.effectiveFrom, actor: adminActor, settings: p.settings });
     // Data Source needs the enabled/defined program announcements before it accepts mapping rules.
@@ -73,7 +75,11 @@ export async function configure(app: App, config: UatConfig): Promise<readonly T
     await app.fxRate.commands.setOutlierShare(tenantId, config.rateSettings.outlierShare);
   }
   await drain(app);
-  return tenantIds;
+  return { tenantIds, actors: configuredActors };
+}
+
+export async function configure(app: App, config: UatConfig): Promise<readonly TenantId[]> {
+  return (await configureWithActors(app, config)).tenantIds;
 }
 
 function option(args: string[], name: string): string {
