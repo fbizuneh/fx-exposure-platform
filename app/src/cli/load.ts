@@ -4,8 +4,8 @@ import { userInfo } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { asOfDate, tenantId, type AsOfDate, type TenantId } from "@shared/kernel";
-import { composeApp, type App } from "../compose.ts";
-import { drain } from "../dispatch.ts";
+import { composeApp as defaultComposeApp, type App } from "../compose.ts";
+import { deliveryProblems, drain as defaultDrain } from "../dispatch.ts";
 import {
   loadAccountsFile,
   loadCalendarsFile,
@@ -279,14 +279,42 @@ function formatProblem(p: FileProblem): string {
   return `${where}${p.message}`;
 }
 
-/** One summary line, then up to 50 problems (never row contents). */
+const OUTBOX_SERVICES = [
+  (app: App) => app.identity,
+  (app: App) => app.masterData,
+  (app: App) => app.fxRate,
+  (app: App) => app.dataSource,
+  (app: App) => app.exposureManagement,
+  (app: App) => app.exposureAnalysis,
+  (app: App) => app.fxTrade,
+  (app: App) => app.hedgeRecommendation,
+] as const;
+
+/** Counts this tenant's undelivered outbox after a drain (Decision 0019: failed stay for retry). */
+export async function countUndelivered(
+  app: App,
+  tenant: string,
+): Promise<{ readonly pending: number; readonly failed: number }> {
+  let pending = 0;
+  for (const service of OUTBOX_SERVICES) {
+    const events = (await service(app).outbox.pending(200)) as ReadonlyArray<{ readonly tenantId?: string }>;
+    for (const e of events) {
+      if (e.tenantId === tenant) pending++;
+    }
+  }
+  const failed = (await deliveryProblems(app)).filter((p) => p.tenantId === tenant).length;
+  return { pending, failed };
+}
+
+/** One summary line, then up to 50 problems (never row contents or raw service refusal text). */
 export function formatOutput(
   kind: Kind,
   outcome: LoadOutcome,
-  options: { dryRun?: boolean; drained?: number } = {},
+  options: { dryRun?: boolean; drained?: number; deliveryIncomplete?: boolean } = {},
 ): { readonly exitCode: ExitCode; readonly lines: string[] } {
   const dry = options.dryRun === true;
   const drainSuffix = options.drained !== undefined ? ` drained=${options.drained}` : "";
+  const deliveryNote = "delivery did not finish (load committed; events pending or failed for retry)";
 
   if (outcome.kind === "INVALID_FILE") {
     const problems = outcome.problems;
@@ -299,14 +327,18 @@ export function formatOutput(
   }
 
   if (outcome.kind === "REFUSED") {
-    return { exitCode: 2, lines: [`${kind}: REFUSED ${outcome.message}${drainSuffix}`] };
+    // Safe summary only: service refusal text can name rejected row values (entity/account codes, pairs).
+    return { exitCode: 2, lines: [`${kind}: REFUSED${drainSuffix}`] };
   }
 
   if (outcome.kind === "HELD") {
-    return {
-      exitCode: 4,
-      lines: [`${kind}: HELD batchId=${outcome.batchId} reason=${outcome.reason}${drainSuffix}`],
-    };
+    // Reason is the safeguard summary (counts only), not rejected row values.
+    const lines = [`${kind}: HELD batchId=${outcome.batchId} reason=${outcome.reason}${drainSuffix}`];
+    if (options.deliveryIncomplete) {
+      lines.push(deliveryNote);
+      return { exitCode: 3, lines };
+    }
+    return { exitCode: 4, lines };
   }
 
   // DONE
@@ -316,12 +348,12 @@ export function formatOutput(
   const counts = Object.entries(outcome.counts)
     .map(([k, v]) => `${k}=${v}`)
     .join(" ");
-  return {
-    exitCode: 0,
-    lines: [`${kind}: ${outcome.status}${counts ? ` ${counts}` : ""}${drainSuffix}`],
-  };
+  const summary = `${kind}: ${outcome.status}${counts ? ` ${counts}` : ""}${drainSuffix}`;
+  if (options.deliveryIncomplete) {
+    return { exitCode: 3, lines: [summary, deliveryNote] };
+  }
+  return { exitCode: 0, lines: [summary] };
 }
-
 export interface LoadCliResult {
   readonly exitCode: ExitCode;
   readonly lines: string[];
@@ -335,14 +367,25 @@ function defaultBy(): string {
   }
 }
 
+export interface LoadDeps {
+  readonly defaultBy?: string;
+  readonly readFile?: (path: string) => Promise<string>;
+  readonly composeApp?: (connectionString: string) => App;
+  readonly drain?: (app: App) => Promise<number>;
+  readonly countUndelivered?: (app: App, tenantId: string) => Promise<{ pending: number; failed: number }>;
+}
+
 /** Runs one load from argv-like args. DATABASE_URL from env unless --dry-run. */
 export async function runLoad(
   argv: readonly string[],
   env: Readonly<Record<string, string | undefined>> = process.env,
-  options: { defaultBy?: string; readFile?: (path: string) => Promise<string> } = {},
+  options: LoadDeps = {},
 ): Promise<LoadCliResult> {
   const byDefault = options.defaultBy ?? defaultBy();
   const read = options.readFile ?? ((path: string) => readFile(path, "utf8"));
+  const compose = options.composeApp ?? defaultComposeApp;
+  const drainOnce = options.drain ?? defaultDrain;
+  const undelivered = options.countUndelivered ?? countUndelivered;
 
   let parsed: ParsedArgs;
   try {
@@ -355,9 +398,8 @@ export async function runLoad(
   let text: string;
   try {
     text = await read(parsed.file);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    return { exitCode: 3, lines: [`cannot read file: ${message}`] };
+  } catch {
+    return { exitCode: 3, lines: ["cannot read file"] };
   }
 
   if (parsed.dryRun) {
@@ -366,31 +408,32 @@ export async function runLoad(
       return formatOutput(parsed.kind, outcome, { dryRun: true });
     } catch (e) {
       if (e instanceof CliUsageError) return { exitCode: 3, lines: [e.message] };
-      const message = e instanceof Error ? e.message : String(e);
-      return { exitCode: 3, lines: [message] };
+      return { exitCode: 3, lines: ["load failed"] };
     }
   }
 
   const databaseUrl = env.DATABASE_URL?.trim();
   if (!databaseUrl) return { exitCode: 3, lines: ["DATABASE_URL is required"] };
 
-  const app = composeApp(databaseUrl);
+  const app = compose(databaseUrl);
   try {
     let outcome: LoadOutcome;
     try {
       outcome = await runLoader(app, parsed, text);
     } catch (e) {
       if (e instanceof CliUsageError) return { exitCode: 3, lines: [e.message] };
-      const message = e instanceof Error ? e.message : String(e);
-      return { exitCode: 3, lines: [message] };
+      return { exitCode: 3, lines: ["load failed"] };
     }
 
     let drained: number | undefined;
+    let deliveryIncomplete = false;
     if (parsed.drain && (outcome.kind === "DONE" || outcome.kind === "HELD")) {
-      drained = await drain(app);
+      drained = await drainOnce(app);
+      const left = await undelivered(app, parseTenant(parsed.tenant));
+      deliveryIncomplete = left.pending > 0 || left.failed > 0;
     }
 
-    return formatOutput(parsed.kind, outcome, { drained });
+    return formatOutput(parsed.kind, outcome, { drained, deliveryIncomplete });
   } finally {
     await app.close();
   }
@@ -403,8 +446,8 @@ async function main(): Promise<void> {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  main().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : error);
+  main().catch(() => {
+    console.error("load failed");
     process.exitCode = 3;
   });
 }
