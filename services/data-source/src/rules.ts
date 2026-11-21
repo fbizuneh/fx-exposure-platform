@@ -104,6 +104,8 @@ export function ruleCommands(db: Db, md: MasterDataQuestionsLike) {
     async endMappingRule(tenant: TenantId, ruleId: string, endsOn: string, by: string): Promise<void> {
       if (!realDate(endsOn)) throw new RuleInvalid(["end date is not a date"]);
       return db.transaction().execute(async (tx) => {
+        // Serialized against addMappingRule and any other end of this tenant's rules, so the read, the shortening check and the write are atomic.
+        await sql`SELECT pg_advisory_xact_lock(hashtext(${`${tenant}:rules`}))`.execute(tx);
         const r = await q(tx).selectFrom("mapping_rules").select(["program_id", "valid_from", "valid_to"]).where("tenant_id", "=", tenant).where("rule_id", "=", ruleId).executeTakeFirst();
         if (!r) throw new RuleInvalid(["rule not found"]);
         if (endsOn <= r.valid_from) throw new RuleInvalid(["the end date must be after the rule starts"]);

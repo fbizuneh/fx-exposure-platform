@@ -1,8 +1,8 @@
-# 0029 — Audit records for Data Source and Exposure Analysis
+# 0032 — Audit records for Data Source and Exposure Analysis
 
 Date: 2026-11-21. Services: data-source, exposure-analysis. Source: `docs/release-1/J-backend-gaps.md` (J2), confirmed as decision row #7 (Overview table) by Fikre on 2026-11-20.
 
-(Numbered 0029 from `main` at the time this branch started; J1 also claims 0029 from its own branch. The two PRs are independent, so whichever merges second renumbers its decision file.)
+(Renumbered from an initial 0029, after #21 merged to `main` with that number and J1's own PR took 0031 and J3's took 0030; see [Claude]'s and [Buddy]'s reviews of PR #39.)
 
 ## Decided
 
@@ -15,6 +15,7 @@ Date: 2026-11-21. Services: data-source, exposure-analysis. Source: `docs/releas
 
 ## Found along the way (not fixed here, per J2's scope)
 - FX Rate's `setStaleAfter`, `setPreferredSource`, `setPivotCurrency`, `setOutlierShare` and Master Data's `setMaxEndShare` take no actor and are not recorded, though they change what exposures are computed from. Left for Fikre to decide, as the J file asks.
+- `byPerson` accepts only `user:<id>` or `platform:<id>`. D5's CLI loader (`app/src/cli/load.ts`) defaults `--by` to `cli:<os user>`, which does not match — a batch loaded through the CLI with its default actor writes no `batch.loaded` record ([Claude]'s review of PR #39). This is a D5/D7 decision (how a CLI operator is identified for audit purposes, or require `--by user:<id>` for an audited load), not a code change in this task.
 
 ## Tests
 - `services/data-source/src/data-source.db.test.ts`: a person's batch load is recorded once; a connector feed and a duplicate batch record nothing; a refused batch records nothing; a person's mapping-rule add and end are recorded with the rule's program and (for the end) the `validTo` field; a routine feed's add/end and a refused end record nothing.
@@ -23,3 +24,8 @@ Date: 2026-11-21. Services: data-source, exposure-analysis. Source: `docs/releas
 
 ## Cost
 Mapping rules needed a new column in no table and no migration — `programId` was already stored on the row; only the function signature changed. `endMappingRule` moving into a transaction is one more round trip only when it is used to end a rule (not a hot path).
+
+## Addendum: fixes from review ([Buddy] on PR #39, 2026-11-21)
+
+4. **`endMappingRule` now takes the same tenant-wide advisory lock `addMappingRule` already does**, before its read. Without it, two concurrent ends of the same rule could both read the same unshortened `valid_to`, and whichever committed second could silently widen what the first had just shortened — while still writing an audit record for an update that was never actually valid against the rule's real, committed state. Confirmed and fixed: the regression test (`endMappingRule: two concurrent ends...`) fails reliably without the lock (checked by removing it and running the test several times) and passes reliably with it.
+5. **A new test proves the business write and the announcement commit or fail together specifically for an outbox-insert failure**, not just "the transaction throws" (the identity service's existing precedent for this pattern, `"an announcement and its change succeed or fail together"`, only exercises an arbitrary throw, not a late announcement). It wraps a throwaway `createDataSource` instance in a Kysely plugin that fails only the `insertInto("outbox")` query, calls the real `endMappingRule` through it, and asserts neither the business write nor any audit record survived the failed announcement. I confirmed this test catches the actual regression it guards against: moving `recordChange` in `rules.ts` to after `db.transaction().execute(...)` returns makes it fail (the business write commits; only the now-standalone announcement throws), then restored the call to inside the transaction.

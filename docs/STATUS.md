@@ -19,7 +19,7 @@ Control totals by currency; contract versioning; platform-level versus tenant-le
 
 ## Release 1 stream J
 
-J2 audit records for Data Source and Exposure Analysis is merged (decision 0029): Data Source records `batch.loaded`, `mapping-rule.added` and `mapping-rule.ended` for a person, same shape as Master Data and FX Rate; a connector feed and a duplicate record nothing. Exposure Analysis has no person-triggered command (every one of its commands is called only by the dispatcher, reacting to another service's event), so it records nothing — found and confirmed, not invented. Still not recorded (found, not fixed, per the J file): FX Rate's `setStaleAfter`/`setPreferredSource`/`setPivotCurrency`/`setOutlierShare` and Master Data's `setMaxEndShare` take no actor. J1 and J3 are separate PRs.
+J2 audit records for Data Source and Exposure Analysis is proposed (decision 0032): Data Source records `batch.loaded`, `mapping-rule.added` and `mapping-rule.ended` for a person, same shape as Master Data and FX Rate; a connector feed and a duplicate record nothing. Exposure Analysis has no person-triggered command (every one of its commands is called only by the dispatcher, reacting to another service's event), so it records nothing — found and confirmed, not invented. Still not recorded (found, not fixed, per the J file): FX Rate's `setStaleAfter`/`setPreferredSource`/`setPivotCurrency`/`setOutlierShare` and Master Data's `setMaxEndShare` take no actor. J1 and J3 are separate PRs.
 
 ## Release 1 stream E prerequisite
 
