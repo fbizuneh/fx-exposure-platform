@@ -45,8 +45,8 @@ admin bypass until collaborators exist; then turn off bypassing and update this.
 - Schema changes are migrations in the owning service, never a sync from code.
 - An approved cycle is never changed. A correction starts a new cycle.
 - Never say a check passed unless you ran it. Say which checks you ran.
-- Start every PR comment and PR description with who wrote it: [Claude],
-  [Codex] or [Cursor]. All three post as one GitHub user.
+- Start PR comments with who wrote them: [Claude], [Codex], [Cursor] or
+  [Buddy] (descriptions: not [Buddy]). They share one GitHub user. A prefix is not an approval.
 
 ## Commands
 - npm run check: the build checks for rules 1 to 6. Rule 7 is checked in review.
