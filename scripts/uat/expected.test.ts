@@ -20,6 +20,17 @@ test("independent UAT results are stable, reconcile per group, and wait for the 
     assert.deepEqual(statuses.find((s) => s.date === "2026-11-12"), { date: "2026-11-12", status: "NO_RATE EUR-USD 2026-11-12", rows: 0 });
     for (const { date } of statuses) assert.deepEqual(await readFile(join(first, `${date}.csv`)), await readFile(join(second, `${date}.csv`)), date);
     assert.deepEqual(await readFile(join(first, "expected-status.json")), await readFile(join(second, "expected-status.json")));
+    assert.deepEqual(await readFile(join(first, "gl-dirty-expected.json")), await readFile(join(second, "gl-dirty-expected.json")));
+    const dirty = JSON.parse(await readFile(join(first, "gl-dirty-expected.json"), "utf8")) as { storedRows: number; batchControlTotals: Record<string, { rows: number; balance: string }>; byProgram: Record<string, { included: Record<string, { rows: number }>; excluded: Record<string, { rows: number }>; blocked: Record<string, { rows: number }>; byReason: Record<string, Record<string, { rows: number }>> }> };
+    const count = (byCurrency: Record<string, { rows: number }>) => Object.values(byCurrency).reduce((sum, item) => sum + item.rows, 0);
+    assert.equal(dirty.storedRows, 20000);
+    assert.equal(count(dirty.batchControlTotals), 20000);
+    for (const [program, expected] of Object.entries({ "BS-ENT": [18558, 1422, 20], "BS-REG": [17890, 2090, 20] })) {
+      const result = dirty.byProgram[program]!;
+      assert.deepEqual([count(result.included), count(result.excluded), count(result.blocked)], expected);
+      assert.equal(count(result.byReason.GL_ENTITY_UNKNOWN!), 10);
+      assert.equal(count(result.byReason.GL_ACCOUNT_UNKNOWN!), 10);
+    }
     const lines = (await readFile(join(first, "2026-11-20.csv"), "utf8")).trimEnd().split("\n");
     assert.ok(lines.length > 700);
     for (const line of lines.slice(1)) {
