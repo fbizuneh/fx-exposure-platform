@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { programId, type ProgramId, type TenantId } from "@shared/kernel";
 import { migrate } from "../../../scripts/migrate.mjs";
-import type { PlatformUserId, UserId } from "../contract/index.ts";
+import { TenantNameTaken, type PlatformUserId, type UserId } from "../contract/index.ts";
 import { connect, createIdentity, type Db } from "./index.ts";
 import { q } from "./db.ts";
 import { announce } from "./outbox.ts";
@@ -50,10 +50,12 @@ dbTest("a tenant name identifies one tenant even under concurrent creation", asy
   const made = attempts.filter((r): r is PromiseFulfilledResult<TenantId> => r.status === "fulfilled");
   const refused = attempts.filter((r) => r.status === "rejected");
   assert.deepEqual([made.length, refused.length], [1, 1]);
+  assert.equal(refused[0]?.status, "rejected");
+  assert.equal(refused[0]?.status === "rejected" && refused[0].reason instanceof TenantNameTaken, true);
   assert.equal(await id.questions.tenantByName(name), made[0]!.value);
   await q(db).updateTable("tenants").set({ status: "DISABLED" }).where("tenant_id", "=", made[0]!.value).execute();
   assert.equal(await id.questions.tenantByName(name), made[0]!.value, "a disabled tenant still reserves its name");
-  await assert.rejects(id.commands.createTenant(name));
+  await assert.rejects(id.commands.createTenant(name), TenantNameTaken);
 });
 
 dbTest("access end to end: roles, enabled programs, restriction, disabled user", async () => {
