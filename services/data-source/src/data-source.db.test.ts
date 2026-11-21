@@ -277,6 +277,204 @@ dbTest("events carry identifiers only; the same batch at the same moment is appl
   assert.deepEqual(await events(t), []);
 });
 
+dbTest("control totals: each currency's received total equals its included, excluded and blocked totals added together", async () => {
+  const t = newTenant();
+  await setup(t);
+  await ds.commands.addMappingRule({ tenantId: t, programId: "BS", kind: "EXCLUDE", target: { type: "ACCOUNT", chartCode: "C", accountNumber: "1100" }, validFrom: "2026-01-01", validTo: null, by: "test" });
+  const r = await send(t, [
+    bal("1000", "100.50"), // USD, included
+    bal("1100", "40"), // USD, excluded by the rule above
+    bal("2000", "7"), // USD, blocked: no program claims it
+    bal("1000", "5", { currency: "EUR" }), // EUR, included
+    bal("1000", "3", { currency: null as never }), // no currency: blocked
+    bal("1000", "abc", { entityCode: "DE1" }), // USD, blocked: amount does not parse, so it contributes 0 to the sum
+  ]);
+  assert.deepEqual([r.received, r.included, r.excluded, r.blocked], [6, 2, 1, 3]);
+  const totals = await ds.questions.controlTotals(t, r.batchId);
+  assert.deepEqual(totals, [
+    { currency: "", receivedRows: 1, receivedSum: "3.0000", includedRows: 0, includedSum: "0.0000", excludedRows: 0, excludedSum: "0.0000", blockedRows: 1, blockedSum: "3.0000" },
+    { currency: "EUR", receivedRows: 1, receivedSum: "5.0000", includedRows: 1, includedSum: "5.0000", excludedRows: 0, excludedSum: "0.0000", blockedRows: 0, blockedSum: "0.0000" },
+    { currency: "USD", receivedRows: 4, receivedSum: "147.5000", includedRows: 1, includedSum: "100.5000", excludedRows: 1, excludedSum: "40.0000", blockedRows: 2, blockedSum: "7.0000" },
+  ]);
+  for (const g of totals) {
+    assert.equal(g.receivedRows, g.includedRows + g.excludedRows + g.blockedRows, `${g.currency}: rows add up`);
+    assert.equal(g.receivedSum, (Number(g.includedSum) + Number(g.excludedSum) + Number(g.blockedSum)).toFixed(4), `${g.currency}: sums add up`);
+  }
+  assert.equal(totals.reduce((n, g) => n + g.receivedRows, 0), r.received, "every group's rows sum to the whole batch");
+});
+
+dbTest("control totals: a duplicate batch returns the same totals as the one it duplicates", async () => {
+  const t = newTenant();
+  await setup(t);
+  const rows = [bal("1000", "10"), bal("1100", "20"), bal("2000", "5")];
+  const first = await send(t, rows);
+  const before = await ds.questions.controlTotals(t, first.batchId);
+  const dup = await send(t, [...rows].reverse());
+  assert.deepEqual([dup.status, dup.batchId], ["DUPLICATE", first.batchId]);
+  assert.deepEqual(await ds.questions.controlTotals(t, dup.batchId), before);
+});
+
+dbTest("control totals: a batch that does not exist, or belongs to another tenant, is refused without naming either", async () => {
+  const t = newTenant();
+  const other = newTenant();
+  await setup(t);
+  await setup(other);
+  const r = await send(t, [bal("1000", "1")]);
+  const missing = randomUUID();
+  const notFound = await ds.questions.controlTotals(t, missing).catch((e: unknown) => e);
+  assert.ok(notFound instanceof Error);
+  assert.doesNotMatch(notFound.message, new RegExp(missing));
+  const crossTenant = await ds.questions.controlTotals(other, r.batchId).catch((e: unknown) => e);
+  assert.ok(crossTenant instanceof Error);
+  assert.doesNotMatch(crossTenant.message, new RegExp(r.batchId));
+  assert.equal(notFound.message, crossTenant.message, "the two cases are indistinguishable from the message alone");
+});
+
+dbTest("expectedTotals: a batch whose totals match is accepted exactly as one sent with no expectedTotals", async () => {
+  const t = newTenant();
+  await setup(t);
+  const rows = [bal("1000", "100.50"), bal("1100", "40"), bal("1000", "5", { currency: "EUR" })];
+  const r = await ds.commands.submitGlBatch({
+    tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows, by: "test",
+    expectedTotals: [{ currency: "USD", rowCount: 2, sum: "140.50" }, { currency: "EUR", rowCount: 1, sum: "5" }],
+  });
+  assert.deepEqual([r.status, r.received, r.included, r.excluded, r.blocked], ["APPLIED", 3, 3, 0, 0]);
+});
+
+dbTest("expectedTotals: each kind of difference refuses the batch and stores it as FAILED; a batch with none is unaffected", async () => {
+  const t = newTenant();
+  await setup(t);
+  const rows = [bal("1000", "100.50"), bal("1100", "40")]; // USD: 2 rows, 140.50, both included
+  const refuse = async (expectedTotals: { currency: string; rowCount: number; sum: string }[]) => {
+    const err: unknown = await ds.commands.submitGlBatch({ tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows, by: "test", expectedTotals }).catch((e: unknown) => e);
+    assert.ok(err instanceof BatchRefused && err.batchId !== null, "refused and recorded, not silently dropped");
+    return err.batchId!;
+  };
+  const wrongSum = await refuse([{ currency: "USD", rowCount: 2, sum: "999.00" }]);
+  const wrongCount = await refuse([{ currency: "USD", rowCount: 5, sum: "140.50" }]);
+  const expectedButNotReceived = await refuse([{ currency: "USD", rowCount: 2, sum: "140.50" }, { currency: "GBP", rowCount: 1, sum: "1.00" }]); // GBP: expected, none arrived
+  const receivedButNotExpected = await refuse([]); // the sender expected no currencies at all; USD arrived anyway
+
+  const statuses = await ds.questions.ingestionStatus(t, { asOf: D1 });
+  for (const id of [wrongSum, wrongCount, expectedButNotReceived, receivedButNotExpected]) {
+    const s = statuses.find((x) => x.batchId === id)!;
+    assert.deepEqual([s.status, s.current], ["FAILED", false]);
+    assert.match(s.failureReason ?? "", /control totals do not match/);
+  }
+  assert.match(statuses.find((s) => s.batchId === expectedButNotReceived)!.failureReason!, /GBP: expected 1 rows.*not received/);
+  assert.match(statuses.find((s) => s.batchId === receivedButNotExpected)!.failureReason!, /USD: received 2 rows.*not expected/);
+  assert.deepEqual(await events(t), [], "nothing is announced for a refused batch");
+  assert.deepEqual(await ds.questions.dataQualityIssues(t), [], "no balances or issues are stored for a refused batch");
+
+  // the same rows, sent with no expectedTotals, behave exactly as before this task
+  const plain = await send(t, rows, D1);
+  assert.deepEqual([plain.status, plain.included], ["APPLIED", 2]);
+});
+
+dbTest("expectedTotals: a currency never received is a difference even when claimed as an explicit zero", async () => {
+  const t = newTenant();
+  await setup(t);
+  const rows = [bal("1000", "100.50"), bal("1100", "40")]; // USD only
+  const err: unknown = await ds.commands.submitGlBatch({
+    tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows, by: "test",
+    expectedTotals: [{ currency: "USD", rowCount: 2, sum: "140.50" }, { currency: "EUR", rowCount: 0, sum: "0.00" }],
+  }).catch((e: unknown) => e);
+  assert.ok(err instanceof BatchRefused && err.batchId !== null);
+  const s = (await ds.questions.ingestionStatus(t, { asOf: D1 })).find((x) => x.batchId === err.batchId)!;
+  assert.equal(s.status, "FAILED");
+  assert.match(s.failureReason!, /EUR: expected 0 rows \/ 0\.00, not received/);
+  assert.deepEqual(await ds.questions.dataQualityIssues(t), [], "no balances stored for the refused batch");
+});
+
+dbTest("expectedTotals: a duplicate currency, a bad rowCount or a malformed sum refuses the batch before anything is received", async () => {
+  const t = newTenant();
+  await setup(t);
+  const rows = [bal("1000", "1")];
+  const refuse = async (expectedTotals: unknown) => {
+    const err: unknown = await ds.commands.submitGlBatch({ tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows, by: "test", expectedTotals: expectedTotals as never }).catch((e: unknown) => e);
+    assert.ok(err instanceof BatchRefused && err.batchId !== null);
+    return (await ds.questions.ingestionStatus(t, { asOf: D1 })).find((x) => x.batchId === err.batchId)!.failureReason!;
+  };
+  assert.match(await refuse([{ currency: "USD", rowCount: 1, sum: "1" }, { currency: "USD", rowCount: 2, sum: "2" }]), /USD is listed more than once/);
+  assert.match(await refuse([{ currency: "USD", rowCount: -1, sum: "1" }]), /rowCount must be a whole number/);
+  assert.match(await refuse([{ currency: "USD", rowCount: 1, sum: "not-a-number" }]), /sum must be a decimal amount/);
+  assert.deepEqual(await ds.questions.dataQualityIssues(t), []);
+});
+
+dbTest("expectedTotals: a resend behind an unchanged content hash is still checked; matching totals stay DUPLICATE, a mismatch refuses a new attempt without touching the original", async () => {
+  const t = newTenant();
+  await setup(t);
+  const rows = [bal("1000", "100.50"), bal("1100", "40")]; // USD: 2 rows, 140.50
+  const first = await ds.commands.submitGlBatch({ tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows, by: "test" }); // no expectedTotals the first time
+  assert.equal(first.status, "APPLIED");
+
+  const dup = await ds.commands.submitGlBatch({
+    tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows: [...rows].reverse(), by: "test",
+    expectedTotals: [{ currency: "USD", rowCount: 2, sum: "140.50" }],
+  });
+  assert.deepEqual([dup.status, dup.batchId], ["DUPLICATE", first.batchId], "matching totals: still the same duplicate batch");
+
+  const err: unknown = await ds.commands.submitGlBatch({
+    tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows, by: "test",
+    expectedTotals: [{ currency: "USD", rowCount: 2, sum: "999.00" }],
+  }).catch((e: unknown) => e);
+  assert.ok(err instanceof BatchRefused && err.batchId !== null && err.batchId !== first.batchId, "a mismatch is a new, separate FAILED attempt");
+
+  const statuses = await ds.questions.ingestionStatus(t, { asOf: D1 });
+  const originalAfter = statuses.find((s) => s.batchId === first.batchId)!;
+  assert.deepEqual([originalAfter.status, originalAfter.current], ["COMPLETED", true], "the original batch is untouched: not superseded, still current");
+  const failedAttempt = statuses.find((s) => s.batchId === err.batchId)!;
+  assert.deepEqual([failedAttempt.status, failedAttempt.current], ["FAILED", false]);
+  assert.deepEqual((await events(t)).map((e) => e.type), ["data-source.batch-stamped"], "nothing new is announced for either the duplicate or the refused resend");
+});
+
+dbTest("control totals reconcile to 4 decimals across many rows of large signed amounts", async () => {
+  const t = newTenant();
+  await setup(t);
+  // Near the 20-integer-digit limit, where decimal.js's default 20-significant-digit precision would round a sum.
+  const amounts = ["12345678901234567890.1234", "1.0001", "-11111111111111111111.1234", "0.0001"];
+  const rows = amounts.map((a, i) => bal("1000", a, { dimensions: { row: String(i) } }));
+  const r = await ds.commands.submitGlBatch({
+    tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows, by: "test",
+    expectedTotals: [{ currency: "USD", rowCount: 4, sum: "1234567790123456780.0002" }],
+  });
+  assert.equal(r.status, "APPLIED", "the expected sum, computed with exact decimal arithmetic, is accepted");
+  const [usd] = await ds.questions.controlTotals(t, r.batchId);
+  assert.deepEqual([usd!.receivedRows, usd!.receivedSum], [4, "1234567790123456780.0002"]);
+  assert.equal(usd!.receivedSum, usd!.includedSum, "all four rows included; the group sums still reconcile exactly");
+});
+
+dbTest("debit minus credit keeps full precision too, not only the balance-column sum path", async () => {
+  const t = newTenant();
+  await setup(t);
+  const rows = [bal("1000", null as never, { balance: null, debit: "12345678901234567890.1234", credit: "0.0001" })];
+  const r = await ds.commands.submitGlBatch({
+    tenantId: t, sourceSystem: "erp", chartCode: "C", asOf: D1, rows, by: "test",
+    expectedTotals: [{ currency: "USD", rowCount: 1, sum: "12345678901234567890.1233" }],
+  });
+  assert.equal(r.status, "APPLIED", "the exact expected total, computed the same way, is accepted");
+  const [usd] = await ds.questions.controlTotals(t, r.batchId);
+  assert.equal(usd!.receivedSum, "12345678901234567890.1233", "the reported total is exact, not rounded at normalization");
+  assert.equal((await included(t))[0]?.amount, "12345678901234567890.1233");
+});
+
+dbTest("control totals answer well within budget at UAT size (20,000 rows, 40 currencies)", async () => {
+  const t = newTenant();
+  await setup(t);
+  const currencies = ["USD", "EUR", "GBP", "JPY", "AUD", "NZD", "CAD", "CHF", "SGD", "HKD", "CNY", "CNH", "INR", "KRW", "MXN", "BRL", "ZAR", "SEK", "NOK", "DKK",
+    "PLN", "TRY", "THB", "IDR", "MYR", "PHP", "AED", "SAR", "ILS", "TWD", "CZK", "HUF", "RON", "CLP", "COP", "PEN", "EGP", "QAR", "KWD", "BHD"];
+  assert.equal(currencies.length, 40);
+  const rows: GlBalanceRow[] = Array.from({ length: 20_000 }, (_, i) => bal("1000", "1.23", { currency: currencies[i % 40], dimensions: { row: String(i) } }));
+  const r = await send(t, rows, asOfDate("2026-03-09"));
+  assert.deepEqual([r.received, r.included], [20_000, 20_000]);
+  const started = Date.now();
+  const totals = await ds.questions.controlTotals(t, r.batchId);
+  const elapsedMs = Date.now() - started;
+  assert.equal(totals.length, 40);
+  assert.equal(totals.reduce((n, g) => n + g.receivedRows, 0), 20_000);
+  assert.ok(elapsedMs < 500, `controlTotals took ${elapsedMs}ms, over the 500ms budget for a 20,000-row batch`);
+});
+
 dbTest("audit: a batch loaded by a person is recorded once; a connector feed and a duplicate record nothing", async () => {
   const t = newTenant();
   await setup(t);

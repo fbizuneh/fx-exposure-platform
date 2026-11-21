@@ -13,6 +13,7 @@ See docs/decisions/0006-data-source.md.
 - Included balances for a program, as-of date and scope (current batches only)
 - Ingestion status
 - Data quality issues
+- A batch's control totals by currency: rows and signed amount received, and the same split by outcome (decision 0031)
 Each is defined in contract/.
 
 ## Announces
@@ -23,7 +24,8 @@ Each is defined in contract/.
 Events carry identifiers only.
 
 ## Consumes
-- Batches from source systems (sent by connectors, files or manual entry)
+- Batches from source systems (sent by connectors, files or manual entry); a batch may carry the sender's expected
+  control totals by currency, checked against what was received (decision 0031). A mismatch refuses the batch.
 - Entities, accounts and hierarchy paths (Master Data's contract)
 - Program catalog (Exposure Management)
 
