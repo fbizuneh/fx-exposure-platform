@@ -53,55 +53,73 @@ const realDate = (v: string): boolean => {
 const has = <T extends string>(list: readonly T[], v: string): v is T => (list as readonly string[]).includes(v);
 
 /**
- * Find an unclosed quote before trusting splitCsv's decoded cells.
+ * Find malformed quoting before trusting splitCsv's decoded cells.
+ * Catches an unclosed quote, and text after a closing quote (e.g. "10"0 → 100).
  * rowNo is null on the header; data rows count from 1. Escaped quotes ("") are fine.
  */
-function unclosedQuote(text: string): { rowNo: number | null; columnIndex: number; header: string[] | null } | null {
+function quotingProblem(
+  text: string,
+): { rowNo: number | null; columnIndex: number; header: string[] | null; message: string } | null {
   let header: string[] | null = null;
   let row: string[] = [];
   let cellText = "";
   let quoted = false;
+  let afterQuote = false;
   let completed = 0;
   const t = text.replace(/^\uFEFF/, "");
+
+  const at = (columnIndex: number, message: string) => ({
+    rowNo: (header === null ? null : completed) as number | null,
+    columnIndex,
+    header,
+    message,
+  });
+
   for (let i = 0; i < t.length; i++) {
     const c = t[i]!;
     if (quoted) {
       if (c === '"' && t[i + 1] === '"') {
         cellText += '"';
         i++;
-      } else if (c === '"') quoted = false;
-      else cellText += c;
-    } else if (c === '"') quoted = true;
-    else if (c === ",") {
+      } else if (c === '"') {
+        quoted = false;
+        afterQuote = true;
+      } else cellText += c;
+    } else if (c === ",") {
       row.push(cellText);
       cellText = "";
+      afterQuote = false;
     } else if (c === "\n" || c === "\r") {
       if (c === "\r" && t[i + 1] === "\n") i++;
       row.push(cellText);
       cellText = "";
+      afterQuote = false;
       if (row.some((x) => x.trim() !== "")) {
         if (header === null) header = row;
         completed++;
       }
       row = [];
+    } else if (c === '"') {
+      if (afterQuote || cellText !== "") return at(row.length, "text around quotes");
+      quoted = true;
+    } else if (afterQuote) {
+      return at(row.length, "text after closing quote");
     } else cellText += c;
   }
   row.push(cellText);
-  if (!quoted) return null;
-  const columnIndex = row.length - 1;
-  const rowNo = header === null ? null : completed;
-  return { rowNo, columnIndex, header };
+  if (quoted) return at(row.length - 1, "unclosed quote");
+  return null;
 }
 
 function openCsv(text: string): { header: string[] | undefined; body: string[][]; problems: FileProblem[] } {
-  const bad = unclosedQuote(text);
+  const bad = quotingProblem(text);
   if (bad) {
     const raw = bad.header?.[bad.columnIndex];
     const column = raw !== undefined && raw.trim() !== "" ? normalizeHeader(raw) : null;
     return {
       header: undefined,
       body: [],
-      problems: [{ rowNo: bad.rowNo, column, message: "unclosed quote" }],
+      problems: [{ rowNo: bad.rowNo, column, message: bad.message }],
     };
   }
   const [header, ...body] = splitCsv(text);

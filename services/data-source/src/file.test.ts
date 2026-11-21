@@ -93,6 +93,15 @@ test("parseGlFile: unclosed quote is a problem; valid quotes and escapes still w
   assert.equal(ok.rows[0]!.dimensions.cost_center, 'CC "A"');
 });
 
+test("parseGlFile: text after a closing quote is refused (not decoded as 100)", () => {
+  // splitCsv would decode "10"0 as 100 with an unchanged column count.
+  const r = parseGlFile(`${HEADER}\nUS1,1000,USD,"10"0,,,2026-03-09,\n`);
+  assert.equal(r.rows.length, 0);
+  assert.ok(
+    r.problems.some((p) => p.rowNo === 1 && p.column === "balance" && /text after closing quote/.test(p.message)),
+  );
+});
+
 test("parseGlFile: row width must match the header", () => {
   const short = parseGlFile(`${HEADER}\nUS1,1000,USD,10\n`);
   assert.equal(short.rows.length, 0);
