@@ -552,6 +552,62 @@ dbTest("gl: valid stores, same file is DUPLICATE", async () => {
   if (second.kind === "DONE") assert.equal(second.status, "DUPLICATE");
 });
 
+dbTest("gl: matching expectedTotals → DONE; mismatch → REFUSED (FAILED batch via ingestionStatus)", async () => {
+  const tenantId = await newTenant();
+  await seedGlMaster(tenantId);
+  const text = glCsv([
+    "US1,1000,USD,100.00,,,2026-03-09",
+    "US1,1000,USD,40.50,,,2026-03-09",
+    "US1,1000,EUR,5.00,,,2026-03-09",
+  ]);
+  const match = await loadGlFile(app, {
+    tenantId,
+    text,
+    chartCode: "MAIN",
+    asOf: D1,
+    sourceSystem: "erp-match",
+    by,
+    expectedTotals: [
+      { currency: "USD", rowCount: 2, sum: "140.50" },
+      { currency: "EUR", rowCount: 1, sum: "5" },
+    ],
+  });
+  assert.equal(match.kind, "DONE");
+  if (match.kind === "DONE") {
+    assert.equal(match.status, "APPLIED");
+    assert.equal(match.counts.received, 3);
+  }
+  const matched = await app.dataSource.questions.ingestionStatus(tenantId, {
+    sourceSystem: "erp-match",
+    asOf: D1,
+  });
+  assert.equal(matched.length, 1);
+  assert.ok(
+    matched[0]?.status === "COMPLETED" || matched[0]?.status === "COMPLETED_WITH_ISSUES",
+    `expected a completed batch, got ${matched[0]?.status}`,
+  );
+  assert.equal(matched[0]?.received, 3);
+
+  const mismatch = await loadGlFile(app, {
+    tenantId,
+    text,
+    chartCode: "MAIN",
+    asOf: D1,
+    sourceSystem: "erp-mismatch",
+    by,
+    expectedTotals: [{ currency: "USD", rowCount: 2, sum: "999.00" }],
+  });
+  assert.equal(mismatch.kind, "REFUSED");
+  if (mismatch.kind === "REFUSED") assert.match(mismatch.message, /control totals do not match/);
+  const refused = await app.dataSource.questions.ingestionStatus(tenantId, {
+    sourceSystem: "erp-mismatch",
+    asOf: D1,
+  });
+  assert.equal(refused.length, 1);
+  assert.equal(refused[0]?.status, "FAILED");
+  assert.match(refused[0]?.failureReason ?? "", /control totals do not match/);
+});
+
 dbTest("gl: one bad row is INVALID_FILE and stores nothing", async () => {
   const tenantId = await newTenant();
   await seedGlMaster(tenantId);
@@ -967,6 +1023,60 @@ dbTest("CLI child process: exit 0 APPLIED, 0 DUPLICATE, 1 INVALID_FILE, 2 REFUSE
   );
   assert.equal(refused.code, 2, refused.stdout + refused.stderr);
   assert.match(refused.stdout, /REFUSED/);
+});
+
+dbTest("CLI child process: gl --control match exits 0; mismatch exits 2 REFUSED", async () => {
+  const tenantId = await newTenant();
+  await seedGlMaster(tenantId);
+  const dir = await mkdtemp(join(tmpdir(), "d7-cli-control-"));
+  const gl = join(dir, "gl.csv");
+  const matchControl = join(dir, "control-match.csv");
+  const badControl = join(dir, "control-bad.csv");
+  await writeFile(gl, `${glCsv(["US1,1000,USD,100.00,,,2026-03-09", "US1,1000,EUR,5.00,,,2026-03-09"])}\n`);
+  await writeFile(matchControl, "currency,row_count,sum\nUSD,1,100.00\nEUR,1,5\n");
+  await writeFile(badControl, "currency,row_count,sum\nUSD,1,999.00\n");
+  const env = { DATABASE_URL: url };
+  const base = [
+    "gl",
+    gl,
+    "--tenant",
+    tenantId,
+    "--chart",
+    "MAIN",
+    "--as-of",
+    "2026-03-09",
+    "--source",
+    "erp-cli-control",
+    "--by",
+    "cli-d7",
+  ];
+
+  const matched = await runCli([...base, "--control", matchControl], env);
+  assert.equal(matched.code, 0, matched.stdout + matched.stderr);
+  assert.match(matched.stdout, /APPLIED/);
+
+  const mismatched = await runCli(
+    [
+      "gl",
+      gl,
+      "--tenant",
+      tenantId,
+      "--chart",
+      "MAIN",
+      "--as-of",
+      "2026-03-09",
+      "--source",
+      "erp-cli-control-bad",
+      "--by",
+      "cli-d7",
+      "--control",
+      badControl,
+    ],
+    env,
+  );
+  assert.equal(mismatched.code, 2, mismatched.stdout + mismatched.stderr);
+  assert.match(mismatched.stdout, /REFUSED/);
+  assert.ok(!mismatched.stdout.includes("999.00"), "never prints control cell values");
 });
 
 dbTest("CLI child process: E3 gl-malformed.csv exits 1, names all 40 problems, stores nothing", async () => {

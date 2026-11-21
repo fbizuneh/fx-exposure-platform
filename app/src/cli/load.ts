@@ -16,6 +16,7 @@ import {
   loadGlFile,
   loadHierarchyFile,
   loadRatesFile,
+  parseControlFile,
   type FileProblem,
   type LoadOutcome,
 } from "../loaders/index.ts";
@@ -51,6 +52,8 @@ export interface ParsedArgs {
   readonly program: string | undefined;
   readonly chart: string | undefined;
   readonly businessDate: string | undefined;
+  /** Control-total CSV path; only valid for kind `gl` (D7). */
+  readonly control: string | undefined;
 }
 
 export class CliUsageError extends Error {
@@ -99,6 +102,7 @@ export function parseArgs(argv: readonly string[], defaultBy: string): ParsedArg
     "--program",
     "--chart",
     "--business-date",
+    "--control",
   ]);
   const positionals: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -118,6 +122,10 @@ export function parseArgs(argv: readonly string[], defaultBy: string): ParsedArg
   const file = positionals[1]!;
   const tenant = requireOption(args, "--tenant");
   const by = option(args, "--by") ?? defaultBy;
+  const control = option(args, "--control");
+  if (control !== undefined && kindRaw !== "gl") {
+    throw new CliUsageError("--control is only valid for kind gl");
+  }
   return {
     kind: kindRaw,
     file,
@@ -131,6 +139,7 @@ export function parseArgs(argv: readonly string[], defaultBy: string): ParsedArg
     program: option(args, "--program"),
     chart: option(args, "--chart"),
     businessDate: option(args, "--business-date"),
+    control,
   };
 }
 
@@ -216,7 +225,12 @@ export function dryRunApp(): App {
   } as unknown as App;
 }
 
-async function runLoader(app: App, parsed: ParsedArgs, text: string): Promise<LoadOutcome> {
+async function runLoader(
+  app: App,
+  parsed: ParsedArgs,
+  text: string,
+  expectedTotals?: ReturnType<typeof parseControlFile>["rows"],
+): Promise<LoadOutcome> {
   const tid = parseTenant(parsed.tenant);
   const by = parsed.by;
   switch (parsed.kind) {
@@ -257,6 +271,7 @@ async function runLoader(app: App, parsed: ParsedArgs, text: string): Promise<Lo
         asOf: parseAsOf("--as-of", parsed.asOf),
         sourceSystem: requireText("--source", parsed.source),
         by,
+        ...(expectedTotals !== undefined ? { expectedTotals } : {}),
       });
     case "rates":
       return loadRatesFile(app, {
@@ -269,6 +284,29 @@ async function runLoader(app: App, parsed: ParsedArgs, text: string): Promise<Lo
     case "executed":
       return loadExecutedFile(app, { tenantId: tid, text, by });
   }
+}
+
+/** Reads and parses `--control` when present. Invalid shape → INVALID_FILE outcome. */
+async function loadExpectedTotals(
+  parsed: ParsedArgs,
+  read: (path: string) => Promise<string>,
+): Promise<
+  | { readonly ok: true; readonly expectedTotals: ReturnType<typeof parseControlFile>["rows"] | undefined }
+  | { readonly ok: false; readonly outcome: LoadOutcome }
+  | { readonly ok: false; readonly readError: true }
+> {
+  if (parsed.control === undefined) return { ok: true, expectedTotals: undefined };
+  let controlText: string;
+  try {
+    controlText = await read(parsed.control);
+  } catch {
+    return { ok: false, readError: true };
+  }
+  const control = parseControlFile(controlText);
+  if (control.problems.length > 0) {
+    return { ok: false, outcome: { kind: "INVALID_FILE", problems: control.problems } };
+  }
+  return { ok: true, expectedTotals: control.rows };
 }
 
 function formatProblem(p: FileProblem): string {
@@ -417,9 +455,16 @@ export async function runLoad(
     return { exitCode: 3, lines: ["cannot read file"] };
   }
 
+  const control = await loadExpectedTotals(parsed, read);
+  if (!control.ok) {
+    if ("readError" in control) return { exitCode: 3, lines: ["cannot read control file"] };
+    return formatOutput(parsed.kind, control.outcome, { dryRun: parsed.dryRun });
+  }
+  const expectedTotals = control.expectedTotals;
+
   if (parsed.dryRun) {
     try {
-      const outcome = await runLoader(dryRunApp(), parsed, text);
+      const outcome = await runLoader(dryRunApp(), parsed, text, expectedTotals);
       return formatOutput(parsed.kind, outcome, { dryRun: true });
     } catch (e) {
       if (e instanceof CliUsageError) return { exitCode: 3, lines: [e.message] };
@@ -434,7 +479,7 @@ export async function runLoad(
   try {
     let outcome: LoadOutcome;
     try {
-      outcome = await runLoader(app, parsed, text);
+      outcome = await runLoader(app, parsed, text, expectedTotals);
     } catch (e) {
       if (e instanceof CliUsageError) return { exitCode: 3, lines: [e.message] };
       return { exitCode: 3, lines: ["load failed"] };

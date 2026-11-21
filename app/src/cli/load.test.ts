@@ -62,7 +62,24 @@ describe("parseArgs", () => {
 
   it("rejects unknown kind and unknown option", () => {
     assert.throws(() => parseArgs(["nope", "f.csv", "--tenant", "x"], "cli:t"), /unknown kind/);
-    assert.throws(() => parseArgs(["gl", "f.csv", "--tenant", "x", "--control", "c.csv"], "cli:t"), /unknown option/);
+    assert.throws(() => parseArgs(["gl", "f.csv", "--tenant", "x", "--bogus", "c.csv"], "cli:t"), /unknown option/);
+  });
+
+  it("accepts --control for gl and rejects it for other kinds", () => {
+    const p = parseArgs(
+      ["gl", "balances.csv", "--tenant", TENANT, "--chart", "MAIN", "--as-of", "2026-03-09", "--source", "erp", "--control", "totals.csv"],
+      "cli:test",
+    );
+    assert.equal(p.kind, "gl");
+    assert.equal(p.control, "totals.csv");
+    assert.throws(
+      () => parseArgs(["rates", "r.csv", "--tenant", TENANT, "--control", "totals.csv"], "cli:test"),
+      /--control is only valid for kind gl/,
+    );
+    assert.throws(
+      () => parseArgs(["currencies", "c.csv", "--tenant", TENANT, "--control", "totals.csv"], "cli:test"),
+      /--control is only valid for kind gl/,
+    );
   });
 });
 
@@ -148,6 +165,51 @@ describe("runLoad dry-run", () => {
     assert.equal(result.exitCode, 1);
     assert.match(result.lines[0]!, /INVALID_FILE/);
     assert.ok(result.lines.some((l) => /row 1/.test(l) && /column code/.test(l)));
+  });
+
+  it("invalid --control file exits 1 without printing cell values", async () => {
+    const badSum = "NOT_A_NUMBER_XYZ";
+    const files = new Map<string, string>([
+      ["balances.csv", "entity_code,account_number,currency,balance,debit,credit,as_of\nUS1,1000,USD,10.00,,,2026-03-09\n"],
+      ["totals.csv", `currency,row_count,sum\nUSD,1,${badSum}\n`],
+    ]);
+    const result = await runLoad(
+      ["gl", "balances.csv", "--tenant", TENANT, "--chart", "MAIN", "--as-of", "2026-03-09", "--source", "erp", "--control", "totals.csv", "--dry-run"],
+      {},
+      {
+        defaultBy: "cli:test",
+        readFile: async (path) => {
+          const text = files.get(path);
+          if (text === undefined) throw new Error(`missing ${path}`);
+          return text;
+        },
+      },
+    );
+    assert.equal(result.exitCode, 1);
+    assert.match(result.lines[0]!, /INVALID_FILE/);
+    assert.ok(result.lines.some((l) => /row 1/.test(l) && /column sum/.test(l)));
+    assert.ok(result.lines.every((l) => !l.includes(badSum)));
+  });
+
+  it("gl dry-run with matching --control exits 0", async () => {
+    const files = new Map<string, string>([
+      ["balances.csv", "entity_code,account_number,currency,balance,debit,credit,as_of\nUS1,1000,USD,10.00,,,2026-03-09\n"],
+      ["totals.csv", "currency,row_count,sum\nUSD,1,10.00\n"],
+    ]);
+    const result = await runLoad(
+      ["gl", "balances.csv", "--tenant", TENANT, "--chart", "MAIN", "--as-of", "2026-03-09", "--source", "erp", "--control", "totals.csv", "--dry-run"],
+      {},
+      {
+        defaultBy: "cli:test",
+        readFile: async (path) => {
+          const text = files.get(path);
+          if (text === undefined) throw new Error(`missing ${path}`);
+          return text;
+        },
+      },
+    );
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.lines[0], "gl: OK (dry-run)");
   });
 
   it("missing DATABASE_URL without dry-run exits 3", async () => {

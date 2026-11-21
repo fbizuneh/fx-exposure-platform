@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { asOfDate, tenantId } from "@shared/kernel";
+import { BatchRefused } from "../../../services/data-source/src/index.ts";
 import {
   loadAccountsFile,
   loadCalendarsFile,
@@ -12,6 +13,7 @@ import {
   loadGlFile,
   loadHierarchyFile,
   loadRatesFile,
+  parseControlFile,
 } from "./index.ts";
 import type { App } from "../compose.ts";
 
@@ -30,19 +32,27 @@ function unusedApp(): App {
 }
 
 /** App that records whether Data Source / FX Trade commands were reached. */
-function trackingApp(): { app: App; called: { gl: boolean; executed: boolean } } {
+function trackingApp(
+  submitGlBatch?: (batch: unknown) => Promise<unknown>,
+): { app: App; called: { gl: boolean; executed: boolean }; lastGlBatch: unknown } {
   const called = { gl: false, executed: false };
+  const state: { lastGlBatch: unknown } = { lastGlBatch: undefined };
   const boom = () => {
     throw new Error("service must not be called when the file is invalid");
   };
   return {
     called,
+    get lastGlBatch() {
+      return state.lastGlBatch;
+    },
     app: {
       masterData: { commands: new Proxy({}, { get: () => boom }) },
       dataSource: {
         commands: {
-          submitGlBatch: async () => {
+          submitGlBatch: async (batch: unknown) => {
             called.gl = true;
+            state.lastGlBatch = batch;
+            if (submitGlBatch) return submitGlBatch(batch);
             return { status: "APPLIED", batchId: "b", ingestion: "COMPLETE", received: 1, included: 1, excluded: 0, blocked: 0 };
           },
         },
@@ -192,5 +202,94 @@ describe("loaders accept blank GL as_of and call the service", () => {
     const out = await loadGlFile(app, { tenantId: tenant, text, chartCode: "MAIN", asOf, sourceSystem: "erp", by });
     assert.equal(out.kind, "DONE");
     assert.equal(called.gl, true);
+  });
+});
+
+describe("parseControlFile", () => {
+  it("parses a valid control CSV into expectedTotals", () => {
+    const out = parseControlFile("currency,row_count,sum\nUSD,2,140.50\nEUR,1,5\n");
+    assert.deepEqual(out.problems, []);
+    assert.deepEqual(out.rows, [
+      { currency: "USD", rowCount: 2, sum: "140.50" },
+      { currency: "EUR", rowCount: 1, sum: "5" },
+    ]);
+  });
+
+  it("allows an empty currency for the no-currency bucket", () => {
+    const out = parseControlFile("currency,row_count,sum\n,1,0\n");
+    assert.deepEqual(out.problems, []);
+    assert.deepEqual(out.rows, [{ currency: "", rowCount: 1, sum: "0" }]);
+  });
+
+  it("names row and column for bad values without echoing cell contents", () => {
+    const marker = "BAD_SUM_MARKER_9f3a";
+    const out = parseControlFile(`currency,row_count,sum\nUSD,2,${marker}\n`);
+    assert.equal(out.rows.length, 0);
+    assert.ok(out.problems.some((p) => p.rowNo === 1 && p.column === "sum" && /decimal/.test(p.message)));
+    assert.ok(out.problems.every((p) => !p.message.includes(marker)));
+  });
+
+  it("refuses unknown, duplicate and missing columns", () => {
+    const unknown = parseControlFile("currency,row_count,sum,extra\nUSD,1,1\n");
+    assert.ok(unknown.problems.some((p) => p.column === "extra" && p.rowNo === null));
+    const missing = parseControlFile("currency,sum\nUSD,1\n");
+    assert.ok(missing.problems.some((p) => p.column === "row_count" && /missing/.test(p.message)));
+    const dupCurrency = parseControlFile("currency,row_count,sum\nUSD,1,1\nUSD,2,2\n");
+    assert.ok(dupCurrency.problems.some((p) => p.rowNo === 2 && p.column === "currency" && /more than once/.test(p.message)));
+  });
+});
+
+describe("loadGlFile expectedTotals (D7)", () => {
+  const glText = "entity_code,account_number,currency,balance,debit,credit,as_of\nUS1,1000,USD,10.00,,,2026-03-09\n";
+
+  it("omitting expectedTotals leaves the batch field unset", async () => {
+    const tracked = trackingApp();
+    const out = await loadGlFile(tracked.app, {
+      tenantId: tenant,
+      text: glText,
+      chartCode: "MAIN",
+      asOf,
+      sourceSystem: "erp",
+      by,
+    });
+    assert.equal(out.kind, "DONE");
+    assert.equal(tracked.called.gl, true);
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(tracked.lastGlBatch as object, "expectedTotals"),
+      false,
+    );
+  });
+
+  it("matching expectedTotals are passed through and yield DONE", async () => {
+    const expectedTotals = [{ currency: "USD", rowCount: 1, sum: "10.00" }];
+    const tracked = trackingApp();
+    const out = await loadGlFile(tracked.app, {
+      tenantId: tenant,
+      text: glText,
+      chartCode: "MAIN",
+      asOf,
+      sourceSystem: "erp",
+      by,
+      expectedTotals,
+    });
+    assert.equal(out.kind, "DONE");
+    assert.deepEqual((tracked.lastGlBatch as { expectedTotals: unknown }).expectedTotals, expectedTotals);
+  });
+
+  it("BatchRefused from a totals mismatch is REFUSED", async () => {
+    const tracked = trackingApp(async () => {
+      throw new BatchRefused("batch-1", "control totals do not match: USD: received 1 rows / 10.0000, expected 1 rows / 99");
+    });
+    const out = await loadGlFile(tracked.app, {
+      tenantId: tenant,
+      text: glText,
+      chartCode: "MAIN",
+      asOf,
+      sourceSystem: "erp",
+      by,
+      expectedTotals: [{ currency: "USD", rowCount: 1, sum: "99" }],
+    });
+    assert.equal(out.kind, "REFUSED");
+    if (out.kind === "REFUSED") assert.match(out.message, /control totals do not match/);
   });
 });
