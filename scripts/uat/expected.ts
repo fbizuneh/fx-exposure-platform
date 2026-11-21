@@ -184,13 +184,14 @@ export async function writeExpected(generated = "packs/uat/generated", configPat
       else {
         const rules = effectiveRules(row, program, account, parents, row.as_of!);
         const exclusion = rules.find((rule) => rule.kind === "EXCLUDE");
-        reason = exclusion ? exclusionReason(exclusion) : rules.some((rule) => rule.kind === "INCLUDE") ? "INCLUDED" : "UNMAPPED";
+        reason = exclusion ? exclusionReason(exclusion) : rules.some((rule) => rule.kind === "INCLUDE") ? "INCLUDED" : "GL_PROGRAM_UNMATCHED";
       }
       (classified[reason] ??= []).push(row);
     }
     const pick = (reasons: string[]) => reasons.flatMap((reason) => classified[reason] ?? []);
-    const excludedReasons = Object.keys(classified).filter((reason) => !["INCLUDED", "GL_ENTITY_UNKNOWN", "GL_ACCOUNT_UNKNOWN"].includes(reason)).sort();
-    byProgram[program.id] = { included: totals(pick(["INCLUDED"])), excluded: totals(pick(excludedReasons)), blocked: totals(pick(["GL_ENTITY_UNKNOWN", "GL_ACCOUNT_UNKNOWN"])), byReason: Object.fromEntries(excludedReasons.concat(["GL_ENTITY_UNKNOWN", "GL_ACCOUNT_UNKNOWN"]).map((reason) => [reason, totals(pick([reason]))])) };
+    const blockedReasons = ["GL_ENTITY_UNKNOWN", "GL_ACCOUNT_UNKNOWN", "GL_PROGRAM_UNMATCHED"];
+    const excludedReasons = Object.keys(classified).filter((reason) => reason !== "INCLUDED" && !blockedReasons.includes(reason)).sort();
+    byProgram[program.id] = { included: totals(pick(["INCLUDED"])), excluded: totals(pick(excludedReasons)), blocked: totals(pick(blockedReasons)), byReason: Object.fromEntries(excludedReasons.concat(blockedReasons).map((reason) => [reason, totals(pick([reason]))])) };
   }
   await writeFile(join(out, "gl-dirty-expected.json"), `${JSON.stringify({ loadStatus: "APPLIED", storedRows: dirty.length, batchControlTotals: totals(dirty), byProgram }, null, 2)}\n`, "utf8");
   return summary;
