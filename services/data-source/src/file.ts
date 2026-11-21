@@ -40,9 +40,55 @@ function fitsMoney(v: string): boolean {
   return whole.replace(/^0+(?=\d)/, "").length <= 20 && frac.replace(/0+$/, "").length <= 4;
 }
 
+/**
+ * Find an unclosed quote before trusting splitCsv's decoded cells.
+ * rowNo is null on the header; data rows count from 1. Escaped quotes ("") are fine.
+ */
+function unclosedQuote(text: string): { rowNo: number | null; columnIndex: number; header: string[] | null } | null {
+  let header: string[] | null = null;
+  let row: string[] = [];
+  let cellText = "";
+  let quoted = false;
+  let completed = 0;
+  const t = text.replace(/^\uFEFF/, "");
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i]!;
+    if (quoted) {
+      if (c === '"' && t[i + 1] === '"') {
+        cellText += '"';
+        i++;
+      } else if (c === '"') quoted = false;
+      else cellText += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ",") {
+      row.push(cellText);
+      cellText = "";
+    } else if (c === "\n" || c === "\r") {
+      if (c === "\r" && t[i + 1] === "\n") i++;
+      row.push(cellText);
+      cellText = "";
+      if (row.some((x) => x.trim() !== "")) {
+        if (header === null) header = row;
+        completed++;
+      }
+      row = [];
+    } else cellText += c;
+  }
+  row.push(cellText);
+  if (!quoted) return null;
+  return { rowNo: header === null ? null : completed, columnIndex: row.length - 1, header };
+}
+
 export function parseGlFile(text: string): ParseResult<GlBalanceRow> {
-  const [header, ...body] = splitCsv(text);
   const problems: FileProblem[] = [];
+  const badQuote = unclosedQuote(text);
+  if (badQuote) {
+    const raw = badQuote.header?.[badQuote.columnIndex];
+    const column = raw !== undefined && raw.trim() !== "" ? normalizeHeader(raw) : null;
+    return { rows: [], problems: [{ rowNo: badQuote.rowNo, column, message: "unclosed quote" }] };
+  }
+
+  const [header, ...body] = splitCsv(text);
   const index = new Map<string, number>();
   const dimensions: string[] = [];
 
@@ -79,6 +125,7 @@ export function parseGlFile(text: string): ParseResult<GlBalanceRow> {
 
   if (problems.length > 0) return { rows: [], problems };
 
+  const width = header.length;
   const get = (cells: string[], name: string): string | null => {
     const i = index.get(name);
     if (i === undefined) return null;
@@ -88,6 +135,14 @@ export function parseGlFile(text: string): ParseResult<GlBalanceRow> {
   const rows: GlBalanceRow[] = [];
   body.forEach((cells, i) => {
     const rowNo = i + 1;
+    if (cells.length !== width) {
+      problems.push({
+        rowNo,
+        column: null,
+        message: `row has ${cells.length} columns; header has ${width}`,
+      });
+      return;
+    }
     const entityCode = get(cells, "entity_code");
     const accountNumber = get(cells, "account_number");
     const currency = get(cells, "currency");

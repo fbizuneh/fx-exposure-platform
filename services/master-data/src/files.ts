@@ -52,6 +52,72 @@ const realDate = (v: string): boolean => {
 
 const has = <T extends string>(list: readonly T[], v: string): v is T => (list as readonly string[]).includes(v);
 
+/**
+ * Find an unclosed quote before trusting splitCsv's decoded cells.
+ * rowNo is null on the header; data rows count from 1. Escaped quotes ("") are fine.
+ */
+function unclosedQuote(text: string): { rowNo: number | null; columnIndex: number; header: string[] | null } | null {
+  let header: string[] | null = null;
+  let row: string[] = [];
+  let cellText = "";
+  let quoted = false;
+  let completed = 0;
+  const t = text.replace(/^\uFEFF/, "");
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i]!;
+    if (quoted) {
+      if (c === '"' && t[i + 1] === '"') {
+        cellText += '"';
+        i++;
+      } else if (c === '"') quoted = false;
+      else cellText += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ",") {
+      row.push(cellText);
+      cellText = "";
+    } else if (c === "\n" || c === "\r") {
+      if (c === "\r" && t[i + 1] === "\n") i++;
+      row.push(cellText);
+      cellText = "";
+      if (row.some((x) => x.trim() !== "")) {
+        if (header === null) header = row;
+        completed++;
+      }
+      row = [];
+    } else cellText += c;
+  }
+  row.push(cellText);
+  if (!quoted) return null;
+  const columnIndex = row.length - 1;
+  const rowNo = header === null ? null : completed;
+  return { rowNo, columnIndex, header };
+}
+
+function openCsv(text: string): { header: string[] | undefined; body: string[][]; problems: FileProblem[] } {
+  const bad = unclosedQuote(text);
+  if (bad) {
+    const raw = bad.header?.[bad.columnIndex];
+    const column = raw !== undefined && raw.trim() !== "" ? normalizeHeader(raw) : null;
+    return {
+      header: undefined,
+      body: [],
+      problems: [{ rowNo: bad.rowNo, column, message: "unclosed quote" }],
+    };
+  }
+  const [header, ...body] = splitCsv(text);
+  return { header, body, problems: [] };
+}
+
+function assertWidth(problems: FileProblem[], rowNo: number, cells: string[], width: number): boolean {
+  if (cells.length === width) return true;
+  problems.push({
+    rowNo,
+    column: null,
+    message: `row has ${cells.length} columns; header has ${width}`,
+  });
+  return false;
+}
+
 interface ColumnMap {
   readonly index: Map<string, number>;
   readonly problems: FileProblem[];
@@ -169,13 +235,17 @@ const ENTITY_REQUIRED = [
 const ENTITY_OPTIONAL = ["parent_code", "country_code", "functional_currency"] as const;
 
 export function parseEntitiesFile(text: string): ParseResult<EntityRow> {
-  const [header, ...body] = splitCsv(text);
+  const opened = openCsv(text);
+  if (opened.problems.length > 0) return { rows: [], problems: opened.problems };
+  const { header, body } = opened;
   const { index, problems } = mapColumns(header, ENTITY_REQUIRED, ENTITY_OPTIONAL);
   const rows: EntityRow[] = [];
   if (problems.length > 0) return { rows, problems };
+  const width = header!.length;
 
   body.forEach((cells, i) => {
     const rowNo = i + 1;
+    if (!assertWidth(problems, rowNo, cells, width)) return;
     const code = requireText(problems, rowNo, "code", get(cells, index, "code"));
     const name = requireText(problems, rowNo, "name", get(cells, index, "name"));
     const type = parseEnum(problems, rowNo, "type", get(cells, index, "type"), ENTITY_TYPES);
@@ -220,13 +290,17 @@ const HIERARCHY_REQUIRED = ["chart_code", "code", "name", "classification"] as c
 const HIERARCHY_OPTIONAL = ["parent_code"] as const;
 
 export function parseHierarchyFile(text: string): ParseResult<HierarchyNodeRow> {
-  const [header, ...body] = splitCsv(text);
+  const opened = openCsv(text);
+  if (opened.problems.length > 0) return { rows: [], problems: opened.problems };
+  const { header, body } = opened;
   const { index, problems } = mapColumns(header, HIERARCHY_REQUIRED, HIERARCHY_OPTIONAL);
   const rows: HierarchyNodeRow[] = [];
   if (problems.length > 0) return { rows, problems };
+  const width = header!.length;
 
   body.forEach((cells, i) => {
     const rowNo = i + 1;
+    if (!assertWidth(problems, rowNo, cells, width)) return;
     const chartCode = requireText(problems, rowNo, "chart_code", get(cells, index, "chart_code"));
     const code = requireText(problems, rowNo, "code", get(cells, index, "code"));
     const name = requireText(problems, rowNo, "name", get(cells, index, "name"));
@@ -251,13 +325,17 @@ const ACCOUNT_REQUIRED = [
 const ACCOUNT_OPTIONAL = ["hierarchy_node_code"] as const;
 
 export function parseAccountsFile(text: string): ParseResult<AccountRow> {
-  const [header, ...body] = splitCsv(text);
+  const opened = openCsv(text);
+  if (opened.problems.length > 0) return { rows: [], problems: opened.problems };
+  const { header, body } = opened;
   const { index, problems } = mapColumns(header, ACCOUNT_REQUIRED, ACCOUNT_OPTIONAL);
   const rows: AccountRow[] = [];
   if (problems.length > 0) return { rows, problems };
+  const width = header!.length;
 
   body.forEach((cells, i) => {
     const rowNo = i + 1;
+    if (!assertWidth(problems, rowNo, cells, width)) return;
     const chartCode = requireText(problems, rowNo, "chart_code", get(cells, index, "chart_code"));
     const accountNumber = requireText(problems, rowNo, "account_number", get(cells, index, "account_number"));
     const name = requireText(problems, rowNo, "name", get(cells, index, "name"));
@@ -291,13 +369,17 @@ export function parseAccountsFile(text: string): ParseResult<AccountRow> {
 }
 
 export function parseCurrenciesFile(text: string): ParseResult<CurrencyRow> {
-  const [header, ...body] = splitCsv(text);
+  const opened = openCsv(text);
+  if (opened.problems.length > 0) return { rows: [], problems: opened.problems };
+  const { header, body } = opened;
   const { index, problems } = mapColumns(header, ["code", "is_ndf"]);
   const rows: CurrencyRow[] = [];
   if (problems.length > 0) return { rows, problems };
+  const width = header!.length;
 
   body.forEach((cells, i) => {
     const rowNo = i + 1;
+    if (!assertWidth(problems, rowNo, cells, width)) return;
     const code = parseCurrency(problems, rowNo, "code", get(cells, index, "code"), true);
     const isNdf = parseBool(problems, rowNo, "is_ndf", get(cells, index, "is_ndf"), true);
     if (code !== null && isNdf !== null) rows.push({ code, isNdf });
@@ -309,9 +391,12 @@ const CALENDAR_REQUIRED = ["currency_code", "weekend_days", "covered_through"] a
 const CALENDAR_OPTIONAL = ["holiday_date", "holiday_name"] as const;
 
 export function parseCalendarsFile(text: string): ParseResult<CalendarRow> {
-  const [header, ...body] = splitCsv(text);
+  const opened = openCsv(text);
+  if (opened.problems.length > 0) return { rows: [], problems: opened.problems };
+  const { header, body } = opened;
   const { index, problems } = mapColumns(header, CALENDAR_REQUIRED, CALENDAR_OPTIONAL);
   if (problems.length > 0) return { rows: [], problems };
+  const width = header!.length;
 
   type Acc = {
     weekendDays: Weekday[];
@@ -323,6 +408,7 @@ export function parseCalendarsFile(text: string): ParseResult<CalendarRow> {
 
   body.forEach((cells, i) => {
     const rowNo = i + 1;
+    if (!assertWidth(problems, rowNo, cells, width)) return;
     const currencyCode = parseCurrency(problems, rowNo, "currency_code", get(cells, index, "currency_code"), true);
     const weekendRaw = get(cells, index, "weekend_days");
     const coveredThrough = parseDate(problems, rowNo, "covered_through", get(cells, index, "covered_through"), true);
@@ -404,13 +490,17 @@ export function parseCalendarsFile(text: string): ParseResult<CalendarRow> {
 }
 
 export function parseExposureCurrenciesFile(text: string): ParseResult<PairExposureCurrencyRow> {
-  const [header, ...body] = splitCsv(text);
+  const opened = openCsv(text);
+  if (opened.problems.length > 0) return { rows: [], problems: opened.problems };
+  const { header, body } = opened;
   const { index, problems } = mapColumns(header, ["pair", "exposure_currency"]);
   const rows: PairExposureCurrencyRow[] = [];
   if (problems.length > 0) return { rows, problems };
+  const width = header!.length;
 
   body.forEach((cells, i) => {
     const rowNo = i + 1;
+    if (!assertWidth(problems, rowNo, cells, width)) return;
     const pair = requireText(problems, rowNo, "pair", get(cells, index, "pair"));
     const exposureCurrency = parseCurrency(problems, rowNo, "exposure_currency", get(cells, index, "exposure_currency"), true);
     if (pair === null || exposureCurrency === null) return;

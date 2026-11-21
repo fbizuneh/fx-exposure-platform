@@ -101,7 +101,7 @@ test("parseEntitiesFile: each bad value kind", () => {
       ",Acme,GROUP,,,,false,false,false",
       "G,,GROUP,,,,false,false,false",
       "G,Acme,NOPE,,,,false,false,false",
-      "G,Acme,GROUP,,usa,,,false,false,false",
+      "G,Acme,GROUP,,usa,,false,false,false",
       "G,Acme,GROUP,,,usd,false,false,false",
       "G,Acme,GROUP,,,,yes,false,false",
     ].join("\n"),
@@ -194,4 +194,24 @@ test("parseExposureCurrenciesFile: valid and shape problems", () => {
   assert.ok(notInPair.problems.some((p) => p.column === "exposure_currency"));
   const unknown = parseExposureCurrenciesFile("pair,exposure_currency,note\nEUR-USD,USD,x\n");
   assert.ok(unknown.problems.some((p) => p.rowNo === null && p.column === "note"));
+});
+
+test("master-data parsers: unclosed quote and row width", () => {
+  const unclosed = parseCurrenciesFile('code,is_ndf\n"USD,false\n');
+  assert.equal(unclosed.rows.length, 0);
+  assert.ok(unclosed.problems.some((p) => p.rowNo === 1 && p.column === "code" && /unclosed quote/.test(p.message)));
+
+  const escaped = parseEntitiesFile(
+    `code,name,type,parent_code,country_code,functional_currency,is_legal_entity,is_treasury_entity,is_hedge_execution_entity\nG,"Acme ""Group""",GROUP,,,,false,false,false\n`,
+  );
+  assert.equal(escaped.problems.length, 0);
+  assert.equal(escaped.rows[0]!.name, 'Acme "Group"');
+
+  const short = parseCurrenciesFile("code,is_ndf\nUSD\n");
+  assert.equal(short.rows.length, 0);
+  assert.ok(short.problems.some((p) => p.rowNo === 1 && p.column === null && /columns/.test(p.message)));
+
+  const long = parseCurrenciesFile("code,is_ndf\nUSD,false,extra\n");
+  assert.equal(long.rows.length, 0);
+  assert.ok(long.problems.some((p) => p.rowNo === 1 && /columns/.test(p.message)));
 });

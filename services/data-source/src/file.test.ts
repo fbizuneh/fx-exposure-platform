@@ -77,6 +77,37 @@ test("parseGlFile: both balance and debit/credit, neither, and bad values", () =
   assert.ok(missingEntity.problems.some((p) => p.column === "entity_code" && p.rowNo === 1));
 });
 
+test("parseGlFile: unclosed quote is a problem; valid quotes and escapes still work", () => {
+  const bad = parseGlFile(`${HEADER}\nUS1,1000,USD,"100,,,2026-03-09,\n`);
+  assert.equal(bad.rows.length, 0);
+  assert.ok(bad.problems.some((p) => p.rowNo === 1 && p.column === "balance" && /unclosed quote/.test(p.message)));
+
+  // Without a closing quote at EOF the decoded cell would look like a valid amount.
+  const eof = parseGlFile(`${HEADER}\nUS1,1000,USD,"100`);
+  assert.equal(eof.rows.length, 0);
+  assert.ok(eof.problems.some((p) => p.rowNo === 1 && p.column === "balance" && /unclosed quote/.test(p.message)));
+
+  const ok = parseGlFile(`${HEADER}\nUS1,1000,USD,"100.00",,,2026-03-09,"CC ""A"""\n`);
+  assert.equal(ok.problems.length, 0);
+  assert.equal(ok.rows[0]!.balance, "100.00");
+  assert.equal(ok.rows[0]!.dimensions.cost_center, 'CC "A"');
+});
+
+test("parseGlFile: row width must match the header", () => {
+  const short = parseGlFile(`${HEADER}\nUS1,1000,USD,10\n`);
+  assert.equal(short.rows.length, 0);
+  assert.ok(short.problems.some((p) => p.rowNo === 1 && p.column === null && /columns/.test(p.message)));
+
+  const long = parseGlFile(`${HEADER}\nUS1,1000,USD,10,,,2026-03-09,CC-1,EXTRA\n`);
+  assert.equal(long.rows.length, 0);
+  assert.ok(long.problems.some((p) => p.rowNo === 1 && /columns/.test(p.message)));
+
+  // Named dimension columns in the header are part of the width; empty is fine.
+  const dims = parseGlFile(`${HEADER}\nUS1,1000,USD,10,,,2026-03-09,\n`);
+  assert.equal(dims.problems.length, 0);
+  assert.deepEqual(dims.rows[0]!.dimensions, {});
+});
+
 test("parseGlFile: 20,000 rows parse in under 2 seconds", () => {
   const lines = [HEADER];
   for (let i = 0; i < 20_000; i++) {

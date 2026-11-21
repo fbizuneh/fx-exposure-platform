@@ -21,7 +21,7 @@ const TENOR = /^[1-9][0-9]{0,2}[DWMY]$/;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const POSITIVE = /^(?:\d+(?:\.\d*)?|\.\d+)$/;
 const SIGNED = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
-const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
+const TIMESTAMP = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z$/;
 
 const normalizeHeader = (h: string): string => h.trim().toLowerCase().replace(/[\s-]+/g, "_");
 
@@ -36,6 +36,55 @@ const realDate = (v: string): boolean => {
   const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
   return d.getUTCFullYear() === Number(m[1]) && d.getUTCMonth() === Number(m[2]) - 1 && d.getUTCDate() === Number(m[3]);
 };
+
+/** Calendar date and clock must be real; Date.parse alone would accept 2026-02-30 as March 2. */
+function realTimestamp(v: string): boolean {
+  const m = TIMESTAMP.exec(v);
+  if (!m || !realDate(m[1]!)) return false;
+  const hour = Number(m[2]);
+  const minute = Number(m[3]);
+  const second = Number(m[4]);
+  return hour <= 23 && minute <= 59 && second <= 59;
+}
+
+/**
+ * Find an unclosed quote before trusting splitCsv's decoded cells.
+ * rowNo is null on the header; data rows count from 1. Escaped quotes ("") are fine.
+ */
+function unclosedQuote(text: string): { rowNo: number | null; columnIndex: number; header: string[] | null } | null {
+  let header: string[] | null = null;
+  let row: string[] = [];
+  let cellText = "";
+  let quoted = false;
+  let completed = 0;
+  const t = text.replace(/^\uFEFF/, "");
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i]!;
+    if (quoted) {
+      if (c === '"' && t[i + 1] === '"') {
+        cellText += '"';
+        i++;
+      } else if (c === '"') quoted = false;
+      else cellText += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ",") {
+      row.push(cellText);
+      cellText = "";
+    } else if (c === "\n" || c === "\r") {
+      if (c === "\r" && t[i + 1] === "\n") i++;
+      row.push(cellText);
+      cellText = "";
+      if (row.some((x) => x.trim() !== "")) {
+        if (header === null) header = row;
+        completed++;
+      }
+      row = [];
+    } else cellText += c;
+  }
+  row.push(cellText);
+  if (!quoted) return null;
+  return { rowNo: header === null ? null : completed, columnIndex: row.length - 1, header };
+}
 
 /** Fits NUMERIC(20,10): at most 10 places and 10 digits before the point. */
 function fitsRate(v: string): boolean {
@@ -94,10 +143,18 @@ function parsePositive(
 }
 
 export function parseRatesFile(text: string): ParseResult<RateRow> {
+  const badQuote = unclosedQuote(text);
+  if (badQuote) {
+    const raw = badQuote.header?.[badQuote.columnIndex];
+    const column = raw !== undefined && raw.trim() !== "" ? normalizeHeader(raw) : null;
+    return { rows: [], problems: [{ rowNo: badQuote.rowNo, column, message: "unclosed quote" }] };
+  }
+
   const [header, ...body] = splitCsv(text);
   const { index, problems } = mapColumns(header);
   const rows: RateRow[] = [];
   if (problems.length > 0) return { rows, problems };
+  const width = header!.length;
 
   const get = (cells: string[], name: string): string | null => {
     const i = index.get(name);
@@ -107,6 +164,14 @@ export function parseRatesFile(text: string): ParseResult<RateRow> {
 
   body.forEach((cells, i) => {
     const rowNo = i + 1;
+    if (cells.length !== width) {
+      problems.push({
+        rowNo,
+        column: null,
+        message: `row has ${cells.length} columns; header has ${width}`,
+      });
+      return;
+    }
     const base = get(cells, "base");
     const quote = get(cells, "quote");
     const typeRaw = get(cells, "type");
@@ -177,7 +242,7 @@ export function parseRatesFile(text: string): ParseResult<RateRow> {
 
     let observedAtOk: string | null = null;
     if (observedAt === null) problems.push({ rowNo, column: "observed_at", message: "observed_at is required" });
-    else if (!TIMESTAMP.test(observedAt) || Number.isNaN(Date.parse(observedAt))) {
+    else if (!realTimestamp(observedAt)) {
       problems.push({ rowNo, column: "observed_at", message: "observed_at must be an ISO 8601 timestamp with Z" });
     } else observedAtOk = observedAt;
 

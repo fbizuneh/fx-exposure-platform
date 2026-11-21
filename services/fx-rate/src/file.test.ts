@@ -88,6 +88,33 @@ test("parseRatesFile: each bad value kind", () => {
   assert.equal(r.rows.length, 0);
 });
 
+test("parseRatesFile: unclosed quote and row width", () => {
+  const header = "base,quote,type,tenor,value_date,all_in,spot,forward_points,bid,mid,ask,observed_at";
+  const badQuote = parseRatesFile(`${header}\nEUR,USD,SPOT,SPOT,,"1.0,,,,,,2026-03-09T16:30:00Z\n`);
+  assert.equal(badQuote.rows.length, 0);
+  assert.ok(badQuote.problems.some((p) => p.rowNo === 1 && p.column === "all_in" && /unclosed quote/.test(p.message)));
+
+  const short = parseRatesFile(`${header}\nEUR,USD,SPOT,SPOT,,1.0\n`);
+  assert.equal(short.rows.length, 0);
+  assert.ok(short.problems.some((p) => p.rowNo === 1 && p.column === null && /columns/.test(p.message)));
+});
+
+test("parseRatesFile: impossible observation timestamps are refused", () => {
+  const header = "base,quote,type,tenor,value_date,all_in,spot,forward_points,bid,mid,ask,observed_at";
+  const day = parseRatesFile(`${header}\nEUR,USD,SPOT,SPOT,,1.0,,,,,,2026-02-30T12:00:00Z\n`);
+  assert.equal(day.rows.length, 0);
+  assert.ok(day.problems.some((p) => p.rowNo === 1 && p.column === "observed_at"));
+
+  const hour = parseRatesFile(`${header}\nEUR,USD,SPOT,SPOT,,1.0,,,,,,2026-03-09T25:00:00Z\n`);
+  assert.equal(hour.rows.length, 0);
+  assert.ok(hour.problems.some((p) => p.rowNo === 1 && p.column === "observed_at"));
+
+  // Date.parse alone would accept Feb 30; a real calendar day still passes.
+  const ok = parseRatesFile(`${header}\nEUR,USD,SPOT,SPOT,,1.0,,,,,,2026-03-09T16:30:00.123Z\n`);
+  assert.equal(ok.problems.length, 0);
+  assert.equal(ok.rows[0]!.observedAt, "2026-03-09T16:30:00.123Z");
+});
+
 test("parseRatesFile: 20,000 rows parse in under 2 seconds", () => {
   const lines = ["base,quote,type,tenor,value_date,all_in,spot,forward_points,bid,mid,ask,observed_at"];
   for (let i = 0; i < 20_000; i++) {
