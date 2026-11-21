@@ -33,4 +33,4 @@ The one deployable. It wires the services together, delivers events between them
 Two instances with the timers on (no leader election). Use `TIMER_ENABLED=false` for any extra instance.
 
 ## Tests
-`end-to-end.db.test.ts` runs a cycle through the real services. `runtime.db.test.ts` tests start-up, the routes, both loops and shutdown. `volume.db.test.ts` (set `VOLUME_TEST=1`) runs 20,000 rows over 50 entities and 40 currencies and prints timings. Database tests need `TEST_DATABASE_URL` (a name ending in `_test`).
+`end-to-end.db.test.ts` runs a cycle through the real services. `runtime.db.test.ts` tests start-up, the routes, both loops and shutdown. `volume.db.test.ts` (set `VOLUME_TEST=1`) runs 20,000 rows over 50 entities and 40 currencies and prints timings. `loaders/loaders.db.test.ts` (D6) runs each loader through `composeApp` (valid / DUPLICATE / INVALID_FILE / REFUSED), CLI child-process exit codes, a 20,000-row GL load under 60 seconds, and E3-equivalent malformed/dirty GL fixtures. Database tests need `TEST_DATABASE_URL` (a name ending in `_test`).

@@ -3,6 +3,9 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import pg from "pg";
 import { asOfDate, programId, type TenantId } from "@shared/kernel";
 import type { Actor } from "@services/identity/contract";
@@ -15,6 +18,8 @@ import { connect as connectEm, createExposureManagement } from "../../services/e
 import { readPolicy } from "../../services/hedge-recommendation/src/queries.ts";
 import { parseExecutedFile } from "../../services/fx-trade/src/index.ts";
 import { RETRY_POLICY, deliveryProblems, drain, retryStuckEvent, startDueCycles } from "./dispatch.ts";
+import { simulate } from "../../scripts/uat/simulate.ts";
+import { generate } from "../../scripts/uat/generate.ts";
 
 const url = process.env.TEST_DATABASE_URL;
 const enabled = url !== undefined && /\/[^/?]*_test(\?|$)/.test(url);
@@ -187,6 +192,36 @@ e2e("approval releases a recommended pre-trade; a simulated platform returns the
   assert.deepEqual([eur.gross.exposureAmount, eur.net.exposureAmount], ["1000.00", "0.00"]);
 });
 
+e2e("two released single-leg forwards use the generated near and far quotes and both match on import", async () => {
+  const { t, admin, cycle } = await finishedCycle();
+  const made = await app.fxTrade.commands.createPreTrades({
+    tenantId: t, cycleId: cycle, by: "recommendation",
+    items: [
+      { recommendationId: "fixture-close", tradingEntityCode: "US01", instrument: "FORWARD", legs: [{ role: "SINGLE", direction: "BUY", dealCurrency: "EUR", dealAmount: "100", settlementCurrency: "USD", settlementAmount: null, valueDate: "2026-11-27", fixingDate: null }] },
+      { recommendationId: "fixture-roll", tradingEntityCode: "US01", instrument: "FORWARD", legs: [{ role: "SINGLE", direction: "SELL", dealCurrency: "EUR", dealAmount: "100", settlementCurrency: "USD", settlementAmount: null, valueDate: "2027-02-23", fixingDate: null }] },
+    ],
+  });
+  await app.exposureManagement.commands.approveCycle({ tenantId: t, cycleId: cycle, actor: admin });
+  await drain(app);
+  const exported = await app.fxTrade.commands.exportPreTrades({ tenantId: t, actor: admin });
+  assert.equal(exported.preTradeIds.length, 2);
+  const root = await mkdtemp(join(tmpdir(), "uat-export-forwards-"));
+  try {
+    await generate(20261120, root);
+    const rates = await readFile(join(root, "rates/rates-2026-11-20.csv"), "utf8");
+    const executed = parseExecutedFile(simulate({ pretrades: exported.file, rates, tradeDate: "2026-11-20", seed: "20261120", portfolioByProgram: { BS: "DEMO" } }));
+    assert.deepEqual(executed.map((trade) => [trade.instrument, trade.leg, trade.valueDate]).sort((a, b) => String(a[2]).localeCompare(String(b[2]))), [["FORWARD", null, "2026-11-27"], ["FORWARD", null, "2027-02-23"]]);
+    assert.equal(new Set(executed.map((trade) => trade.preTradeReference)).size, 2);
+    const imported = await app.fxTrade.commands.importExecutedTrades({ tenantId: t, rows: executed, by: "simulator" });
+    assert.deepEqual([imported.stored, imported.matched, imported.blocked], [2, 2, 0]);
+    for (const preTrade of made) assert.equal((await app.fxTrade.questions.getPreTrade(t, preTrade.preTradeId))!.status, "EXECUTED");
+    const outstanding = await app.fxTrade.questions.executedTrades(t, { programId: programId("BS"), asOf: asOfDate("2026-11-20") });
+    assert.equal(outstanding.filter((trade) => executed.some((row) => row.tradeId === trade.tradeId)).length, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 /** A tenant whose cycle for the 12th has finished its run, with the recommendations it produced. */
 async function finishedCycle(policy?: object, level = "ENTITY", approve = true, segregation = false, before?: (t: TenantId) => Promise<unknown>, eurUsd = "1.1") {
   clock.now = new Date("2026-11-11T23:00:00Z");
@@ -229,11 +264,9 @@ e2e("a finished run produces recommendations; accepting one makes a draft pre-tr
   const sent = await app.fxTrade.commands.exportPreTrades({ tenantId: t, actor: admin });
   const [h, d] = sent.file.trim().split("\n").map((l) => l.split(","));
   const out = Object.fromEntries(h!.map((k, i) => [k, d![i]!]));
-  const reply = [
-    "trade_id,execution_platform_id,trading_entity,counterparty,trade_date,value_date,deal_currency,deal_amount,settlement_currency,settlement_amount,instrument,buy_sell,hedging_program_id,pre_trade_reference",
-    `SIM-9,SIMFX,${out.trading_entity},Sim Bank,2026-11-12,${out.value_date},${out.deal_currency},${out.deal_amount},${out.settlement_currency},1105.0000,${out.instrument},${out.buy_sell},${out.hedging_program_id},${out.pre_trade_reference}`,
-  ].join("\n");
-  await app.fxTrade.commands.importExecutedTrades({ tenantId: t, rows: parseExecutedFile(reply), by: "simulator" });
+  const reply = simulate({ pretrades: sent.file, rates: `base,quote,type,value_date,all_in\nEUR,USD,FORWARD,${out.value_date},1.1050000000\n`, tradeDate: "2026-11-12", seed: "9", portfolioByProgram: { BS: "DEMO" } });
+  const imported = await app.fxTrade.commands.importExecutedTrades({ tenantId: t, rows: parseExecutedFile(reply), by: "simulator" });
+  assert.deepEqual([imported.stored, imported.matched, imported.blocked], [1, 1, 0]);
   await drain(app);
   assert.equal((await app.hedgeRecommendation.questions.getRecommendation(t, accepted.recommendationId))!.followUp, "EXECUTED");
 
