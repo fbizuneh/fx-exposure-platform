@@ -2,7 +2,7 @@
 
 The CSV layouts the data loaders accept (stream D) and that the UAT pack generates against (stream E). Column order below is the canonical order; headers are matched ignoring case and spaces. One file per kind. Snake_case headers match the row fields in code (release-1 decisions #3, #4, #5, #10).
 
-Batch-level facts (source, as-of date, chart code, business date, mode, program) are **command options, never columns**. A file is a pure table.
+Batch-level facts (source, as-of date, chart code, business date, mode, program) are **command options**. They are not substituted for columns of the file. A file is a pure table. For GL balances only, an optional per-row `as_of` column may repeat the batch date (see that kind).
 
 ## Shared rules
 
@@ -148,7 +148,7 @@ USD-BRL,USD
 
 ## GL balances (`gl.csv`)
 
-Row type: `GlBalanceRow` in Data Source. Load options: `--chart`, `--as-of`, `--source` (**all required**). Chart, as-of and source are never columns.
+Row type: `GlBalanceRow` in Data Source. Load options: `--chart`, `--as-of`, `--source` (**all required**). Chart and source are never columns. **`--as-of` is required and sets the batch date. A GL row’s `as_of` is optional; if supplied, it must match `--as-of`.**
 
 | Column | Type | Required? | Allowed values |
 | --- | --- | --- | --- |
