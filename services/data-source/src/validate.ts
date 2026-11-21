@@ -3,7 +3,9 @@ import { Decimal } from "decimal.js";
 import type { GlBalanceRow } from "./rows.ts";
 
 export const MAX_ROWS = 20_000;
-const CURRENCIES = new Set(Intl.supportedValuesOf("currency"));
+/** Market codes outside ISO 4217 that a GL file may use on purpose (decision 0028). */
+export const NON_ISO_CURRENCIES = ["CNH"] as const;
+const CURRENCIES = new Set<string>([...Intl.supportedValuesOf("currency"), ...NON_ISO_CURRENCIES]);
 /** Signed decimal text (balance). Shared with the GL file parser. */
 export const SIGNED = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 /** Non-negative decimal text (debit/credit). Shared with the GL file parser. */

@@ -28,5 +28,7 @@ Events carry identifiers only.
 ## Files
 `parseGlFile` in `src/file.ts` reads GL CSVs (layouts in `docs/file-layouts.md`) via the local `csv.ts`. Shape only; further columns become dimensions.
 
+Currency codes are the ISO list plus a short set of deliberate exceptions, today `CNH` (decision 0028).
+
 ## Schema
 `data_source`. Its tables are defined by this service's migrations.
