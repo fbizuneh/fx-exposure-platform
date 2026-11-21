@@ -29,5 +29,5 @@ export type { GlBatch, BatchResult } from "./intake.ts";
 export type { ExpectedTotal } from "./control-totals.ts";
 export type { GlBalanceRow, MappingRule, RuleKind, RuleTarget } from "./rows.ts";
 export type { NewRule } from "./rules.ts";
-export { parseGlFile } from "./file.ts";
+export { parseGlFile, parseControlFile } from "./file.ts";
 export type { FileProblem, ParseResult } from "./file.ts";
