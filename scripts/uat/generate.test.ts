@@ -21,7 +21,12 @@ test("one seed produces identical complete UAT files and a manifest that covers 
       malformedProblems: { row: number; column: string; kind: string }[];
       planted: { missing: { date: string; currency: string }; stale: { date: string; currency: string }; outlier: { date: string; currency: string } };
     };
-    assert.equal(manifest.files.length, 291);
+    assert.equal(manifest.files.length, 292);
+    for (const program of ["BS-ENT", "BS-REG"]) {
+      const history = (await readFile(join(first, `executed-history-${program}.csv`), "utf8")).trimEnd().split("\n").slice(1);
+      assert.ok(history.length > 100);
+      assert.ok(history.every((line) => line.split(",")[14] === program));
+    }
     assert.equal(manifest.files.filter((f) => f.file.startsWith("gl/gl-")).length, 20);
     assert.equal(manifest.files.filter((f) => f.file.startsWith("rates/rates-")).length, 262);
     assert.equal(manifest.malformedProblems.length, 40);

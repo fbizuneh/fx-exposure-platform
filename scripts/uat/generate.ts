@@ -191,7 +191,7 @@ export async function generate(seed: number, out: string, configPath = "packs/ua
   for (let i = 20; i < 30; i++) dirty[i + 1]![1] = "8009";
   await save("gl-dirty.csv", dirty);
 
-  const history: string[][] = [EXECUTED_HEADER];
+  const histories = new Map(config.tenants.map((t) => [t.program.id, [EXECUTED_HEADER]]));
   let tradeNo = 0;
   for (const day of rateDays) {
     const rates = spotByDay.get(day)!;
@@ -199,9 +199,9 @@ export async function generate(seed: number, out: string, configPath = "packs/ua
     const amount = new Decimal(100000 + random(900000));
     const settlement = amount.times(rates.get(currency)!);
     const program = config.tenants[tradeNo % config.tenants.length]!.program.id;
-    history.push([`HIST-${String(++tradeNo).padStart(5, "0")}`, "SIMFX", "EX01", "Fictional Meridian Bank", day, addMonths(day, 3), currency, money(amount, currency), "USD", money(settlement, "USD"), "", "FORWARD", tradeNo % 2 === 0 ? "BUY" : "SELL", `DEMO-${program}`, program, "", "SINGLE"]);
+    histories.get(program)!.push([`HIST-${String(++tradeNo).padStart(5, "0")}`, "SIMFX", "EX01", "Fictional Meridian Bank", day, addMonths(day, 3), currency, money(amount, currency), "USD", money(settlement, "USD"), "", "FORWARD", tradeNo % 2 === 0 ? "BUY" : "SELL", `DEMO-${program}`, program, "", "SINGLE"]);
   }
-  await save("executed-history.csv", history);
+  for (const [program, history] of histories) await save(`executed-history-${program}.csv`, history);
 
   files.sort((a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : 0);
   const manifest = { seed, config: relative(process.cwd(), configPath).replaceAll("\\", "/"), dates: { ratesFrom: rateDays[0], ratesThrough: rateDays.at(-1), glFrom: glDays[0], glThrough: glDays.at(-1) }, planted: { missing, stale, outlier, holiday: { date: holiday, currency: "EUR" }, flip: { currency: "EUR", from: glDays[18], to: glDays[19] }, excludedEntity: "LE45" }, malformedProblems, dirtyChanges: { unknownEntity: 10, unknownAccount: 10, excludedAccount: 10 }, files };

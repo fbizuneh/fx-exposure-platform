@@ -2,7 +2,7 @@
 
 Run `npm run uat:generate -- --seed 20261120 --out packs/uat/generated`. The optional `--config` defaults to `packs/uat/config.json`; its `generator` section holds the date range, chart, rate source, initial USD rates, daily volatility in basis points, annual interest assumptions, NDF flags and weekend conventions. The same generated files are loaded into both UAT tenants, one program per tenant. The output manifest records every file's row count and SHA-256 digest. Large generated files are ignored by Git; the six small master-data files and manifest are committed.
 
-The pack has 50 entity records (45 legal), 40 currencies, 25 hierarchy nodes, 40 accounts, 20 daily GL files of 20,000 rows each, daily spot and four forward tenors for 12 months, and an executed-trade history. All names and dates are fictional or illustrative. Amounts and rates use `decimal.js` and are written as decimal text. The GL key is entity, account, currency and cost center. Forward points use the configured difference between USD and the base currency's annual interest assumption.
+The pack has 50 entity records (45 legal), 40 currencies, 25 hierarchy nodes, 40 accounts, 20 daily GL files of 20,000 rows each, daily spot and four forward tenors for 12 months, and one executed-trade history file per program. Only the matching program's history file is loaded into each tenant. All names and dates are fictional or illustrative. Amounts and rates use `decimal.js` and are written as decimal text. The GL key is entity, account, currency and cost center. Forward points use the configured difference between USD and the base currency's annual interest assumption.
 
 ## Planted conditions
 
