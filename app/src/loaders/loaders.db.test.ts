@@ -1076,7 +1076,9 @@ dbTest("CLI child process: gl --control match exits 0; mismatch exits 2 REFUSED"
   );
   assert.equal(mismatched.code, 2, mismatched.stdout + mismatched.stderr);
   assert.match(mismatched.stdout, /REFUSED/);
-  assert.ok(!mismatched.stdout.includes("999.00"), "never prints control cell values");
+  // Control-totals mismatches may name currency / row count / sum (safe); not GL row contents.
+  assert.match(mismatched.stdout, /USD:.*expected 1 rows \/ 999\.00/);
+  assert.ok(!mismatched.stdout.includes("US1"), "never prints GL row contents");
 });
 
 dbTest("CLI child process: E3 gl-malformed.csv exits 1, names all 40 problems, stores nothing", async () => {

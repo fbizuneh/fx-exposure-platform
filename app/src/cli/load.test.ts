@@ -101,7 +101,17 @@ describe("formatOutput", () => {
     const refused = formatOutput("rates", { kind: "REFUSED", message: `entity ${MARKER} bad` });
     assert.equal(refused.exitCode, 2);
     assert.equal(refused.lines[0], "rates: REFUSED");
+    assert.equal(refused.lines.length, 1);
     assert.ok(refused.lines.every((l) => !l.includes(MARKER)));
+
+    const totals = formatOutput("gl", {
+      kind: "REFUSED",
+      message: "control totals do not match: USD: received 1 rows / 10.0000, expected 1 rows / 99; EUR: received 1 rows / 5.0000, not expected",
+    });
+    assert.equal(totals.exitCode, 2);
+    assert.equal(totals.lines[0], "gl: REFUSED");
+    assert.equal(totals.lines[1], "USD: received 1 rows / 10.0000, expected 1 rows / 99");
+    assert.equal(totals.lines[2], "EUR: received 1 rows / 5.0000, not expected");
 
     assert.equal(
       formatOutput("entities", { kind: "HELD", batchId: "b1", reason: "ends too many" }).exitCode,

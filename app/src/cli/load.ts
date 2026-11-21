@@ -388,8 +388,18 @@ export function formatOutput(
   }
 
   if (outcome.kind === "REFUSED") {
-    // Safe summary only: service refusal text can name rejected row values (entity/account codes, pairs).
-    return { exitCode: 2, lines: [`${kind}: REFUSED${drainSuffix}`] };
+    // Safe summary only: most service refusal text can name rejected row values (entity/account codes, pairs).
+    // Control-total mismatches (decision 0031) name only currency, row count and sum — safe to show.
+    const lines = [`${kind}: REFUSED${drainSuffix}`];
+    const msg = outcome.message;
+    const totalsPrefix = "control totals do not match: ";
+    if (msg.startsWith(totalsPrefix)) {
+      const detail = msg.slice(totalsPrefix.length);
+      for (const part of detail.split("; ")) {
+        if (part !== "") lines.push(part);
+      }
+    }
+    return { exitCode: 2, lines };
   }
 
   if (outcome.kind === "HELD") {
