@@ -5,6 +5,8 @@ The one deployable. It wires the services together, delivers events between them
 ## Run
 `DATABASE_URL=postgres://... npm run start`. It migrates the database, starts the HTTP server and the two timer loops, and stops cleanly on SIGTERM or SIGINT.
 
+`DATABASE_URL=postgres://... npm run load -- <kind> <file> --tenant <id> [options]` loads one CSV through the D4 loaders (`app/src/cli/load.ts`). Kinds: `entities`, `hierarchy`, `accounts`, `currencies`, `calendars`, `exposure-currencies`, `gl`, `rates`, `executed`. `--by` defaults to `cli:<os user>`. `--dry-run` parses only (no database). `--drain` delivers events once before exit; if any of this tenant's events are still pending or failed for retry, exit is 3 and the summary says the load committed but delivery did not finish (Decision 0019). Refusals print a safe summary only (no row values). Exit codes: 0 applied/duplicate, 1 invalid file, 2 refused, 3 other (including incomplete delivery), 4 held.
+
 ## Settings (environment)
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -23,6 +25,7 @@ The one deployable. It wires the services together, delivers events between them
 ## Files
 - `compose.ts`: builds every service over one database. `dispatch.ts`: `drain` (delivers events), `deliveryProblems`, `retryStuckEvent`, `startDueCycles`.
 - `loaders/`: one function per file kind (entities, hierarchy, accounts, currencies, calendars, exposure currencies, GL, rates, executed). Each parses, returns `INVALID_FILE` without calling the service when the file has problems, otherwise calls the owning service command and maps refusals and results to `LoadOutcome`.
+- `cli/load.ts`: command-line shell over the loaders (`npm run load`).
 - `config.ts`, `log.ts`: settings and JSON logging (no row contents, secrets redacted).
 - `ticks.ts`: the two passes and the loop that never overlaps itself. `runtime.ts`: starts and stops everything. `http.ts`, `ready.ts`, `server.ts`: routes, readiness, entry point.
 
