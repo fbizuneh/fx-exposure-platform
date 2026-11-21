@@ -58,10 +58,17 @@ function pathOf(node: string, parents: Map<string, string>): string[] {
   while (current) { path.push(current); current = parents.get(current) ?? ""; }
   return path;
 }
-function included(row: Record<string, string>, program: Program, account: Account, parents: Map<string, string>, day: string): boolean {
+function effectiveRules(row: Record<string, string>, program: Program, account: Account, parents: Map<string, string>, day: string): Rule[] {
   const path = pathOf(account.node, parents);
-  const matches = program.mappingRules.filter((r) => r.validFrom <= day && (r.validTo === null || day < r.validTo) && (!r.entityCode || r.entityCode === row.entity_code) && (r.target.type === "ACCOUNT" ? r.target.accountNumber === account.number : path.includes(r.target.nodeCode ?? "")));
+  return program.mappingRules.filter((r) => r.validFrom <= day && (r.validTo === null || day < r.validTo) && (!r.entityCode || r.entityCode === row.entity_code) && (r.target.type === "ACCOUNT" ? r.target.accountNumber === account.number : path.includes(r.target.nodeCode ?? "")));
+}
+function included(row: Record<string, string>, program: Program, account: Account, parents: Map<string, string>, day: string): boolean {
+  const matches = effectiveRules(row, program, account, parents, day);
   return matches.some((r) => r.kind === "INCLUDE") && !matches.some((r) => r.kind === "EXCLUDE");
+}
+function exclusionReason(rule: Rule): string {
+  if (rule.entityCode) return rule.entityCode;
+  return rule.target.type === "ACCOUNT" ? `ACCOUNT_${rule.target.accountNumber}` : rule.target.nodeCode ?? "UNKNOWN_NODE";
 }
 function exposureOf(program: Program, c1: string, c2: string, functional: string, deal: string | null, overrides: Map<string, string>, ndf: Set<string>): string {
   if (program.settings.nettingLevel === "ENTITY" && (c1 === functional || c2 === functional)) return c1 === functional ? c2 : c1;
@@ -174,10 +181,11 @@ export async function writeExpected(generated = "packs/uat/generated", configPat
       let reason: string;
       if (!entity) reason = "GL_ENTITY_UNKNOWN";
       else if (!account) reason = "GL_ACCOUNT_UNKNOWN";
-      else if (!account.fx || !account.monetary) reason = "NONFX";
-      else if (row.entity_code === "LE45") reason = "LE45";
-      else if (!included(row, program, account, parents, row.as_of!)) reason = account.number === "1900" ? "ACCOUNT_1900" : "OTHER_MAPPING";
-      else reason = "INCLUDED";
+      else {
+        const rules = effectiveRules(row, program, account, parents, row.as_of!);
+        const exclusion = rules.find((rule) => rule.kind === "EXCLUDE");
+        reason = exclusion ? exclusionReason(exclusion) : rules.some((rule) => rule.kind === "INCLUDE") ? "INCLUDED" : "UNMAPPED";
+      }
       (classified[reason] ??= []).push(row);
     }
     const pick = (reasons: string[]) => reasons.flatMap((reason) => classified[reason] ?? []);

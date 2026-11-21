@@ -5,7 +5,7 @@
   "problems": [
     {
       "row": 1,
-      "column": "debit",
+      "column": "balance",
       "kind": "balance_with_debit"
     },
     {
@@ -35,7 +35,7 @@
     },
     {
       "row": 7,
-      "column": "debit",
+      "column": "balance",
       "kind": "balance_with_debit"
     },
     {
@@ -65,7 +65,7 @@
     },
     {
       "row": 13,
-      "column": "debit",
+      "column": "balance",
       "kind": "balance_with_debit"
     },
     {
@@ -95,7 +95,7 @@
     },
     {
       "row": 19,
-      "column": "debit",
+      "column": "balance",
       "kind": "balance_with_debit"
     },
     {
@@ -125,7 +125,7 @@
     },
     {
       "row": 25,
-      "column": "debit",
+      "column": "balance",
       "kind": "balance_with_debit"
     },
     {
@@ -155,7 +155,7 @@
     },
     {
       "row": 31,
-      "column": "debit",
+      "column": "balance",
       "kind": "balance_with_debit"
     },
     {
@@ -185,7 +185,7 @@
     },
     {
       "row": 37,
-      "column": "debit",
+      "column": "balance",
       "kind": "balance_with_debit"
     },
     {

@@ -201,7 +201,7 @@ export async function generate(seed: number, out: string, configPath = "packs/ua
     if (kind === "bad_currency") row[2] = "EURO";
     if (kind === "non_numeric") row[3] = "NaN";
     if (kind === "missing_entity") row[0] = "";
-    malformedProblems.push({ row: i + 1, column: ({ balance_with_debit: "debit", no_amount: "balance", bad_date: "as_of", bad_currency: "currency", non_numeric: "balance", missing_entity: "entity_code" } as Record<string, string>)[kind]!, kind });
+    malformedProblems.push({ row: i + 1, column: ({ balance_with_debit: "balance", no_amount: "balance", bad_date: "as_of", bad_currency: "currency", non_numeric: "balance", missing_entity: "entity_code" } as Record<string, string>)[kind]!, kind });
   }
   await save("gl-malformed.csv", malformed);
   const dirty = lastGl.map((r) => [...r]);
