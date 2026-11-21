@@ -110,7 +110,7 @@ export function simulate(input: SimulationInput): string {
       if (!/^(?:\d+)(?:\.\d+)?$/.test(row.deal_amount!) || !new Decimal(row.deal_amount!).isPositive()) throw new Error(`pre-trade ${ref} has invalid deal amount`);
       const amount = new Decimal(row.deal_amount!).times(rate);
       const values = [
-        `SIM-${input.tradeDate}-${index}`, "SIMFX", row.trading_entity!, BANKS[(index - 1) % BANKS.length]!, input.tradeDate, row.value_date!, deal, row.deal_amount!, settlement,
+        `SIM-${input.tradeDate}-${createHash("sha256").update(`${input.tradeDate}:${ref}`).digest("hex").slice(0, 24)}`, "SIMFX", row.trading_entity!, BANKS[(index - 1) % BANKS.length]!, input.tradeDate, row.value_date!, deal, row.deal_amount!, settlement,
         amount.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4), row.fixing_date ?? "", row.instrument!, row.buy_sell!, portfolio, row.hedging_program_id!, ref, row.leg!,
       ];
       lines.push(values.map(csvCell).join(","));

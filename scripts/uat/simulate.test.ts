@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { parseExecutedFile, toPreTradeFile, type OutRow } from "../../services/fx-trade/src/file.ts";
 import { simulate } from "./simulate.ts";
 
@@ -37,4 +38,23 @@ test("a non-USD pair derives its settlement through the USD pivot", () => {
   const crossRates = "base,quote,type,value_date,all_in\nEUR,USD,FORWARD,2027-02-20,1.2000000000\nGBP,USD,FORWARD,2027-02-20,1.5000000000\n";
   const [row] = parseExecutedFile(simulate({ ...options, pretrades, rates: crossRates }));
   assert.equal(row?.settlementAmount, "80.0000");
+});
+
+test("inverse rates, four-place rounding, and NDF fixing data survive the executed layout", () => {
+  const ndf = { ...single, reference: "PT-NDF000000001", dealCurrency: "USD", settlementCurrency: "INR", dealAmount: "1.0000", fixingDate: "2027-02-18" };
+  const inverse = "base,quote,type,value_date,all_in\nINR,USD,FORWARD,2027-02-20,0.3000000000\n";
+  const [row] = parseExecutedFile(simulate({ ...options, pretrades: toPreTradeFile([ndf]), rates: inverse }));
+  assert.equal(row?.settlementAmount, "3.3333");
+  assert.equal(row?.fixingDate, "2027-02-18");
+  assert.equal(row?.settlementCurrency, "INR");
+});
+
+test("trade IDs remain distinct across same-day files and match generated holiday forwards", async () => {
+  const generated = await readFile("packs/uat/generated/rates/rates-2026-11-20.csv", "utf8");
+  const holidayTrade = { ...single, valueDate: "2027-02-23" };
+  const first = parseExecutedFile(simulate({ ...options, pretrades: toPreTradeFile([holidayTrade]), rates: generated }));
+  const second = parseExecutedFile(simulate({ ...options, pretrades: toPreTradeFile([{ ...holidayTrade, reference: "PT-CCCCCCCCCCCC" }]), rates: generated }));
+  assert.equal(first.length, 1);
+  assert.ok(Number(first[0]!.settlementAmount) > 0);
+  assert.notEqual(first[0]!.tradeId, second[0]!.tradeId);
 });
