@@ -33,13 +33,14 @@ const KNOWN: Record<string, keyof Omit<ExecutedRow, "rowNo" | "custom">> = {
 };
 
 
-/** Comma-separated text with quotes. A blank line is skipped. */
+/** Comma-separated text with quotes. A blank line is skipped; a comma-only record (all cells empty, width > 1) is kept. */
 export function splitCsv(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = "";
   let quoted = false;
   const t = text.replace(/^﻿/, "");
+  const keep = (r: string[]) => r.some((x) => x.trim() !== "") || r.length > 1;
   for (let i = 0; i < t.length; i++) {
     const c = t[i]!;
     if (quoted) {
@@ -51,12 +52,12 @@ export function splitCsv(text: string): string[][] {
     else if (c === "\n" || c === "\r") {
       if (c === "\r" && t[i + 1] === "\n") i++;
       row.push(cell); cell = "";
-      if (row.some((x) => x.trim() !== "")) rows.push(row);
+      if (keep(row)) rows.push(row);
       row = [];
     } else cell += c;
   }
   row.push(cell);
-  if (row.some((x) => x.trim() !== "")) rows.push(row);
+  if (keep(row)) rows.push(row);
   return rows;
 }
 
@@ -104,6 +105,7 @@ export function quotingProblem(
   if (quoted) return at(row.length - 1, "unclosed quote");
   return null;
 }
+
 /** Header names are matched ignoring case and spaces; columns we do not know become custom fields. */
 export function parseExecutedFile(text: string): ExecutedRow[] {
   const [header, ...body] = splitCsv(text);

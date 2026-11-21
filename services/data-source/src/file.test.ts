@@ -102,6 +102,13 @@ test("parseGlFile: text after a closing quote is refused (not decoded as 100)", 
   );
 });
 
+test("parseGlFile: comma-only row is not dropped; file returns no rows", () => {
+  // Eight empty cells for the eight-column header — not a blank line.
+  const r = parseGlFile(`${HEADER}\nUS1,1000,USD,10,,,2026-03-09,\n,,,,,,,\n`);
+  assert.equal(r.rows.length, 0);
+  assert.ok(r.problems.some((p) => p.rowNo === 2 && p.column === "entity_code"));
+});
+
 test("parseGlFile: row width must match the header", () => {
   const short = parseGlFile(`${HEADER}\nUS1,1000,USD,10\n`);
   assert.equal(short.rows.length, 0);

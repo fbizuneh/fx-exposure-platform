@@ -22,6 +22,12 @@ test("splitCsv: blank lines are skipped", () => {
   assert.deepEqual(splitCsv("a,b\n\n\nc,d\n"), [["a", "b"], ["c", "d"]]);
 });
 
+test("splitCsv: comma-only records are kept; blank lines are not", () => {
+  assert.deepEqual(splitCsv("a,b\n,\n1,2\n"), [["a", "b"], ["", ""], ["1", "2"]]);
+  assert.deepEqual(splitCsv("a,b,c\n,,\n"), [["a", "b", "c"], ["", "", ""]]);
+  assert.deepEqual(splitCsv("a,b\n\n1,2\n"), [["a", "b"], ["1", "2"]]);
+});
+
 test("quotingProblem: unclosed quote, text after close; valid and escaped quotes ok", () => {
   assert.equal(quotingProblem('a,b\n1,"2\n')?.message, "unclosed quote");
   assert.equal(quotingProblem('a,b\n1,"2"0\n')?.message, "text after closing quote");
