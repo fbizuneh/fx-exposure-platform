@@ -16,6 +16,19 @@ export interface GlLoadOptions {
 export async function loadGlFile(app: App, opts: GlLoadOptions): Promise<LoadOutcome> {
   const parsed = parseGlFile(opts.text);
   if (parsed.problems.length > 0) return { kind: "INVALID_FILE", problems: parsed.problems };
+
+  // D1: a supplied row as_of must equal the batch as-of; blank stays allowed. Mismatches must not
+  // reach Data Source (which would only block those rows and could store the rest).
+  const asOfMismatches = parsed.rows.flatMap((row, i) => {
+    if (row.asOf === null || row.asOf === opts.asOf) return [];
+    return [{
+      rowNo: i + 1,
+      column: "as_of",
+      message: `as_of ${row.asOf} differs from the batch's ${opts.asOf}`,
+    }];
+  });
+  if (asOfMismatches.length > 0) return { kind: "INVALID_FILE", problems: asOfMismatches };
+
   try {
     const result = await app.dataSource.commands.submitGlBatch({
       tenantId: opts.tenantId,

@@ -7,6 +7,7 @@ import {
   loadCalendarsFile,
   loadCurrenciesFile,
   loadEntitiesFile,
+  loadExecutedFile,
   loadExposureCurrenciesFile,
   loadGlFile,
   loadHierarchyFile,
@@ -26,6 +27,37 @@ function unusedApp(): App {
     fxRate: { commands },
     fxTrade: { commands },
   } as unknown as App;
+}
+
+/** App that records whether Data Source / FX Trade commands were reached. */
+function trackingApp(): { app: App; called: { gl: boolean; executed: boolean } } {
+  const called = { gl: false, executed: false };
+  const boom = () => {
+    throw new Error("service must not be called when the file is invalid");
+  };
+  return {
+    called,
+    app: {
+      masterData: { commands: new Proxy({}, { get: () => boom }) },
+      dataSource: {
+        commands: {
+          submitGlBatch: async () => {
+            called.gl = true;
+            return { status: "APPLIED", batchId: "b", ingestion: "COMPLETE", received: 1, included: 1, excluded: 0, blocked: 0 };
+          },
+        },
+      },
+      fxRate: { commands: new Proxy({}, { get: () => boom }) },
+      fxTrade: {
+        commands: {
+          importExecutedTrades: async () => {
+            called.executed = true;
+            return { status: "APPLIED", batchId: "b", received: 1, stored: 1, unchanged: 0, blocked: 0, matched: 0, unmatched: 1 };
+          },
+        },
+      },
+    } as unknown as App,
+  };
 }
 
 const tenant = tenantId("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeee0001");
@@ -81,9 +113,50 @@ describe("loaders INVALID_FILE (no service call)", () => {
     if (out.kind === "INVALID_FILE") assert.ok(out.problems.some((p) => p.rowNo === 1));
   });
 
+  it("GL: row as_of mismatch is INVALID_FILE (no service call)", async () => {
+    const text = [
+      "entity_code,account_number,currency,balance,debit,credit,as_of",
+      "US1,1000,USD,125000.50,,,2026-03-09",
+      "US1,1200,EUR,10000.00,,,2026-03-08",
+      "DE1,2000,EUR,-4200.00,,,",
+    ].join("\n");
+    const out = await loadGlFile(app, { tenantId: tenant, text, chartCode: "MAIN", asOf, sourceSystem: "erp", by });
+    assert.equal(out.kind, "INVALID_FILE");
+    if (out.kind === "INVALID_FILE") {
+      assert.equal(out.problems.length, 1);
+      assert.deepEqual(out.problems[0], {
+        rowNo: 2,
+        column: "as_of",
+        message: "as_of 2026-03-08 differs from the batch's 2026-03-09",
+      });
+    }
+  });
+
   it("rates: missing observed_at", async () => {
     const text = "base,quote,type,tenor,value_date,all_in,spot,forward_points,bid,mid,ask,observed_at\nEUR,USD,SPOT,SPOT,,1.08,,,,,,\n";
     const out = await loadRatesFile(app, { tenantId: tenant, text, source: "reuters", businessDate: asOf, by });
     assert.equal(out.kind, "INVALID_FILE");
+  });
+
+  it("executed: malformed quoted amount is INVALID_FILE (no service call)", async () => {
+    const text = [
+      "trade_id,execution_platform_id,trading_entity,counterparty,trade_date,value_date,deal_currency,deal_amount,settlement_currency,settlement_amount,fixing_date,instrument,buy_sell,portfolio,hedging_program_id,pre_trade_reference,leg",
+      'SIM-1,SIMFX,US1,Bank,2026-03-09,2026-06-09,EUR,"10"0,USD,1090,,FORWARD,BUY,BOOK-A,BS-ENT,,',
+    ].join("\n");
+    const out = await loadExecutedFile(app, { tenantId: tenant, text, by });
+    assert.equal(out.kind, "INVALID_FILE");
+    if (out.kind === "INVALID_FILE") {
+      assert.ok(out.problems.some((p) => p.rowNo === 1 && (p.column === "deal_amount" || p.column === null)));
+    }
+  });
+});
+
+describe("loaders accept blank GL as_of and call the service", () => {
+  it("blank optional as_of is not treated as a mismatch", async () => {
+    const { app, called } = trackingApp();
+    const text = "entity_code,account_number,currency,balance,debit,credit,as_of\nUS1,1000,USD,1.00,,,\n";
+    const out = await loadGlFile(app, { tenantId: tenant, text, chartCode: "MAIN", asOf, sourceSystem: "erp", by });
+    assert.equal(out.kind, "DONE");
+    assert.equal(called.gl, true);
   });
 });
