@@ -54,6 +54,29 @@ test("independent UAT results are stable, reconcile per group, and wait for the 
         assert.equal(new Decimal(before.excluded[currency]?.balance ?? 0).minus(after.excluded[currency]?.balance ?? 0).toFixed(2), amount.balance);
       }
     }
+    const hierarchyPath = join(generated, "hierarchy.csv"), accountsPath = join(generated, "accounts.csv"), dirtyPath = join(generated, "gl-dirty.csv");
+    await writeFile(hierarchyPath, `${(await readFile(hierarchyPath, "utf8")).trimEnd()}\nUAT,OUTSIDE,Outside the balance sheet,ASSETS,\n`);
+    await writeFile(accountsPath, `${(await readFile(accountsPath, "utf8")).trimEnd()}\nUAT,9999,Unmapped FX account,BALANCE_SHEET,DEBIT,true,true,OUTSIDE\n`);
+    const dirtyLines = (await readFile(dirtyPath, "utf8")).trimEnd().split("\n");
+    const chosen = dirtyLines.findIndex((line, index) => index > 0 && line.startsWith("LE01,") && line.split(",")[1] !== "1900" && !line.split(",")[1]!.startsWith("8"));
+    assert.ok(chosen > 0, "test needs a known FX-relevant row included by both programs");
+    const cells = dirtyLines[chosen]!.split(","), currency = cells[2]!, signedBalance = cells[3]!;
+    cells[1] = "9999";
+    dirtyLines[chosen] = cells.join(",");
+    await writeFile(dirtyPath, `${dirtyLines.join("\n")}\n`);
+    const unmatchedOutput = join(root, "unmatched");
+    await writeExpected(generated, "packs/uat/config.json", unmatchedOutput);
+    const unmatched = JSON.parse(await readFile(join(unmatchedOutput, "gl-dirty-expected.json"), "utf8")) as DirtyResult;
+    assert.deepEqual(unmatched.batchControlTotals, dirty.batchControlTotals, "changing a mapped account to an unmapped one preserves received currency totals");
+    for (const program of ["BS-ENT", "BS-REG"]) {
+      const before = dirty.byProgram[program]!, after = unmatched.byProgram[program]!;
+      assert.equal(count(before.included) - count(after.included), 1);
+      assert.equal(count(after.blocked) - count(before.blocked), 1);
+      assert.deepEqual(after.excluded, before.excluded);
+      assert.deepEqual(after.byReason.GL_PROGRAM_UNMATCHED, { [currency]: { rows: 1, balance: signedBalance } });
+      assert.equal(new Decimal(before.included[currency]?.balance ?? 0).minus(after.included[currency]?.balance ?? 0).toFixed(2), signedBalance);
+      assert.equal(new Decimal(after.blocked[currency]?.balance ?? 0).minus(before.blocked[currency]?.balance ?? 0).toFixed(2), signedBalance);
+    }
     const lines = (await readFile(join(first, "2026-11-20.csv"), "utf8")).trimEnd().split("\n");
     assert.ok(lines.length > 700);
     for (const line of lines.slice(1)) {
