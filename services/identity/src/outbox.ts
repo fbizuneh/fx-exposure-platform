@@ -1,6 +1,7 @@
 // Rule 5: a change and its announcement are written in one transaction. A dispatcher in app/
 // reads pending events and delivers them; moving to a queue later changes only the dispatcher.
 import { randomUUID } from "node:crypto";
+import type { TenantId } from "@shared/kernel";
 import type { IdentityEvents } from "../contract/index.ts";
 import { sql } from "kysely";
 import { q, type Db, type Queryable } from "./db.ts";
@@ -26,9 +27,16 @@ export interface DeliveryProblem {
   readonly retryAt: Date | null; readonly stuckAt: Date | null;
 }
 
+/** True for exactly the retry announcement this service's own `retryStuck` writes (decision 0030), never any other change record. */
+const isRetryAnnouncement = (alias: "o" | "b") => sql<boolean>`(${sql.ref(`${alias}.type`)} like '%.change-recorded' and ${sql.ref(`${alias}.payload`)}->>'action' = 'event.retried')`;
+
 /**
  * Events that may be delivered now, oldest first. Per tenant, nothing is offered behind an event that is waiting to be retried or is stuck, so a tenant's
- * order is kept while other tenants carry on (decision 0019).
+ * order is kept while other tenants carry on (decision 0019; records from one service otherwise arrive in order, decision 0012 point 4). A retry's own
+ * `event.retried` announcement is the single, narrow exception, and only on one side (decision 0030): it is never held behind an earlier unresolved
+ * event, so it still reaches Audit even if the event it was about gets stuck again before the announcement is delivered. It can still hold up a later
+ * event if the announcement itself fails to deliver, exactly like any other row — only being blocked is exempted, not blocking. Every other change
+ * record, J2's included, keeps the ordinary hold in both directions.
  */
 export async function pendingEvents(db: Db, limit = 100, now = new Date()): Promise<IdentityEvents[]> {
   const rows = await q(db)
@@ -38,12 +46,15 @@ export async function pendingEvents(db: Db, limit = 100, now = new Date()): Prom
     .where("o.stuck_at", "is", null)
     .where((eb) => eb.or([eb("o.retry_at", "is", null), eb("o.retry_at", "<=", now)]))
     .where((eb) =>
-      eb.not(
-        eb.exists(
-          eb.selectFrom("outbox as b").select("b.event_id").whereRef("b.tenant_id", "=", "o.tenant_id").whereRef("b.seq", "<", "o.seq").where("b.published_at", "is", null)
-            .where((e2) => e2.or([e2("b.stuck_at", "is not", null), e2("b.retry_at", ">", now)])),
+      eb.or([
+        isRetryAnnouncement("o"),
+        eb.not(
+          eb.exists(
+            eb.selectFrom("outbox as b").select("b.event_id").whereRef("b.tenant_id", "=", "o.tenant_id").whereRef("b.seq", "<", "o.seq").where("b.published_at", "is", null)
+              .where((e2) => e2.or([e2("b.stuck_at", "is not", null), e2("b.retry_at", ">", now)])),
+          ),
         ),
-      ),
+      ]),
     )
     .orderBy("o.seq")
     .limit(limit)
@@ -80,9 +91,20 @@ export async function deliveryProblems(db: Db): Promise<DeliveryProblem[]> {
   return rows.map((r) => ({ eventId: r.event_id, tenantId: r.tenant_id, type: r.type, attempts: r.attempts, lastError: r.last_error, retryAt: r.retry_at, stuckAt: r.stuck_at }));
 }
 
-/** An operator's retry of a stuck event: its tries start again. False when the event is not stuck. */
-export async function retryStuck(db: Db, eventId: string): Promise<boolean> {
-  const row = await q(db).updateTable("outbox").set({ attempts: 0, retry_at: null, stuck_at: null })
-    .where("event_id", "=", eventId).where("published_at", "is", null).where("stuck_at", "is not", null).returning("event_id").executeTakeFirst();
-  return row !== undefined;
+/**
+ * An operator's retry of a stuck event: its tries start again. False when the event is not stuck, or when it belongs to a
+ * different tenant than `by.tenantId` (the mutation enforces this itself, not only the caller's lookup in `operations.ts`, decision 0030).
+ * The reset and the retry's own `event.retried` announcement commit or fail together, so the audit trail can never come apart from the retry.
+ */
+export async function retryStuck(db: Db, eventId: string, by: { tenantId: TenantId; actor: string }): Promise<boolean> {
+  return db.transaction().execute(async (tx) => {
+    const row = await q(tx).updateTable("outbox").set({ attempts: 0, retry_at: null, stuck_at: null })
+      .where("event_id", "=", eventId).where("tenant_id", "=", by.tenantId).where("published_at", "is", null).where("stuck_at", "is not", null).returning("event_id").executeTakeFirst();
+    if (row === undefined) return false;
+    await announce(tx, {
+      type: "identity.change-recorded", tenantId: by.tenantId, programId: null, actor: by.actor,
+      action: "event.retried", targetType: "stuck-event", targetId: eventId, fields: [],
+    });
+    return true;
+  });
 }

@@ -18,8 +18,10 @@ Each is defined in contract/.
 
 ## Announces
 - Run started, then run finished, both with the run ID (decision 0007). Nothing is announced while a run waits.
-- Nothing for Audit: every command here is called by the dispatcher reacting to another service's event, never
-  a person, so there is no change for a person to record (decision 0012/0032).
+- Nothing for domain activity: every command here is called by the dispatcher reacting to another service's event, never
+  a person, so there is no change for a person to record (decision 0012/0032). It does have a `change-recorded` event
+  type now (decision 0030), used only to carry an operator's stuck-event retry into Audit through this service's own
+  outbox, atomically with the reset.
 Events carry identifiers only.
 
 ## Consumes

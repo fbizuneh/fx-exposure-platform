@@ -8,7 +8,8 @@ Tier: generic.
 - Invitations
 - Fixed roles, with permissions as named checks
 - A user's optional program restriction (none means all programs)
-- Who may do what in which tenant and program
+- Who may do what in which tenant and program, including `operations:manage-events` (stuck-event
+  retry, held by TREASURY_ADMIN and the platform role, decision 0030)
 - Which programs a tenant has enabled
 See docs/decisions/0001, 0002 and 0003 (identity-model, roles-and-permissions, users-belong-to-a-tenant).
 
