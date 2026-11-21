@@ -226,7 +226,8 @@
           "maxHedgeDisplay": "500000",
           "maxHedgeOverrides": [],
           "splitMethod": "EVEN",
-          "rollType": "NONE"
+          "rollType": "CLOSE_OUT_NEW",
+          "rollOffsetDays": 0
         }
       }
     }
