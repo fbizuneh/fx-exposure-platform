@@ -17,7 +17,8 @@
     "uat:configure": "node scripts/uat/configure.ts",
     "uat:reset": "node scripts/uat/reset.ts",
     "uat:generate": "node scripts/uat/generate.ts",
-    "uat:expected": "node scripts/uat/expected.ts"
+    "uat:expected": "node scripts/uat/expected.ts",
+    "uat:simulate": "node scripts/uat/simulate.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
