@@ -4,8 +4,10 @@ import type { GlBalanceRow } from "./rows.ts";
 
 export const MAX_ROWS = 20_000;
 const CURRENCIES = new Set(Intl.supportedValuesOf("currency"));
-const SIGNED = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
-const UNSIGNED = /^(?:\d+(?:\.\d*)?|\.\d+)$/;
+/** Signed decimal text (balance). Shared with the GL file parser. */
+export const SIGNED = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
+/** Non-negative decimal text (debit/credit). Shared with the GL file parser. */
+export const UNSIGNED = /^(?:\d+(?:\.\d*)?|\.\d+)$/;
 
 export interface RowIssue {
   readonly ruleCode: string;
@@ -14,8 +16,8 @@ export interface RowIssue {
 
 const blank = (v: string | null | undefined): v is null | undefined => v === null || v === undefined || v.trim() === "";
 
-/** Fits NUMERIC(24,4): up to 20 digits before the point and 4 after. */
-function fits(v: string): boolean {
+/** Fits NUMERIC(24,4): up to 20 digits before the point and 4 after. Shared with the GL file parser. */
+export function fits(v: string): boolean {
   const [whole = "", frac = ""] = v.replace(/^[+-]/, "").split(".");
   return whole.replace(/^0+(?=\d)/, "").length <= 20 && frac.replace(/0+$/, "").length <= 4;
 }
