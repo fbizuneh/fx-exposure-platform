@@ -1,0 +1,235 @@
+{
+  "OIDC_ISSUER": "http://localhost:8080/realms/uat",
+  "platformUser": {
+    "issuer": "uat-platform",
+    "externalSubject": "uat-scheduler",
+    "displayName": "UAT Platform User"
+  },
+  "adminUser": "Mara Vale",
+  "users": [
+    {
+      "name": "Mara Vale",
+      "externalSubject": "mara.vale",
+      "roles": [
+        "TREASURY_ADMIN"
+      ]
+    },
+    {
+      "name": "Tavi Reed",
+      "externalSubject": "tavi.reed",
+      "roles": [
+        "TREASURY_ANALYST"
+      ]
+    },
+    {
+      "name": "Lena Moss",
+      "externalSubject": "lena.moss",
+      "roles": [
+        "TREASURY_REVIEWER"
+      ]
+    },
+    {
+      "name": "Ivo Lark",
+      "externalSubject": "ivo.lark",
+      "roles": [
+        "TREASURY_APPROVER"
+      ]
+    },
+    {
+      "name": "Neri Clay",
+      "externalSubject": "neri.clay",
+      "roles": [
+        "VIEWER"
+      ]
+    }
+  ],
+  "rateSettings": {
+    "preferredSource": "uat-rates",
+    "staleAfterMinutes": 1440,
+    "pivotCurrency": "USD",
+    "outlierShare": 0.1
+  },
+  "simulator": {
+    "portfolioByProgram": {
+      "BS-ENT": "DEMO-ENT",
+      "BS-REG": "DEMO-REG"
+    }
+  },
+  "tenants": [
+    {
+      "tenantName": "Northstar Meridian Entity (fictional)",
+      "program": {
+        "id": "BS-ENT",
+        "name": "Daily entity balance sheet",
+        "type": "BALANCE_SHEET",
+        "effectiveFrom": "2025-11-20",
+        "settings": {
+          "nettingLevel": "ENTITY",
+          "displayCurrency": "USD",
+          "exposureCurrencyOverrides": [],
+          "bucketScheme": {
+            "kind": "MONTHS"
+          },
+          "schedule": {
+            "frequency": "DAILY",
+            "asOfOffsetDays": 1
+          }
+        },
+        "mappingRules": [
+          {
+            "kind": "INCLUDE",
+            "target": {
+              "type": "NODE",
+              "chartCode": "UAT",
+              "nodeCode": "BS"
+            },
+            "validFrom": "2025-11-20",
+            "validTo": null
+          },
+          {
+            "kind": "EXCLUDE",
+            "target": {
+              "type": "NODE",
+              "chartCode": "UAT",
+              "nodeCode": "NONFX"
+            },
+            "validFrom": "2025-11-20",
+            "validTo": null
+          },
+          {
+            "kind": "EXCLUDE",
+            "target": {
+              "type": "NODE",
+              "chartCode": "UAT",
+              "nodeCode": "FX"
+            },
+            "entityCode": "LE45",
+            "validFrom": "2025-11-20",
+            "validTo": null
+          }
+        ],
+        "policy": {
+          "strategy": "hedge-ratio-adjustment",
+          "defaultRatio": "0.75",
+          "ratioOverrides": [
+            {
+              "pair": "EUR-USD",
+              "ratio": "0.90"
+            }
+          ],
+          "minHedgeDisplay": "25000",
+          "roundingDefault": "1000",
+          "roundingOverrides": [
+            {
+              "currency": "JPY",
+              "rounding": "1"
+            },
+            {
+              "currency": "KRW",
+              "rounding": "1"
+            }
+          ],
+          "tenor": "3M",
+          "tradingEntityCode": "EX01",
+          "maxHedgeDisplay": "1000000",
+          "maxHedgeOverrides": [],
+          "splitMethod": "EVEN",
+          "rollType": "ADJUST_SWAP",
+          "rollAdjustment": "COMBINED",
+          "rollOffsetDays": 0
+        }
+      }
+    },
+    {
+      "tenantName": "Northstar Meridian Region (fictional)",
+      "program": {
+        "id": "BS-REG",
+        "name": "Weekly regional balance sheet",
+        "type": "BALANCE_SHEET",
+        "effectiveFrom": "2025-11-20",
+        "settings": {
+          "nettingLevel": "REGION",
+          "displayCurrency": "USD",
+          "exposureCurrencyOverrides": [],
+          "bucketScheme": {
+            "kind": "MONTHS"
+          },
+          "schedule": {
+            "frequency": "WEEKLY",
+            "dayOfWeek": 5,
+            "asOfOffsetDays": 1
+          }
+        },
+        "mappingRules": [
+          {
+            "kind": "INCLUDE",
+            "target": {
+              "type": "NODE",
+              "chartCode": "UAT",
+              "nodeCode": "BS"
+            },
+            "validFrom": "2025-11-20",
+            "validTo": null
+          },
+          {
+            "kind": "EXCLUDE",
+            "target": {
+              "type": "NODE",
+              "chartCode": "UAT",
+              "nodeCode": "NONFX"
+            },
+            "validFrom": "2025-11-20",
+            "validTo": null
+          },
+          {
+            "kind": "EXCLUDE",
+            "target": {
+              "type": "ACCOUNT",
+              "chartCode": "UAT",
+              "accountNumber": "1900"
+            },
+            "validFrom": "2025-11-20",
+            "validTo": null
+          },
+          {
+            "kind": "EXCLUDE",
+            "target": {
+              "type": "NODE",
+              "chartCode": "UAT",
+              "nodeCode": "FX"
+            },
+            "entityCode": "LE45",
+            "validFrom": "2025-11-20",
+            "validTo": null
+          }
+        ],
+        "policy": {
+          "strategy": "amount-threshold",
+          "defaultRatio": "0",
+          "ratioOverrides": [],
+          "amountThresholdDisplay": "100000",
+          "amountThresholdOverrides": [],
+          "minHedgeDisplay": "50000",
+          "roundingDefault": "1000",
+          "roundingOverrides": [
+            {
+              "currency": "JPY",
+              "rounding": "1"
+            },
+            {
+              "currency": "KRW",
+              "rounding": "1"
+            }
+          ],
+          "tenor": "3M",
+          "tradingEntityCode": "EX01",
+          "maxHedgeDisplay": "500000",
+          "maxHedgeOverrides": [],
+          "splitMethod": "EVEN",
+          "rollType": "CLOSE_OUT_NEW",
+          "rollOffsetDays": 0
+        }
+      }
+    }
+  ]
+}

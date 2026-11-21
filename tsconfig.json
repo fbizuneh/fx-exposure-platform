@@ -16,5 +16,5 @@
     },
     "types": ["node"]
   },
-  "include": ["shared", "services", "app"]
+  "include": ["shared", "services", "app", "scripts/uat"]
 }
