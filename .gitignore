@@ -2,3 +2,11 @@ node_modules/
 dist/
 *.log
 .env
+packs/uat/generated/*
+!packs/uat/generated/manifest.json
+!packs/uat/generated/entities.csv
+!packs/uat/generated/hierarchy.csv
+!packs/uat/generated/accounts.csv
+!packs/uat/generated/currencies.csv
+!packs/uat/generated/calendars.csv
+!packs/uat/generated/exposure-currencies.csv
