@@ -8,6 +8,10 @@ Shared kernel, checks, Identity (done) -> Master Data (done) -> FX Rate (done) -
 ## app/ (composition)
 **Runtime (decision 0023): `npm run start` runs one server process (migrations, HTTP health routes, an event-delivery loop and a due-cycle loop); see app/README.md.** `app/src/compose.ts` builds all services over one database; `app/src/dispatch.ts` delivers events between them (`drain`) and starts due cycles (`startDueCycles`). `app/src/end-to-end.db.test.ts` runs a cycle through the real services (no fakes). The dispatcher sends every `<service>.change-recorded` event to Audit. It also routes cycle approved to FX Trade (release gate) and cycle skipped or deleted (cancels drafts). A real process still needs a loop that calls both on a timer.
 
+## Release 1 stream E
+
+`docs/uat/data-design.md` is the E1 design for review. Fikre confirmed two tenants, one balance sheet program each, loading the same generated files; unique tenant names; rate-derived simulated settlement amounts; and Close-out+New rolling for `BS-REG` (decision 0025). The 12 Release 1 scenarios are recorded, with 2026-10-27 designated as the late GL load. D1 file layouts have merged; E2–E7 are separate work.
+
 ## Known gaps (recorded, not built)
 Control totals by currency; contract versioning; platform-level versus tenant-level NDF list; Audit retention and purge, trail export, Data Source and Exposure Analysis records (decision 0012); an operator screen for stuck events (decision 0019 gives the list and retry as functions only, with no permission model).
 
