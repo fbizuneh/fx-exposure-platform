@@ -33,11 +33,11 @@ Other planted cases are a stale rate, an outlier rate, a holiday on a value date
 
 E3 starts after D1's `docs/file-layouts.md` is merged and agreed. E7 needs D's loaders and J's backend work. The UAT scenario table needs the Release 1 outline's scenarios from Fikre's Claude Docs. The design is ready for review; E1 is done only when Fikre agrees and it is merged.
 
-**DECISION REQUIRED — simulated settlement amounts.** Recommendation pre-trade files may have an empty `settlement_amount`; FX Trade's executed importer requires a positive amount. Options: (A) derive the amount from the pack's spot/forward rate for the trade date and tenor (recommended; realistic and reusable, but couples the simulator to the rate files); (B) use a fixed rate in config (simple, but executed values may not agree with UAT rates). The simulator's database acceptance test depends on this choice.
+**Decided — simulated settlement amounts.** Fikre chose to derive the executed settlement amount from generated rates. The simulator therefore needs the generated rates for its trade date and value date; a missing rate must refuse simulation rather than invent an amount.
 
-**DECISION REQUIRED — two programs on one GL.** `combinationProblem` currently refuses a second `BALANCE_SHEET` program in a tenant. Data Source also refuses mapping rules that let two programs claim the same balance. Options: (A) amend both service rules to allow the two UAT programs to consume the same GL (recommended for the agreed Release 1 scenario; changes platform behavior and needs service decisions, migrations or tests as appropriate); (B) keep the one-program rule and revise E to use one program per tenant (less platform change, but loses the required same-GL comparison). E2, E4 and E7 cannot run as specified before this is settled.
+**Decided — two programs on one GL.** Fikre chose to allow two balance sheet programs to share GL. `combinationProblem` and Data Source's single-program stamp still need a reviewed service design and implementation before E2, E4 and E7 can run as specified.
 
-**DECISION REQUIRED — duplicate tenant name.** Identity's `createTenant` allows duplicate names, and its questions do not expose a name lookup. Options: (A) make tenant names unique in Identity and expose a lookup or refusal (recommended; durable and race safe, but changes Identity's contract and schema); (B) use a UAT-only registry (no Identity change, but it can diverge from the actual tenants). E2 cannot promise to refuse an existing name without this.
+**Decided — duplicate tenant name.** Fikre chose a unique tenant-name rule and Identity lookup. E2 will call Identity's contract and refuse before any configuration write if the name exists; Identity must still enforce uniqueness atomically for concurrent callers.
 
 ## UAT scenario checklist
 
