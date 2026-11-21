@@ -71,19 +71,43 @@ export function simulate(input: SimulationInput): string {
   const kept = randomized.slice(Math.floor(reject * randomized.length));
   const chosen = new Set(kept.slice(0, Math.floor(partial * kept.length)).map(([ref]) => ref));
   const byRate = new Map<string, string>();
+  const forwardCurves = new Map<string, { valueDate: string; rate: Decimal }[]>();
   for (const [i, rate] of rates.entries()) {
     const amount = rate.all_in!;
     if (!/^(?:\d+)(?:\.\d+)?$/.test(amount) || !new Decimal(amount).isPositive()) throw new Error(`rate row ${i + 1} has invalid all_in`);
     const key = `${rate.base}|${rate.quote}|${rate.type}|${rate.value_date}`;
     if (byRate.has(key)) throw new Error(`duplicate rate ${key}`);
     byRate.set(key, amount);
+    if (rate.type === "FORWARD") {
+      const valueDate = rate.value_date!;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(valueDate) || Number.isNaN(Date.parse(`${valueDate}T00:00:00Z`)) || new Date(`${valueDate}T00:00:00Z`).toISOString().slice(0, 10) !== valueDate) throw new Error(`rate row ${i + 1} has invalid forward value_date`);
+      const pair = `${rate.base}|${rate.quote}`;
+      const curve = forwardCurves.get(pair) ?? [];
+      curve.push({ valueDate, rate: new Decimal(amount) });
+      forwardCurves.set(pair, curve);
+    }
   }
+  for (const curve of forwardCurves.values()) curve.sort((a, b) => a.valueDate.localeCompare(b.valueDate));
+  const interpolatedRate = (base: string, quote: string, valueDate: string): Decimal | null => {
+    const curve = forwardCurves.get(`${base}|${quote}`);
+    if (!curve) return null;
+    const upper = curve.findIndex((point) => point.valueDate > valueDate);
+    if (upper <= 0) return null;
+    const before = curve[upper - 1]!, after = curve[upper]!;
+    const days = (day: string): number => Date.parse(`${day}T00:00:00Z`) / 86400000;
+    return before.rate.plus(after.rate.minus(before.rate).times(days(valueDate) - days(before.valueDate)).div(days(after.valueDate) - days(before.valueDate))).toDecimalPlaces(10, Decimal.ROUND_HALF_UP);
+  };
   const directRate = (base: string, quote: string, kind: string, valueDate: string): Decimal | null => {
     if (base === quote) return new Decimal(1);
     const forward = byRate.get(`${base}|${quote}|${kind}|${valueDate}`);
     if (forward) return new Decimal(forward);
     const reverse = byRate.get(`${quote}|${base}|${kind}|${valueDate}`);
-    return reverse ? new Decimal(1).div(reverse) : null;
+    if (reverse) return new Decimal(1).div(reverse);
+    if (kind !== "FORWARD") return null;
+    const interpolated = interpolatedRate(base, quote, valueDate);
+    if (interpolated) return interpolated;
+    const inverse = interpolatedRate(quote, base, valueDate);
+    return inverse ? new Decimal(1).div(inverse) : null;
   };
   const convertedRate = (base: string, quote: string, kind: string, valueDate: string): Decimal | null => {
     const direct = directRate(base, quote, kind, valueDate);

@@ -52,6 +52,14 @@ test("inverse rates, four-place rounding, and NDF fixing data survive the execut
   assert.equal(row?.settlementCurrency, "INR");
 });
 
+test("forward quotes interpolate by calendar day without extrapolation", () => {
+  const trade = { ...single, valueDate: "2027-01-06" };
+  const curve = "base,quote,type,value_date,all_in\nEUR,USD,FORWARD,2027-01-01,1.1000000000\nEUR,USD,FORWARD,2027-01-11,1.3000000000\n";
+  const [row] = parseExecutedFile(simulate({ ...options, pretrades: toPreTradeFile([trade]), rates: curve }));
+  assert.equal(row?.settlementAmount, "120.0000");
+  assert.throws(() => simulate({ ...options, pretrades: toPreTradeFile([{ ...trade, valueDate: "2027-01-12" }]), rates: curve }), /no FORWARD rate/);
+});
+
 test("trade IDs remain distinct across same-day files and match generated holiday forwards", async () => {
   const root = await mkdtemp(join(tmpdir(), "uat-simulator-rates-"));
   try {
@@ -63,6 +71,14 @@ test("trade IDs remain distinct across same-day files and match generated holida
     assert.equal(first.length, 1);
     assert.ok(Number(first[0]!.settlementAmount) > 0);
     assert.notEqual(first[0]!.tradeId, second[0]!.tradeId);
+    const scenarioEight = toPreTradeFile([{ ...near, valueDate: "2026-11-27" }, { ...far, valueDate: "2027-02-23" }]);
+    const legs = parseExecutedFile(simulate({ ...options, pretrades: scenarioEight, rates }));
+    assert.equal(legs.length, 2);
+    assert.ok(legs.every((leg) => leg.valueDate !== null && leg.valueDate > "2026-11-20" && Number(leg.settlementAmount) > 0));
+    const octoberRates = await readFile(join(root, "rates/rates-2026-10-29.csv"), "utf8");
+    const scenarioFive = toPreTradeFile([{ ...single, dealCurrency: "BRL", settlementCurrency: "AED", valueDate: "2027-01-28" }]);
+    const [closeOut] = parseExecutedFile(simulate({ ...options, tradeDate: "2026-10-29", pretrades: scenarioFive, rates: octoberRates }));
+    assert.ok(closeOut && Number(closeOut.settlementAmount) > 0);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
