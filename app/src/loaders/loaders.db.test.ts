@@ -1,17 +1,19 @@
 // D6: full loader path through composeApp. Needs TEST_DATABASE_URL (*_test).
 // Per loader: valid → stores; same file → DUPLICATE; one bad row → INVALID_FILE, nothing stored;
-// service refusal → REFUSED, nothing stored. CLI child-process exit codes. 20k GL under 60s.
-// E3 gl-malformed / gl-dirty CSVs are gitignored; this file builds equivalent fixtures matching packs/uat/expected/.
+// service refusal → REFUSED, nothing stored. CLI child-process exit codes (incl. one success per kind).
+// 20k GL under 60s with separate parse vs service timings. E3 pack generated once into a temp dir.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { asOfDate, programId, type TenantId } from "@shared/kernel";
+import { parseGlFile } from "../../../services/data-source/src/index.ts";
+import { generate } from "../../../scripts/uat/generate.ts";
 import { migrate } from "../../../scripts/migrate.mjs";
 import { composeApp, type App } from "../compose.ts";
 import {
@@ -35,6 +37,7 @@ const dbTest = (name: string, fn: () => Promise<void>, opts: { timeout?: number 
 
 const clock = { now: new Date("2026-03-10T12:00:00Z") };
 let app: App;
+let e3PackDir: string | null = null;
 
 before(async () => {
   if (!enabled) return;
@@ -59,7 +62,16 @@ before(async () => {
 });
 after(async () => {
   if (enabled) await app.close();
+  if (e3PackDir) await rm(e3PackDir, { recursive: true, force: true });
 });
+
+/** Seeded E3 pack (seed 20261120) once per process; large CSVs stay out of git. */
+async function ensureE3Pack(): Promise<string> {
+  if (e3PackDir) return e3PackDir;
+  e3PackDir = await mkdtemp(join(tmpdir(), "d6-e3-pack-"));
+  await generate(20261120, e3PackDir);
+  return e3PackDir;
+}
 
 const D1 = asOfDate("2026-03-09");
 const D2 = asOfDate("2026-03-10");
@@ -133,81 +145,36 @@ async function seedGlMaster(tenantId: TenantId): Promise<void> {
   });
 }
 
-/** Equivalent of packs/uat/expected/gl-malformed-problems.json planted kinds (E3 CSVs are gitignored). */
-const MALFORMED_KINDS = [
-  "balance_with_debit",
-  "no_amount",
-  "bad_date",
-  "bad_currency",
-  "non_numeric",
-  "missing_entity",
-] as const;
-const MALFORMED_COLUMNS: Record<(typeof MALFORMED_KINDS)[number], string> = {
-  balance_with_debit: "balance",
-  no_amount: "balance",
-  bad_date: "as_of",
-  bad_currency: "currency",
-  non_numeric: "balance",
-  missing_entity: "entity_code",
-};
+const E3_MD_ASOF = asOfDate("2025-11-20");
+const E3_GL_ASOF = asOfDate("2026-11-20");
+const E3_CHART = "UAT";
 
-function buildGlMalformedEquivalent(rowCount = 20_000): {
-  text: string;
-  expected: { row: number; column: string; kind: string }[];
-} {
-  const header = "entity_code,account_number,currency,balance,debit,credit,as_of,cost_center";
-  const lines = [header];
-  const expected: { row: number; column: string; kind: string }[] = [];
-  for (let i = 0; i < rowCount; i++) {
-    const row = [
-      "US1",
-      "1000",
-      "USD",
-      `${(1000 + (i % 9000)).toFixed(2)}`,
-      "",
-      "",
-      "2026-03-09",
-      `CC-${(i % 10) + 1}`,
-    ];
-    if (i < 40) {
-      const kind = MALFORMED_KINDS[i % MALFORMED_KINDS.length]!;
-      if (kind === "balance_with_debit") row[4] = "1.00";
-      if (kind === "no_amount") row[3] = "";
-      if (kind === "bad_date") row[6] = "2026-99-99";
-      if (kind === "bad_currency") row[2] = "EURO";
-      if (kind === "non_numeric") row[3] = "NaN";
-      if (kind === "missing_entity") row[0] = "";
-      expected.push({ row: i + 1, column: MALFORMED_COLUMNS[kind], kind });
-    }
-    lines.push(row.join(","));
+/** Load E3 master-data files so dirty/malformed GL rows resolve against the seeded pack. */
+async function seedFromE3Pack(tenantId: TenantId, packDir: string): Promise<void> {
+  clock.now = new Date("2026-11-21T12:00:00Z");
+  const md = async (
+    kind: "currencies" | "entities" | "hierarchy" | "accounts" | "calendars",
+    file: string,
+  ) => {
+    const text = await readFile(join(packDir, file), "utf8");
+    const opts = { tenantId, text, sourceSystem: "uat", asOf: E3_MD_ASOF, mode: "SNAPSHOT" as const, by };
+    if (kind === "currencies") return loadCurrenciesFile(app, opts);
+    if (kind === "entities") return loadEntitiesFile(app, opts);
+    if (kind === "hierarchy") return loadHierarchyFile(app, opts);
+    if (kind === "accounts") return loadAccountsFile(app, opts);
+    return loadCalendarsFile(app, opts);
+  };
+  for (const [kind, file] of [
+    ["currencies", "currencies.csv"],
+    ["entities", "entities.csv"],
+    ["hierarchy", "hierarchy.csv"],
+    ["accounts", "accounts.csv"],
+    ["calendars", "calendars.csv"],
+  ] as const) {
+    const out = await md(kind, file);
+    assert.equal(out.kind, "DONE", `${file}: ${JSON.stringify(out)}`);
+    if (out.kind === "DONE") assert.equal(out.status, "APPLIED");
   }
-  return { text: `${lines.join("\n")}\n`, expected };
-}
-
-/** Parser-valid dirty GL: unknown entity/account/excluded-account plants; every row loader-accepted. */
-function buildGlDirtyEquivalent(rowCount = 20_000): string {
-  const header = "entity_code,account_number,currency,balance,debit,credit,as_of,cost_center";
-  const lines = [header];
-  for (let i = 0; i < rowCount; i++) {
-    let entity = "US1";
-    let account = "1000";
-    if (i < 10) entity = `UNKNOWN${i + 1}`;
-    else if (i < 20) account = `UNKNOWN${i + 1}`;
-    else if (i < 30) account = "8009";
-    lines.push(
-      [
-        entity,
-        account,
-        "USD",
-        `${(1000 + (i % 9000)).toFixed(2)}`,
-        "",
-        "",
-        "2026-03-09",
-        `CC-${(i % 10) + 1}`,
-      ].join(","),
-    );
-  }
-  return `${lines.join("\n")}\n`;
 }
 
 function buildGlValid20k(): string {
@@ -623,23 +590,20 @@ dbTest("gl: service REFUSED stores nothing", async () => {
   assert.equal(failed.filter((b) => b.status !== "FAILED").length, 0);
 });
 
-dbTest("gl: E3-equivalent malformed → INVALID_FILE, planted problems, nothing stored", async () => {
+dbTest("gl: E3 gl-malformed.csv → INVALID_FILE, 40 planted problems, nothing stored", async () => {
+  const packDir = await ensureE3Pack();
   const tenantId = await newTenant();
-  await seedGlMaster(tenantId);
-  const { text, expected } = buildGlMalformedEquivalent(20_000);
-  const packExpected = JSON.parse(
+  await seedFromE3Pack(tenantId, packDir);
+  const text = await readFile(join(packDir, "gl-malformed.csv"), "utf8");
+  const expected = JSON.parse(
     await readFile(join(REPO_ROOT, "packs/uat/expected/gl-malformed-problems.json"), "utf8"),
-  ) as { problems: { row: number; column: string; kind: string }[] };
-  assert.deepEqual(
-    expected.map((p) => ({ row: p.row, column: p.column, kind: p.kind })),
-    packExpected.problems,
-    "equivalent fixture matches packs/uat/expected/gl-malformed-problems.json",
-  );
+  ) as { problems: { row: number; column: string; kind: string }[]; expectedExitCode: number };
+  assert.equal(expected.problems.length, 40);
   const out = await loadGlFile(app, {
     tenantId,
     text,
-    chartCode: "MAIN",
-    asOf: D1,
+    chartCode: E3_CHART,
+    asOf: E3_GL_ASOF,
     sourceSystem: "erp",
     by,
   });
@@ -647,20 +611,24 @@ dbTest("gl: E3-equivalent malformed → INVALID_FILE, planted problems, nothing 
   if (out.kind !== "INVALID_FILE") return;
   assert.deepEqual(
     out.problems.map((p) => [p.rowNo, p.column]),
-    expected.map((p) => [p.row, p.column]),
+    expected.problems.map((p) => [p.row, p.column]),
   );
-  assert.deepEqual(await app.dataSource.questions.ingestionStatus(tenantId, { sourceSystem: "erp", asOf: D1 }), []);
-});
+  assert.deepEqual(
+    await app.dataSource.questions.ingestionStatus(tenantId, { sourceSystem: "erp", asOf: E3_GL_ASOF }),
+    [],
+  );
+}, { timeout: 300_000 });
 
-dbTest("gl: E3-equivalent dirty → APPLIED, every row stored (service issues are E's)", async () => {
+dbTest("gl: E3 gl-dirty.csv → APPLIED, all 20,000 rows stored (service issues are E's)", async () => {
+  const packDir = await ensureE3Pack();
   const tenantId = await newTenant();
-  await seedGlMaster(tenantId);
-  const text = buildGlDirtyEquivalent(20_000);
+  await seedFromE3Pack(tenantId, packDir);
+  const text = await readFile(join(packDir, "gl-dirty.csv"), "utf8");
   const out = await loadGlFile(app, {
     tenantId,
     text,
-    chartCode: "MAIN",
-    asOf: D1,
+    chartCode: E3_CHART,
+    asOf: E3_GL_ASOF,
     sourceSystem: "erp",
     by,
   });
@@ -668,14 +636,12 @@ dbTest("gl: E3-equivalent dirty → APPLIED, every row stored (service issues ar
   if (out.kind !== "DONE") return;
   assert.equal(out.status, "APPLIED");
   assert.equal(out.counts.received, 20_000);
-  const packDirty = JSON.parse(
-    await readFile(join(REPO_ROOT, "packs/uat/expected/gl-dirty-plants.json"), "utf8"),
-  ) as { storedRows: number; expectedLoadStatus: string };
-  assert.equal(out.counts.received, packDirty.storedRows);
-  assert.equal(out.status, packDirty.expectedLoadStatus);
-  const status = await app.dataSource.questions.ingestionStatus(tenantId, { sourceSystem: "erp", asOf: D1 });
+  const status = await app.dataSource.questions.ingestionStatus(tenantId, {
+    sourceSystem: "erp",
+    asOf: E3_GL_ASOF,
+  });
   assert.equal(status[0]?.received, 20_000);
-}, { timeout: 120_000 });
+}, { timeout: 300_000 });
 
 dbTest("gl: 20,000-row load under 60 seconds (report stage if slower)", async () => {
   const tenantId = await newTenant();
@@ -733,13 +699,17 @@ dbTest("gl: 20,000-row load under 60 seconds (report stage if slower)", async ()
   };
 
   const t0 = performance.now();
-  const out = await timed("loadGlFile (parse + submitGlBatch)", () =>
-    loadGlFile(app, {
+  const parsed = await timed("parse", async () => parseGlFile(text));
+  assert.equal(parsed.problems.length, 0);
+  assert.equal(parsed.rows.length, 20_000);
+
+  const batch = await timed("service/database (submitGlBatch)", () =>
+    app.dataSource.commands.submitGlBatch({
       tenantId,
-      text,
+      sourceSystem: "erp",
       chartCode: "MAIN",
       asOf: D1,
-      sourceSystem: "erp",
+      rows: parsed.rows,
       by,
     }),
   );
@@ -749,52 +719,16 @@ dbTest("gl: 20,000-row load under 60 seconds (report stage if slower)", async ()
     "D6 20k GL TIMINGS (ms):\n" + stages.map((s) => `  ${s.stage}: ${s.ms.toFixed(1)}`).join("\n"),
   );
 
-  assert.equal(out.kind, "DONE");
-  if (out.kind === "DONE") {
-    assert.equal(out.status, "APPLIED");
-    assert.equal(out.counts.received, 20_000);
-  }
+  assert.equal(batch.status, "APPLIED");
+  assert.equal(batch.received, 20_000);
 
   if (totalMs >= 60_000) {
-    const slowest = [...stages].sort((a, b) => b.ms - a.ms)[0]!;
-    const body = [
-      "D6 20k GL load exceeded 60 seconds.",
-      "",
-      "Stages (ms):",
-      ...stages.map((s) => `- ${s.stage}: ${s.ms.toFixed(1)}`),
-      "",
-      `Slowest stage: ${slowest.stage} (${slowest.ms.toFixed(1)} ms).`,
-      "Do not tune Data Source in stream D; investigate parsing / loader path first.",
-    ].join("\n");
-    // Open an issue when gh is available; still fail the assertion with the stage named.
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn(
-          "gh",
-          [
-            "issue",
-            "create",
-            "--repo",
-            "fbizuneh/fx-exposure-platform",
-            "--title",
-            "D6: 20k GL load exceeded 60s",
-            "--body",
-            body,
-          ],
-          { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"] },
-        );
-        let err = "";
-        child.stderr.on("data", (c: Buffer) => {
-          err += c.toString();
-        });
-        child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(err || `gh exit ${code}`))));
-      });
-      console.warn("Opened GitHub issue for slow 20k GL load");
-    } catch (e) {
-      console.warn("Could not open GitHub issue for slow 20k GL load:", e);
-    }
+    const slowest = [...stages].filter((s) => s.stage !== "total").sort((a, b) => b.ms - a.ms)[0]!;
+    // Report stages only — do not open GitHub issues from the test runner.
     assert.fail(
-      `20k GL load took ${(totalMs / 1000).toFixed(1)}s (limit 60s); slowest stage: ${slowest.stage} (${slowest.ms.toFixed(1)}ms)`,
+      `20k GL load took ${(totalMs / 1000).toFixed(1)}s (limit 60s); stages: ${stages
+        .map((s) => `${s.stage}=${s.ms.toFixed(1)}ms`)
+        .join(", ")}; slowest: ${slowest.stage} (${slowest.ms.toFixed(1)}ms). File an issue with these measurements; do not tune Data Source in stream D.`,
     );
   }
 }, { timeout: 180_000 });
@@ -1040,13 +974,14 @@ dbTest("CLI child process: exit 0 APPLIED, 0 DUPLICATE, 1 INVALID_FILE, 2 REFUSE
   assert.match(refused.stdout, /REFUSED/);
 });
 
-dbTest("CLI child process: E3-equivalent malformed GL exits 1, names problems, stores nothing", async () => {
+dbTest("CLI child process: E3 gl-malformed.csv exits 1, names all 40 problems, stores nothing", async () => {
+  const packDir = await ensureE3Pack();
   const tenantId = await newTenant();
-  await seedGlMaster(tenantId);
-  const dir = await mkdtemp(join(tmpdir(), "d6-gl-malformed-"));
-  const { text, expected } = buildGlMalformedEquivalent(20_000);
-  const file = join(dir, "gl-malformed.csv");
-  await writeFile(file, text);
+  await seedFromE3Pack(tenantId, packDir);
+  const expected = JSON.parse(
+    await readFile(join(REPO_ROOT, "packs/uat/expected/gl-malformed-problems.json"), "utf8"),
+  ) as { problems: { row: number; column: string }[]; expectedExitCode: number };
+  const file = join(packDir, "gl-malformed.csv");
 
   const result = await runCli(
     [
@@ -1055,9 +990,9 @@ dbTest("CLI child process: E3-equivalent malformed GL exits 1, names problems, s
       "--tenant",
       tenantId,
       "--chart",
-      "MAIN",
+      E3_CHART,
       "--as-of",
-      "2026-03-09",
+      E3_GL_ASOF,
       "--source",
       "erp",
       "--by",
@@ -1065,15 +1000,139 @@ dbTest("CLI child process: E3-equivalent malformed GL exits 1, names problems, s
     ],
     { DATABASE_URL: url },
   );
-  assert.equal(result.code, 1, result.stdout + result.stderr);
+  assert.equal(result.code, expected.expectedExitCode, result.stdout + result.stderr);
   assert.match(result.stdout, /INVALID_FILE/);
-  // CLI caps at 50 problem lines; first 40 planted problems should appear (or 50 of summary+lines).
-  for (const p of expected.slice(0, 40)) {
-    // Cap: summary + 50 lines; all 40 fit.
+  // CLI caps problem lines at 50; all 40 planted diagnostics fit.
+  for (const p of expected.problems) {
     assert.match(result.stdout, new RegExp(`row ${p.row}, column ${p.column}:`));
   }
   assert.deepEqual(
-    await app.dataSource.questions.ingestionStatus(tenantId, { sourceSystem: "erp", asOf: D1 }),
+    await app.dataSource.questions.ingestionStatus(tenantId, { sourceSystem: "erp", asOf: E3_GL_ASOF }),
     [],
   );
+}, { timeout: 300_000 });
+
+dbTest("CLI child process: E3 gl-dirty.csv exits 0 APPLIED and stores 20,000 rows", async () => {
+  const packDir = await ensureE3Pack();
+  const tenantId = await newTenant();
+  await seedFromE3Pack(tenantId, packDir);
+  const file = join(packDir, "gl-dirty.csv");
+  const result = await runCli(
+    [
+      "gl",
+      file,
+      "--tenant",
+      tenantId,
+      "--chart",
+      E3_CHART,
+      "--as-of",
+      E3_GL_ASOF,
+      "--source",
+      "erp",
+      "--by",
+      "cli-d6",
+    ],
+    { DATABASE_URL: url },
+  );
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /APPLIED/);
+  const status = await app.dataSource.questions.ingestionStatus(tenantId, {
+    sourceSystem: "erp",
+    asOf: E3_GL_ASOF,
+  });
+  assert.equal(status[0]?.received, 20_000);
+}, { timeout: 300_000 });
+
+dbTest("CLI child process: one successful load per kind", async () => {
+  clock.now = new Date("2026-03-10T12:00:00Z");
+  const tenantId = await newTenant();
+  const dir = await mkdtemp(join(tmpdir(), "d6-cli-kinds-"));
+  const env = { DATABASE_URL: url };
+  const write = async (name: string, body: string) => {
+    const path = join(dir, name);
+    await writeFile(path, `${body}\n`);
+    return path;
+  };
+
+  const currencies = await write("currencies.csv", currenciesCsv(["USD,false", "EUR,false"]));
+  const entities = await write(
+    "entities.csv",
+    entitiesCsv([
+      "G,Group,GROUP,,,,false,false,false",
+      "US1,Acme US,LEGAL_ENTITY,G,US,USD,true,true,true",
+    ]),
+  );
+  const hierarchy = await write("hierarchy.csv", hierarchyCsv(["MAIN,CASH,Cash,ASSETS,"]));
+  const accounts = await write(
+    "accounts.csv",
+    accountsCsv(["MAIN,1000,Cash,BALANCE_SHEET,DEBIT,true,true,CASH"]),
+  );
+  const calendars = await write(
+    "calendars.csv",
+    calendarsCsv(["USD,SAT|SUN,2027-12-31,2026-01-01,NY"]),
+  );
+  const exposure = await write("exposure-currencies.csv", exposureCsv(["EUR-USD,USD"]));
+  const gl = await write("gl.csv", glCsv(["US1,1000,USD,100.00,,,2026-03-09"]));
+  const rates = await write(
+    "rates.csv",
+    ratesCsv(["EUR,USD,SPOT,SPOT,,1.0850000000,,,,,,2026-03-09T16:30:00Z"]),
+  );
+  const executed = await write(
+    "executed.csv",
+    executedCsv([
+      "SIM-CLI,SIMFX,US1,Bank,2026-03-09,2026-06-09,EUR,1000.0000,USD,1090.0000,,FORWARD,BUY,BOOK-A,,,",
+    ]),
+  );
+
+  const mdFlags = ["--source", "md", "--as-of", "2026-03-09", "--mode", "SNAPSHOT", "--by", "cli-d6"];
+  const kinds: { args: string[]; label: string }[] = [
+    { label: "currencies", args: ["currencies", currencies, "--tenant", tenantId, ...mdFlags] },
+    { label: "entities", args: ["entities", entities, "--tenant", tenantId, ...mdFlags] },
+    { label: "hierarchy", args: ["hierarchy", hierarchy, "--tenant", tenantId, ...mdFlags] },
+    { label: "accounts", args: ["accounts", accounts, "--tenant", tenantId, ...mdFlags] },
+    { label: "calendars", args: ["calendars", calendars, "--tenant", tenantId, ...mdFlags] },
+    {
+      label: "exposure-currencies",
+      args: ["exposure-currencies", exposure, "--tenant", tenantId, ...mdFlags, "--program", "BS"],
+    },
+    {
+      label: "gl",
+      args: [
+        "gl",
+        gl,
+        "--tenant",
+        tenantId,
+        "--chart",
+        "MAIN",
+        "--as-of",
+        "2026-03-09",
+        "--source",
+        "erp",
+        "--by",
+        "cli-d6",
+      ],
+    },
+    {
+      label: "rates",
+      args: [
+        "rates",
+        rates,
+        "--tenant",
+        tenantId,
+        "--source",
+        "reuters",
+        "--business-date",
+        "2026-03-09",
+        "--by",
+        "cli-d6",
+      ],
+    },
+    { label: "executed", args: ["executed", executed, "--tenant", tenantId, "--by", "cli-d6"] },
+  ];
+
+  for (const { label, args } of kinds) {
+    const result = await runCli(args, env);
+    assert.equal(result.code, 0, `${label}: ${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /APPLIED|DUPLICATE/, `${label}: ${result.stdout}`);
+  }
 }, { timeout: 120_000 });
