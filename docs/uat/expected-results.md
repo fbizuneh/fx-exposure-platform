@@ -1,6 +1,6 @@
 # Independent UAT expected results (E4)
 
-Run `npm run uat:generate -- --seed 20261120 --out packs/uat/generated`, then `npm run uat:expected`. The latter reads the generated master data, daily GL and spot rates, executed-trade history and `packs/uat/config.json`. It writes one `packs/uat/expected/<date>.csv` for each GL date and `expected-status.json`. It imports `decimal.js` and no platform calculation code.
+Run `npm run uat:generate -- --seed 20261120 --out packs/uat/generated`, then `npm run uat:expected`. The latter reads the generated master data, daily GL and spot rates, each program's executed-trade history and `packs/uat/config.json`. It writes one `packs/uat/expected/<date>.csv` for each GL date and `expected-status.json`. It imports `decimal.js` and no platform calculation code.
 
 The results are grouped by program, period and the program's netting level (entity for `BS-ENT`, region for `BS-REG`), currency pair and exposure currency. Columns carry gross, outstanding hedge and net amounts in each pair currency, exposure currency and USD display currency. A hedge-only group has zero gross. The stored amounts have two decimal places; shown amounts may later use zero places in a client.
 

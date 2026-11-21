@@ -100,7 +100,7 @@ export async function writeExpected(generated = "packs/uat/generated", configPat
   const parents = new Map(table(await readFile(join(generated, "hierarchy.csv"), "utf8")).map((r) => [r.code!, r.parent_code!]));
   const ndf = new Set(table(await readFile(join(generated, "currencies.csv"), "utf8")).filter((r) => r.is_ndf === "true").map((r) => r.code!));
   const mappings = new Map(table(await readFile(join(generated, "exposure-currencies.csv"), "utf8")).map((r) => [r.pair!, r.exposure_currency!]));
-  const trades = table(await readFile(join(generated, "executed-history.csv"), "utf8"));
+  const trades = (await Promise.all(config.tenants.map(async (t) => table(await readFile(join(generated, `executed-history-${t.program.id}.csv`), "utf8"))))).flat();
   const glFiles = manifest.files.filter((f) => /^gl\/gl-\d{4}-\d{2}-\d{2}\.csv$/.test(f.file)).sort((a, b) => a.file < b.file ? -1 : 1);
   await mkdir(out, { recursive: true });
   const summary: { date: string; status: string; rows: number }[] = [];
