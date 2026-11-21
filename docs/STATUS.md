@@ -3,7 +3,7 @@
 Read this with AGENTS.md at the start of a session. Update it when a service is finished or a decision is added.
 
 ## Order and status
-Release 1 stream E: E1 data design, E2 configuration and E5 simulator are in draft PRs. E3 generator is in progress: seeded master/GL/rate/trade files, two GL fixtures and a SHA-256 manifest are built. The dirty fixture has independent expected totals under Fikre's decision to compare excluded totals; loader-backed verification awaits D3+ and a UAT/test database. E4/E6/E7 remain.
+Release 1 stream E: E1 data design, E2 configuration and E5 simulator are in draft PRs. E3 generator is in a draft PR: seeded master/GL/rate/trade files, two GL fixtures, SHA-256 manifest and independent dirty-fixture totals. E4 independent expected results are in progress. Loader-backed E3 verification awaits D3+ and a UAT/test database; E6/E7 remain.
 
 Shared kernel, checks, Identity (done) -> Master Data (done) -> FX Rate (done) -> Data Source (done) -> Exposure Management (done) -> **Exposure Analysis (done, incl. net exposure)** -> **FX Trade (done; the demo simulator is a separate tool outside the services)** -> **Hedge Recommendation (done: hedge-ratio-adjustment, decision 0011)** -> **Audit (built: change records, append-only hash chain, decision 0012)**.
 
