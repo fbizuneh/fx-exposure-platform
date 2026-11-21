@@ -6,7 +6,7 @@ Batch-level facts (source, as-of date, chart code, business date, mode, program)
 
 ## Shared rules
 
-- **Encoding and shape.** UTF-8 text, with or without a byte-order mark. Comma-separated; quotes as in FX Trade's `splitCsv` (a field that contains a comma or quote is wrapped in `"…"`, and a quote inside a field is doubled). Line endings LF or CRLF. Blank lines are skipped.
+- **Encoding and shape.** UTF-8 text, with or without a byte-order mark. Comma-separated; quotes as in FX Trade's `splitCsv` (a field that contains a comma or quote is wrapped in `"…"`, and a quote inside a field is doubled). Line endings LF or CRLF. Blank lines are skipped. Parser problem `rowNo` values count non-blank data rows from 1 (the header is not a data row; blank lines are not numbered), matching `parseExecutedFile`.
 - **Everything is text.** Every cell is read as text. Money and rates are never converted to numbers in the parser: they are passed on exactly as sent. An empty cell is `null`.
 - **Booleans.** Only `true` or `false` in lower case; nothing else.
 - **Dates and times.** Dates are `YYYY-MM-DD`. Timestamps are ISO 8601 with a `Z` suffix (for example `2026-03-09T16:30:00Z`). Currencies are three upper-case letters.

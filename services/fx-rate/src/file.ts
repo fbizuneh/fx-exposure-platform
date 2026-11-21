@@ -1,5 +1,5 @@
 // Pure CSV parser for FX rate files (docs/file-layouts.md). Shape only; no database.
-import { splitCsv } from "./csv.ts";
+import { quotingProblem, splitCsv } from "./csv.ts";
 import type { RateRow } from "./rows.ts";
 
 export interface FileProblem {
@@ -47,70 +47,14 @@ function realTimestamp(v: string): boolean {
   return hour <= 23 && minute <= 59 && second <= 59;
 }
 
-/**
- * Find malformed quoting before trusting splitCsv's decoded cells.
- * Catches an unclosed quote, and text after a closing quote (e.g. "10"0 → 100).
- * rowNo is null on the header; data rows count from 1. Escaped quotes ("") are fine.
- */
-function quotingProblem(
-  text: string,
-): { rowNo: number | null; columnIndex: number; header: string[] | null; message: string } | null {
-  let header: string[] | null = null;
-  let row: string[] = [];
-  let cellText = "";
-  let quoted = false;
-  let afterQuote = false;
-  let completed = 0;
-  const t = text.replace(/^\uFEFF/, "");
-
-  const at = (columnIndex: number, message: string) => ({
-    rowNo: (header === null ? null : completed) as number | null,
-    columnIndex,
-    header,
-    message,
-  });
-
-  for (let i = 0; i < t.length; i++) {
-    const c = t[i]!;
-    if (quoted) {
-      if (c === '"' && t[i + 1] === '"') {
-        cellText += '"';
-        i++;
-      } else if (c === '"') {
-        quoted = false;
-        afterQuote = true;
-      } else cellText += c;
-    } else if (c === ",") {
-      row.push(cellText);
-      cellText = "";
-      afterQuote = false;
-    } else if (c === "\n" || c === "\r") {
-      if (c === "\r" && t[i + 1] === "\n") i++;
-      row.push(cellText);
-      cellText = "";
-      afterQuote = false;
-      if (row.some((x) => x.trim() !== "")) {
-        if (header === null) header = row;
-        completed++;
-      }
-      row = [];
-    } else if (c === '"') {
-      if (afterQuote || cellText !== "") return at(row.length, "text around quotes");
-      quoted = true;
-    } else if (afterQuote) {
-      return at(row.length, "text after closing quote");
-    } else cellText += c;
-  }
-  row.push(cellText);
-  if (quoted) return at(row.length - 1, "unclosed quote");
-  return null;
-}
-
 /** Fits NUMERIC(20,10): at most 10 places and 10 digits before the point. */
 function fitsRate(v: string): boolean {
   const [whole = "", frac = ""] = v.replace(/^[+-]/, "").split(".");
   return whole.replace(/^0+(?=\d)/, "").length <= 10 && frac.length <= 10;
 }
+
+/** Positive without floating point: a decimal form that contains a non-zero digit. */
+const isPositiveDecimal = (v: string): boolean => POSITIVE.test(v) && fitsRate(v) && /[1-9]/.test(v);
 
 function mapColumns(header: string[] | undefined): { index: Map<string, number>; problems: FileProblem[] } {
   const problems: FileProblem[] = [];
@@ -155,7 +99,7 @@ function parsePositive(
     if (required) problems.push({ rowNo, column, message: `${column} is required` });
     return null;
   }
-  if (!POSITIVE.test(value) || !fitsRate(value) || Number(value) <= 0) {
+  if (!isPositiveDecimal(value)) {
     problems.push({ rowNo, column, message: `${column} must be a positive number with at most 10 places` });
     return null;
   }

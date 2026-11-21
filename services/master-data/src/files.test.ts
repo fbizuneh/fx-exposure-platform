@@ -171,6 +171,14 @@ USD,FRI|SAT,2027-12-31,2026-07-04,Jul
 `);
   assert.ok(disagree.problems.some((p) => p.column === "weekend_days" && p.rowNo === 2));
 
+  // Same days in another order are the same weekend set.
+  const reordered = parseCalendarsFile(`currency_code,weekend_days,covered_through,holiday_date,holiday_name
+USD,SAT|SUN,2027-12-31,2026-01-01,NY
+USD,SUN|SAT,2027-12-31,2026-07-04,Jul
+`);
+  assert.equal(reordered.problems.length, 0);
+  assert.equal(reordered.rows[0]!.holidays.length, 2);
+
   const covered = parseCalendarsFile(`currency_code,weekend_days,covered_through,holiday_date,holiday_name
 USD,SAT|SUN,2027-12-31,2026-01-01,NY
 USD,SAT|SUN,2026-12-31,2026-07-04,Jul

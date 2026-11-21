@@ -1,6 +1,7 @@
 // Pure CSV parser for GL balance files (docs/file-layouts.md). Shape only; no database.
-import { splitCsv } from "./csv.ts";
+import { quotingProblem, splitCsv } from "./csv.ts";
 import type { GlBalanceRow } from "./rows.ts";
+import { SIGNED, UNSIGNED, fits } from "./validate.ts";
 
 export interface FileProblem {
   readonly rowNo: number | null;
@@ -17,8 +18,6 @@ const FIXED = ["entity_code", "account_number", "currency", "balance", "debit", 
 const REQUIRED = ["entity_code", "account_number", "currency"] as const;
 const CURRENCY = /^[A-Z]{3}$/;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
-const SIGNED = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
-const UNSIGNED = /^(?:\d+(?:\.\d*)?|\.\d+)$/;
 
 const normalizeHeader = (h: string): string => h.trim().toLowerCase().replace(/[\s-]+/g, "_");
 
@@ -33,74 +32,6 @@ const realDate = (v: string): boolean => {
   const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
   return d.getUTCFullYear() === Number(m[1]) && d.getUTCMonth() === Number(m[2]) - 1 && d.getUTCDate() === Number(m[3]);
 };
-
-/** Fits NUMERIC(24,4): up to 20 digits before the point and 4 after — same bound intake uses. */
-function fitsMoney(v: string): boolean {
-  const [whole = "", frac = ""] = v.replace(/^[+-]/, "").split(".");
-  return whole.replace(/^0+(?=\d)/, "").length <= 20 && frac.replace(/0+$/, "").length <= 4;
-}
-
-/**
- * Find malformed quoting before trusting splitCsv's decoded cells.
- * Catches an unclosed quote, and text after a closing quote (e.g. "10"0 → 100).
- * rowNo is null on the header; data rows count from 1. Escaped quotes ("") are fine.
- */
-function quotingProblem(
-  text: string,
-): { rowNo: number | null; columnIndex: number; header: string[] | null; message: string } | null {
-  let header: string[] | null = null;
-  let row: string[] = [];
-  let cellText = "";
-  let quoted = false;
-  let afterQuote = false;
-  let completed = 0;
-  const t = text.replace(/^\uFEFF/, "");
-
-  const at = (columnIndex: number, message: string) => ({
-    rowNo: (header === null ? null : completed) as number | null,
-    columnIndex,
-    header,
-    message,
-  });
-
-  for (let i = 0; i < t.length; i++) {
-    const c = t[i]!;
-    if (quoted) {
-      if (c === '"' && t[i + 1] === '"') {
-        cellText += '"';
-        i++;
-      } else if (c === '"') {
-        quoted = false;
-        afterQuote = true;
-      } else cellText += c;
-    } else if (c === ",") {
-      row.push(cellText);
-      cellText = "";
-      afterQuote = false;
-    } else if (c === "\n" || c === "\r") {
-      if (c === "\r" && t[i + 1] === "\n") i++;
-      row.push(cellText);
-      cellText = "";
-      afterQuote = false;
-      if (row.some((x) => x.trim() !== "")) {
-        if (header === null) header = row;
-        completed++;
-      }
-      row = [];
-    } else if (c === '"') {
-      if (afterQuote || cellText !== "") return at(row.length, "text around quotes");
-      quoted = true;
-    } else if (afterQuote) {
-      return at(row.length, "text after closing quote");
-    } else cellText += c;
-  }
-  row.push(cellText);
-  if (quoted) return at(row.length - 1, "unclosed quote");
-  if (afterQuote) {
-    // Closing quote at end of field is fine; afterQuote with no following text is OK.
-  }
-  return null;
-}
 
 export function parseGlFile(text: string): ParseResult<GlBalanceRow> {
   const problems: FileProblem[] = [];
@@ -201,13 +132,13 @@ export function parseGlFile(text: string): ParseResult<GlBalanceRow> {
         message: "a balance, or a debit or credit amount, is required",
       });
     } else {
-      if (balance !== null && (!SIGNED.test(balance) || !fitsMoney(balance))) {
+      if (balance !== null && (!SIGNED.test(balance) || !fits(balance))) {
         problems.push({ rowNo, column: "balance", message: "balance must be a number with at most 4 places" });
       }
-      if (debit !== null && (!UNSIGNED.test(debit) || !fitsMoney(debit))) {
+      if (debit !== null && (!UNSIGNED.test(debit) || !fits(debit))) {
         problems.push({ rowNo, column: "debit", message: "debit must be a non-negative number with at most 4 places" });
       }
-      if (credit !== null && (!UNSIGNED.test(credit) || !fitsMoney(credit))) {
+      if (credit !== null && (!UNSIGNED.test(credit) || !fits(credit))) {
         problems.push({ rowNo, column: "credit", message: "credit must be a non-negative number with at most 4 places" });
       }
     }
