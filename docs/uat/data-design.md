@@ -39,4 +39,19 @@ E3 starts after D1's `docs/file-layouts.md` is merged and agreed. E7 needs D's l
 
 **DECISION REQUIRED — duplicate tenant name.** Identity's `createTenant` allows duplicate names, and its questions do not expose a name lookup. Options: (A) make tenant names unique in Identity and expose a lookup or refusal (recommended; durable and race safe, but changes Identity's contract and schema); (B) use a UAT-only registry (no Identity change, but it can diverge from the actual tenants). E2 cannot promise to refuse an existing name without this.
 
-**DECISION REQUIRED — exact scenario mapping.** The scenario descriptions and numbers are only in Fikre's Release 1 outline. Provide that section so E6 can map each scenario to a dated file and expected CSV without inventing cases.
+## UAT scenario checklist
+
+Fikre supplied the Release 1 outline's scenario section verbatim. E6 will map each item to exact generated files, dates and expected CSVs after E3 and E4 produce them.
+
+1. Onboard a tenant, load master data and users.
+2. Happy-path cycle from data to approved record.
+3. Late data, rerun, skip and delete.
+4. Dirty data: blocked balances and a missing rate.
+5. Each strategy: ratio, threshold, Adjust+Swap, Close-out+New.
+6. Accept, override with a split, dismiss.
+7. Approve Exposure and Approve Cycle with segregation of duties.
+8. Release pre-trades, return the executed file, match, follow up.
+9. Next cycle begins with all outstanding hedges including the ones executed in the prior cycle.
+10. Correction after approval as a new cycle.
+11. Audit review and chain check; program-restricted access.
+12. A failed delivery and an operator retry.
