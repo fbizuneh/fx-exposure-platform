@@ -17,7 +17,7 @@ This is the proposed design for Fikre's review. The data is entirely fictional. 
 
 ## Programs and people
 
-Both balance sheet programs use the same GL, with distinct mapping rules. `BS-ENT` runs daily at ENTITY netting. Its hedge-ratio-adjustment policy has a 0.75 default ratio, a 0.90 override for one pair, and Adjust + Swap rolling. `BS-REG` runs weekly at REGION netting. Its amount-threshold policy has one USD threshold and no threshold override or roll. Both have a minimum amount, currency rounding, 3M tenor, a trading entity and a maximum amount. Every policy must pass `policyProblems` before it is saved. The configured actors are a tenant admin, analyst, reviewer, approver, viewer and platform user. Segregation of duties remains on; the starter and both approvers are assigned so the gates can be exercised by different people.
+Two tenants load the same generated master data, rates and GL files, one program per tenant. Each tenant has 50 entity records, 40 currencies and a 20,000-row daily GL batch. `BS-ENT` runs daily at ENTITY netting. Its hedge-ratio-adjustment policy has a 0.75 default ratio, a 0.90 override for one pair, and Adjust + Swap rolling. `BS-REG` runs weekly at REGION netting. Its amount-threshold policy has one USD threshold and no threshold override or roll. Each tenant has its own mapping rules, hedge policy and five tenant users (admin, analyst, reviewer, approver, viewer); a platform user is outside both tenants. Both policies have a minimum amount, currency rounding, 3M tenor, a trading entity and a maximum amount. Every policy must pass `policyProblems` before it is saved. Segregation of duties remains on, with different people for the two approval gates.
 
 ## Controlled failures
 
@@ -35,7 +35,7 @@ E3 starts after D1's `docs/file-layouts.md` is merged and agreed. E7 needs D's l
 
 **Decided — simulated settlement amounts.** Fikre chose to derive the executed settlement amount from generated rates. The simulator therefore needs the generated rates for its trade date and value date; a missing rate must refuse simulation rather than invent an amount.
 
-**Decided — two programs on one GL.** Fikre chose to allow two balance sheet programs to share GL. `combinationProblem` and Data Source's single-program stamp still need a reviewed service design and implementation before E2, E4 and E7 can run as specified.
+**Decided — one program per tenant.** Fikre confirmed two UAT tenants, each with one balance sheet program. They load the same generated files into separate tenant scopes. The existing one-balance-sheet-program rule and Data Source's single-program stamp stay in force.
 
 **Decided — duplicate tenant name.** Fikre chose a unique tenant-name rule and Identity lookup. E2 will call Identity's contract and refuse before any configuration write if the name exists; Identity must still enforce uniqueness atomically for concurrent callers.
 

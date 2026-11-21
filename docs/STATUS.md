@@ -10,7 +10,7 @@ Shared kernel, checks, Identity (done) -> Master Data (done) -> FX Rate (done) -
 
 ## Release 1 stream E
 
-`docs/uat/data-design.md` is an E1 proposal for review, not an agreed or merged UAT pack. E2–E7 are not built. Fikre chose two balance sheet programs sharing the same GL, Identity uniqueness and lookup for tenant names, and generated rates for simulated settlement amounts (decision 0024); the service changes are not yet built. The 12 Release 1 scenarios have been supplied and recorded. D1 file layouts are on an unmerged branch. The E1 proposal records the remaining handoffs.
+`docs/uat/data-design.md` is an E1 proposal for review, not an agreed or merged UAT pack. Fikre confirmed two tenants, one balance sheet program each, loading the same generated files; unique tenant names; and rate-derived simulated settlement amounts (decision 0025). The 12 Release 1 scenarios have been supplied and recorded. E2–E7 are separate work. D1 file layouts are on an unmerged branch.
 
 ## Known gaps (recorded, not built)
 Control totals by currency; contract versioning; platform-level versus tenant-level NDF list; Audit retention and purge, trail export, Data Source and Exposure Analysis records (decision 0012); an operator screen for stuck events (decision 0019 gives the list and retry as functions only, with no permission model).
