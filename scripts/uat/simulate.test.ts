@@ -1,7 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parseExecutedFile, toPreTradeFile, type OutRow } from "../../services/fx-trade/src/file.ts";
+import { generate } from "./generate.ts";
 import { simulate } from "./simulate.ts";
 
 const single: OutRow = { reference: "PT-AAAAAAAAAAAA", programId: "BS-ENT", tradingEntity: "US1", instrument: "FORWARD", leg: "SINGLE", buySell: "SELL", dealCurrency: "EUR", dealAmount: "100.0000", settlementCurrency: "USD", settlementAmount: null, valueDate: "2027-02-20", fixingDate: null };
@@ -50,11 +53,17 @@ test("inverse rates, four-place rounding, and NDF fixing data survive the execut
 });
 
 test("trade IDs remain distinct across same-day files and match generated holiday forwards", async () => {
-  const generated = await readFile("packs/uat/generated/rates/rates-2026-11-20.csv", "utf8");
-  const holidayTrade = { ...single, valueDate: "2027-02-23" };
-  const first = parseExecutedFile(simulate({ ...options, pretrades: toPreTradeFile([holidayTrade]), rates: generated }));
-  const second = parseExecutedFile(simulate({ ...options, pretrades: toPreTradeFile([{ ...holidayTrade, reference: "PT-CCCCCCCCCCCC" }]), rates: generated }));
-  assert.equal(first.length, 1);
-  assert.ok(Number(first[0]!.settlementAmount) > 0);
-  assert.notEqual(first[0]!.tradeId, second[0]!.tradeId);
+  const root = await mkdtemp(join(tmpdir(), "uat-simulator-rates-"));
+  try {
+    await generate(20261120, root);
+    const rates = await readFile(join(root, "rates/rates-2026-11-20.csv"), "utf8");
+    const holidayTrade = { ...single, valueDate: "2027-02-23" };
+    const first = parseExecutedFile(simulate({ ...options, pretrades: toPreTradeFile([holidayTrade]), rates }));
+    const second = parseExecutedFile(simulate({ ...options, pretrades: toPreTradeFile([{ ...holidayTrade, reference: "PT-CCCCCCCCCCCC" }]), rates }));
+    assert.equal(first.length, 1);
+    assert.ok(Number(first[0]!.settlementAmount) > 0);
+    assert.notEqual(first[0]!.tradeId, second[0]!.tradeId);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
