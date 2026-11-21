@@ -1,4 +1,4 @@
-# 0026 — Unique tenant names for UAT configuration
+# 0027 — Unique tenant names for UAT configuration
 
 Fikre chose Identity uniqueness and lookup for tenant names on 2026-11-20 (stream E, E2). A name identifies at most one tenant, including disabled tenants. The equality rule is exact text equality, matching the existing `name` field; case and whitespace normalization are not introduced here.
 
