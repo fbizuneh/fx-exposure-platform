@@ -1,0 +1,8 @@
+{
+  "simulator": {
+    "portfolioByProgram": {
+      "BS-ENT": "DEMO-ENT",
+      "BS-REG": "DEMO-REG"
+    }
+  }
+}
