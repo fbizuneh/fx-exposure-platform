@@ -212,6 +212,56 @@ describe("runLoad dry-run", () => {
     assert.equal(result.lines[0], "gl: OK (dry-run)");
   });
 
+  it("gl dry-run accepts a valid quoted control sum", async () => {
+    const files = new Map<string, string>([
+      ["balances.csv", "entity_code,account_number,currency,balance,debit,credit,as_of\nUS1,1000,USD,10.00,,,2026-03-09\n"],
+      ["totals.csv", 'currency,row_count,sum\nUSD,1,"10.00"\n'],
+    ]);
+    const result = await runLoad(
+      ["gl", "balances.csv", "--tenant", TENANT, "--chart", "MAIN", "--as-of", "2026-03-09", "--source", "erp", "--control", "totals.csv", "--dry-run"],
+      {},
+      {
+        defaultBy: "cli:test",
+        readFile: async (path) => {
+          const text = files.get(path);
+          if (text === undefined) throw new Error(`missing ${path}`);
+          return text;
+        },
+      },
+    );
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.lines[0], "gl: OK (dry-run)");
+  });
+
+  it("unclosed quote in --control exits 1 INVALID_FILE without opening the database", async () => {
+    // Totals would match if the unclosed quote were silently decoded as 10.00.
+    const files = new Map<string, string>([
+      ["balances.csv", "entity_code,account_number,currency,balance,debit,credit,as_of\nUS1,1000,USD,10.00,,,2026-03-09\n"],
+      ["totals.csv", 'currency,row_count,sum\nUSD,1,"10.00'],
+    ]);
+    let composed = false;
+    const result = await runLoad(
+      ["gl", "balances.csv", "--tenant", TENANT, "--chart", "MAIN", "--as-of", "2026-03-09", "--source", "erp", "--control", "totals.csv"],
+      { DATABASE_URL: "postgres://must-not-connect/fx_platform_test" },
+      {
+        defaultBy: "cli:test",
+        readFile: async (path) => {
+          const text = files.get(path);
+          if (text === undefined) throw new Error(`missing ${path}`);
+          return text;
+        },
+        composeApp: () => {
+          composed = true;
+          throw new Error("composeApp must not run for an invalid control file");
+        },
+      },
+    );
+    assert.equal(result.exitCode, 1);
+    assert.match(result.lines[0]!, /INVALID_FILE/);
+    assert.ok(result.lines.some((l) => /unclosed quote/.test(l)));
+    assert.equal(composed, false);
+  });
+
   it("missing DATABASE_URL without dry-run exits 3", async () => {
     const result = await runLoad(
       ["executed", "t.csv", "--tenant", TENANT],

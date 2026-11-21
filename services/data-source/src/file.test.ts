@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseGlFile } from "./file.ts";
+import { parseControlFile, parseGlFile } from "./file.ts";
 
 const HEADER = "entity_code,account_number,currency,balance,debit,credit,as_of,cost_center";
 const SAMPLE = `${HEADER}
@@ -162,4 +162,45 @@ test("parseGlFile: 20,000 rows parse in under 2 seconds", () => {
   assert.equal(r.problems.length, 0);
   assert.equal(r.rows.length, 20_000);
   assert.ok(ms < 2000, `parsed 20k rows in ${ms.toFixed(1)}ms (limit 2000ms)`);
+});
+
+const CONTROL_HEADER = "currency,row_count,sum";
+
+test("parseControlFile: valid file, empty currency bucket, and quoted values", () => {
+  const plain = parseControlFile(`${CONTROL_HEADER}\nUSD,2,140.50\nEUR,1,5\n`);
+  assert.deepEqual(plain.problems, []);
+  assert.deepEqual(plain.rows, [
+    { currency: "USD", rowCount: 2, sum: "140.50" },
+    { currency: "EUR", rowCount: 1, sum: "5" },
+  ]);
+
+  const emptyCcy = parseControlFile(`${CONTROL_HEADER}\n,1,0\n`);
+  assert.deepEqual(emptyCcy.problems, []);
+  assert.deepEqual(emptyCcy.rows, [{ currency: "", rowCount: 1, sum: "0" }]);
+
+  const quoted = parseControlFile(`${CONTROL_HEADER}\nUSD,1,"10.00"\n`);
+  assert.deepEqual(quoted.problems, []);
+  assert.deepEqual(quoted.rows, [{ currency: "USD", rowCount: 1, sum: "10.00" }]);
+});
+
+test("parseControlFile: unclosed quote at EOF is a problem (not a silent decode)", () => {
+  // Without a closing quote the decoded cell would look like a valid matching sum.
+  const eof = parseControlFile(`${CONTROL_HEADER}\nUSD,1,"10.00`);
+  assert.equal(eof.rows.length, 0);
+  assert.ok(eof.problems.some((p) => p.rowNo === 1 && p.column === "sum" && /unclosed quote/.test(p.message)));
+});
+
+test("parseControlFile: names row and column without echoing cell contents; refuses bad shape", () => {
+  const marker = "BAD_SUM_MARKER_9f3a";
+  const badSum = parseControlFile(`${CONTROL_HEADER}\nUSD,2,${marker}\n`);
+  assert.equal(badSum.rows.length, 0);
+  assert.ok(badSum.problems.some((p) => p.rowNo === 1 && p.column === "sum" && /decimal/.test(p.message)));
+  assert.ok(badSum.problems.every((p) => !p.message.includes(marker)));
+
+  const unknown = parseControlFile("currency,row_count,sum,extra\nUSD,1,1\n");
+  assert.ok(unknown.problems.some((p) => p.column === "extra" && p.rowNo === null));
+  const missing = parseControlFile("currency,sum\nUSD,1\n");
+  assert.ok(missing.problems.some((p) => p.column === "row_count" && /missing/.test(p.message)));
+  const dupCurrency = parseControlFile(`${CONTROL_HEADER}\nUSD,1,1\nUSD,2,2\n`);
+  assert.ok(dupCurrency.problems.some((p) => p.rowNo === 2 && p.column === "currency" && /more than once/.test(p.message)));
 });

@@ -30,7 +30,7 @@ Events carry identifiers only.
 - Program catalog (Exposure Management)
 
 ## Files
-`parseGlFile` in `src/file.ts` reads GL CSVs (layouts in `docs/file-layouts.md`) via the local `csv.ts`. Shape only; further columns become dimensions.
+`parseGlFile` and `parseControlFile` in `src/file.ts` read GL and control-total CSVs via the local `csv.ts` (`readCsvStrict`). GL shape only; further columns become dimensions. Control files carry `currency`, `row_count`, `sum` for `expectedTotals` (D7 / decision 0031).
 
 Currency codes are the ISO list plus a short set of deliberate exceptions, today `CNH` (decision 0028).
 

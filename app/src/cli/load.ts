@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { asOfDate, tenantId, type AsOfDate, type TenantId } from "@shared/kernel";
 import { composeApp as defaultComposeApp, type App } from "../compose.ts";
 import { deliveryProblems, drain as defaultDrain } from "../dispatch.ts";
+import { parseControlFile } from "../../../services/data-source/src/index.ts";
 import {
   loadAccountsFile,
   loadCalendarsFile,
@@ -16,7 +17,6 @@ import {
   loadGlFile,
   loadHierarchyFile,
   loadRatesFile,
-  parseControlFile,
   type FileProblem,
   type LoadOutcome,
 } from "../loaders/index.ts";

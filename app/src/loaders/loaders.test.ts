@@ -13,7 +13,6 @@ import {
   loadGlFile,
   loadHierarchyFile,
   loadRatesFile,
-  parseControlFile,
 } from "./index.ts";
 import type { App } from "../compose.ts";
 
@@ -202,40 +201,6 @@ describe("loaders accept blank GL as_of and call the service", () => {
     const out = await loadGlFile(app, { tenantId: tenant, text, chartCode: "MAIN", asOf, sourceSystem: "erp", by });
     assert.equal(out.kind, "DONE");
     assert.equal(called.gl, true);
-  });
-});
-
-describe("parseControlFile", () => {
-  it("parses a valid control CSV into expectedTotals", () => {
-    const out = parseControlFile("currency,row_count,sum\nUSD,2,140.50\nEUR,1,5\n");
-    assert.deepEqual(out.problems, []);
-    assert.deepEqual(out.rows, [
-      { currency: "USD", rowCount: 2, sum: "140.50" },
-      { currency: "EUR", rowCount: 1, sum: "5" },
-    ]);
-  });
-
-  it("allows an empty currency for the no-currency bucket", () => {
-    const out = parseControlFile("currency,row_count,sum\n,1,0\n");
-    assert.deepEqual(out.problems, []);
-    assert.deepEqual(out.rows, [{ currency: "", rowCount: 1, sum: "0" }]);
-  });
-
-  it("names row and column for bad values without echoing cell contents", () => {
-    const marker = "BAD_SUM_MARKER_9f3a";
-    const out = parseControlFile(`currency,row_count,sum\nUSD,2,${marker}\n`);
-    assert.equal(out.rows.length, 0);
-    assert.ok(out.problems.some((p) => p.rowNo === 1 && p.column === "sum" && /decimal/.test(p.message)));
-    assert.ok(out.problems.every((p) => !p.message.includes(marker)));
-  });
-
-  it("refuses unknown, duplicate and missing columns", () => {
-    const unknown = parseControlFile("currency,row_count,sum,extra\nUSD,1,1\n");
-    assert.ok(unknown.problems.some((p) => p.column === "extra" && p.rowNo === null));
-    const missing = parseControlFile("currency,sum\nUSD,1\n");
-    assert.ok(missing.problems.some((p) => p.column === "row_count" && /missing/.test(p.message)));
-    const dupCurrency = parseControlFile("currency,row_count,sum\nUSD,1,1\nUSD,2,2\n");
-    assert.ok(dupCurrency.problems.some((p) => p.rowNo === 2 && p.column === "currency" && /more than once/.test(p.message)));
   });
 });
 
