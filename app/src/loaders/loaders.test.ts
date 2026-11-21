@@ -127,7 +127,7 @@ describe("loaders INVALID_FILE (no service call)", () => {
       assert.deepEqual(out.problems[0], {
         rowNo: 2,
         column: "as_of",
-        message: "as_of 2026-03-08 differs from the batch's 2026-03-09",
+        message: "as_of differs from the batch as-of",
       });
     }
   });

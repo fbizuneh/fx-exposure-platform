@@ -427,14 +427,14 @@ export function parseCalendarsFile(text: string): ParseResult<CalendarRow> {
       problems.push({
         rowNo,
         column: "weekend_days",
-        message: `weekend_days for ${currencyCode} disagrees with earlier rows`,
+        message: "weekend_days disagrees with earlier rows for the same currency",
       });
     }
     if (existing.coveredThrough !== coveredThrough) {
       problems.push({
         rowNo,
         column: "covered_through",
-        message: `covered_through for ${currencyCode} disagrees with earlier rows`,
+        message: "covered_through disagrees with earlier rows for the same currency",
       });
     }
     if (holidayDate !== null) existing.holidays.push({ date: holidayDate, name: holidayName });
