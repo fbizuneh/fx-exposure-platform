@@ -1568,6 +1568,45 @@ e2e("the ordering exception is narrow: an ordinary audit record cannot overtake 
   }
 });
 
+e2e("the ordering exception is one-sided: a retry announcement that itself fails to deliver still blocks a later ordinary event, exactly like any other row", async () => {
+  const t = await tenantWithProgram();
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  const realRecord = app.audit.commands.record;
+  let breakAudit = false;
+  app.audit.commands.record = (async (e) => {
+    if (breakAudit) throw new Error("audit unavailable");
+    return realRecord(e);
+  }) as typeof realRecord;
+  try {
+    const stuckId = randomUUID();
+    await client.query("INSERT INTO fx_rate.outbox (event_id, tenant_id, type, payload) VALUES ($1, $2, 'fx-rate.loaded', $3)", [stuckId, t, JSON.stringify({ type: "fx-rate.loaded", tenantId: t, eventId: stuckId, occurredAt: new Date().toISOString() })]);
+    for (let i = 0; i < 5; i++) await app.fxRate.outbox.recordFailure(stuckId, "unavailable", new Date(), RETRY_POLICY);
+    assert.ok((await deliveryProblems(app)).find((p) => p.eventId === stuckId)?.stuckAt, "set up: stuck");
+
+    breakAudit = true; // the retry's own announcement will fail to deliver every time, from here on
+    assert.equal(await retryStuckEvent(app, "fx-rate", stuckId, { tenantId: t, actor: "platform:test-operator" }), true, "retried");
+    let clk = new Date("2032-01-01T00:00:00Z");
+    for (let i = 0; i < 5; i++) {
+      await drain(app, { now: clk });
+      clk = new Date(clk.getTime() + 20 * 60_000);
+    }
+    // stuckId itself succeeds (nothing here breaks retryWaiting), but its own announcement is a plain outbox row like
+    // any other, and Audit rejecting it 5 times in a row makes it stuck in turn.
+    const announcement = (await deliveryProblems(app)).find((p) => p.tenantId === t && p.type === "fx-rate.change-recorded");
+    assert.ok(announcement?.stuckAt, "the announcement itself is now stuck");
+
+    const laterId = randomUUID();
+    await client.query("INSERT INTO fx_rate.outbox (event_id, tenant_id, type, payload) VALUES ($1, $2, 'fx-rate.loaded', $3)", [laterId, t, JSON.stringify({ type: "fx-rate.loaded", tenantId: t, eventId: laterId, occurredAt: new Date().toISOString() })]);
+    await drain(app, { now: clk });
+    const row = (await client.query("SELECT published_at FROM fx_rate.outbox WHERE event_id = $1", [laterId])).rows[0] as { published_at: Date | null };
+    assert.equal(row.published_at, null, "the later event stays held behind the stuck announcement: only being blocked is exempted for a retry announcement, not blocking others");
+  } finally {
+    app.audit.commands.record = realRecord;
+    await client.end();
+  }
+});
+
 e2e("a failure is persisted whole: an interrupted recording cannot leave an event eligible, a fifth failure never leads to a sixth delivery, and earlier failures keep their wait", async () => {
   const tenant = await app.identity.commands.createTenant(`Acme-${randomUUID()}`);
   const client = new pg.Client({ connectionString: url });

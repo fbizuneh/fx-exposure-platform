@@ -32,9 +32,10 @@ const isRetryAnnouncement = (alias: "o" | "b") => sql<boolean>`(${sql.ref(`${ali
 /**
  * Events that may be delivered now, oldest first. Per tenant, nothing is offered behind an event that is waiting to be retried or is stuck, so a tenant's
  * order is kept while other tenants carry on (decision 0019; records from one service otherwise arrive in order, decision 0012 point 4). A retry's own
- * `event.retried` announcement is the single, narrow exception (decision 0030): it is never held behind an earlier unresolved event, and never holds a
- * later one, so it still reaches Audit even if the event it was about gets stuck again before the announcement is delivered. Every other change record,
- * J2's included, keeps the ordinary hold in both directions.
+ * `event.retried` announcement is the single, narrow exception, and only on one side (decision 0030): it is never held behind an earlier unresolved
+ * event, so it still reaches Audit even if the event it was about gets stuck again before the announcement is delivered. It can still hold up a later
+ * event if the announcement itself fails to deliver, exactly like any other row — only being blocked is exempted, not blocking. Every other change
+ * record, J2's included, keeps the ordinary hold in both directions.
  */
 export async function pendingEvents(db: Db, limit = 100, now = new Date()): Promise<HedgeRecommendationEvents[]> {
   const rows = await q(db)
@@ -49,7 +50,6 @@ export async function pendingEvents(db: Db, limit = 100, now = new Date()): Prom
         eb.not(
           eb.exists(
             eb.selectFrom("outbox as b").select("b.event_id").whereRef("b.tenant_id", "=", "o.tenant_id").whereRef("b.seq", "<", "o.seq").where("b.published_at", "is", null)
-              .where((e2) => e2.not(isRetryAnnouncement("b")))
               .where((e2) => e2.or([e2("b.stuck_at", "is not", null), e2("b.retry_at", ">", now)])),
           ),
         ),
