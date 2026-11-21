@@ -19,6 +19,18 @@ test("reset rejects every database outside _uat and _test", () => {
   assert.throws(() => uatDatabaseName("postgres://localhost/fx_uat_backup"), /_uat or _test/);
   assert.throws(() => uatDatabaseName("https://localhost/fx_test"), /valid PostgreSQL URL/);
 });
+test("reset leaves every schema untouched when the server selects a different database", async () => {
+  const queries: string[] = [];
+  let ended = false;
+  const client = {
+    connect: async () => {},
+    query: async (sql: string) => { queries.push(sql); return { rows: [{ name: "fx_other_test" }] }; },
+    end: async () => { ended = true; },
+  } as unknown as Parameters<typeof reset>[1];
+  await assert.rejects(reset("postgres://localhost/fx_test", client), /does not match disposable URL database fx_test/);
+  assert.deepEqual(queries, ["SELECT current_database() AS name"]);
+  assert.equal(ended, true);
+});
 
 const url = process.env.TEST_DATABASE_URL;
 const enabled = url !== undefined && /\/[^/?]*_test(\?|$)/.test(url);
