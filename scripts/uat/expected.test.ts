@@ -24,6 +24,11 @@ test("independent UAT results are stable, reconcile per group, and wait for the 
     for (const { date } of statuses) assert.deepEqual(await readFile(join(first, `${date}.csv`)), await readFile(join(second, `${date}.csv`)), date);
     assert.deepEqual(await readFile(join(first, "expected-status.json")), await readFile(join(second, "expected-status.json")));
     assert.deepEqual(await readFile(join(first, "gl-dirty-expected.json")), await readFile(join(second, "gl-dirty-expected.json")));
+    for (const file of [...statuses.map(({ date }) => `${date}.csv`), "expected-status.json", "gl-dirty-expected.json"]) {
+      const current = (await readFile(join(first, file), "utf8")).replaceAll("\r\n", "\n");
+      const committed = (await readFile(join("packs/uat/expected", file), "utf8")).replaceAll("\r\n", "\n");
+      assert.equal(current, committed, `committed expected file ${file} is stale; run npm run uat:expected`);
+    }
     const dirty = JSON.parse(await readFile(join(first, "gl-dirty-expected.json"), "utf8")) as DirtyResult;
     const count = (byCurrency: Record<string, { rows: number }>) => Object.values(byCurrency).reduce((sum, item) => sum + item.rows, 0);
     assert.equal(dirty.storedRows, 20000);
