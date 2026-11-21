@@ -10,7 +10,7 @@ import { reset, uatDatabaseName } from "./reset.ts";
 
 const config = JSON.parse(await readFile(new URL("../../packs/uat/config.json", import.meta.url), "utf8")) as UatConfig;
 test("the UAT sample policies satisfy the real policy validation", () => {
-  assert.deepEqual(config.programs.map((p) => policyProblems(p.policy)), [[], []]);
+  assert.deepEqual(config.tenants.map((t) => policyProblems(t.program.policy)), [[], []]);
 });
 test("reset rejects every database outside _uat and _test", () => {
   assert.equal(uatDatabaseName("postgres://localhost/fx_test"), "fx_test");
@@ -31,12 +31,18 @@ before(async () => {
   app = composeApp(url!);
 });
 after(async () => { if (enabled) await app.close(); });
-test("configure refuses a second run and leaves programs able to start cycles", { skip: !enabled }, async () => {
-  const tenant = await configure(app, config);
+test("configure refuses a second run and leaves both tenants able to start cycles", { skip: !enabled }, async () => {
+  const tenants = await configure(app, config);
   await assert.rejects(configure(app, config), /already exists/);
-  assert.equal((await app.exposureManagement.questions.tenantSettings(tenant)).segregationOfDuties, true);
-  assert.deepEqual((await app.exposureManagement.questions.programCatalog(tenant)).map((p) => p.programId).sort(), ["BS-ENT", "BS-REG"]);
+  const fresh = `Fresh-${Date.now()}`;
+  await assert.rejects(configure(app, { ...config, tenants: [{ ...config.tenants[0]!, tenantName: fresh }, config.tenants[1]!] }), /already exists/);
+  assert.equal(await app.identity.questions.tenantByName(fresh), null, "both names are checked before the first tenant is created");
   const platformUserId = await app.identity.commands.ensurePlatformUser(config.platformUser);
-  const started = await startDueCycles(app, tenant, "2026-11-20", { kind: "platform", platformUserId });
-  assert.equal(started.length, 2);
+  assert.equal(tenants.length, 2);
+  for (const [i, tenant] of tenants.entries()) {
+    assert.equal((await app.exposureManagement.questions.tenantSettings(tenant!)).segregationOfDuties, true);
+    assert.deepEqual((await app.exposureManagement.questions.programCatalog(tenant!)).map((p) => p.programId), [config.tenants[i]!.program.id]);
+    const started = await startDueCycles(app, tenant!, "2026-11-20", { kind: "platform", platformUserId });
+    assert.equal(started.length, 1);
+  }
 });
