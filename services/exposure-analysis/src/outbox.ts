@@ -1,5 +1,6 @@
 // Rule 5: a change and its announcement are written in one transaction. A dispatcher in app/ delivers pending events.
 import { randomUUID } from "node:crypto";
+import type { TenantId } from "@shared/kernel";
 import type { ExposureAnalysisEvents } from "../contract/index.ts";
 import { sql } from "kysely";
 import { q, type Db, type Queryable } from "./db.ts";
@@ -23,7 +24,9 @@ export interface DeliveryProblem {
 
 /**
  * Events that may be delivered now, oldest first. Per tenant, nothing is offered behind an event that is waiting to be retried or is stuck, so a tenant's
- * order is kept while other tenants carry on (decision 0019).
+ * order is kept while other tenants carry on (decision 0019). A `.change-recorded` announcement is exempt from that hold in both directions (decision
+ * 0030): Audit only needs its records to arrive, not in any order relative to this service's other events, and an operator's retry announcement must
+ * still reach Audit even if the event it was about gets stuck again before the announcement is delivered.
  */
 export async function pendingEvents(db: Db, limit = 100, now = new Date()): Promise<ExposureAnalysisEvents[]> {
   const rows = await q(db)
@@ -33,12 +36,16 @@ export async function pendingEvents(db: Db, limit = 100, now = new Date()): Prom
     .where("o.stuck_at", "is", null)
     .where((eb) => eb.or([eb("o.retry_at", "is", null), eb("o.retry_at", "<=", now)]))
     .where((eb) =>
-      eb.not(
-        eb.exists(
-          eb.selectFrom("outbox as b").select("b.event_id").whereRef("b.tenant_id", "=", "o.tenant_id").whereRef("b.seq", "<", "o.seq").where("b.published_at", "is", null)
-            .where((e2) => e2.or([e2("b.stuck_at", "is not", null), e2("b.retry_at", ">", now)])),
+      eb.or([
+        eb("o.type", "like", "%.change-recorded"),
+        eb.not(
+          eb.exists(
+            eb.selectFrom("outbox as b").select("b.event_id").whereRef("b.tenant_id", "=", "o.tenant_id").whereRef("b.seq", "<", "o.seq").where("b.published_at", "is", null)
+              .where("b.type", "not like", "%.change-recorded")
+              .where((e2) => e2.or([e2("b.stuck_at", "is not", null), e2("b.retry_at", ">", now)])),
+          ),
         ),
-      ),
+      ]),
     )
     .orderBy("o.seq")
     .limit(limit)
@@ -76,9 +83,19 @@ export async function deliveryProblems(db: Db): Promise<DeliveryProblem[]> {
   return rows.map((r) => ({ eventId: r.event_id, tenantId: r.tenant_id, type: r.type, attempts: r.attempts, lastError: r.last_error, retryAt: r.retry_at, stuckAt: r.stuck_at }));
 }
 
-/** An operator's retry of a stuck event: its tries start again. False when the event is not stuck. */
-export async function retryStuck(db: Db, eventId: string): Promise<boolean> {
-  const row = await q(db).updateTable("outbox").set({ attempts: 0, retry_at: null, stuck_at: null })
-    .where("event_id", "=", eventId).where("published_at", "is", null).where("stuck_at", "is not", null).returning("event_id").executeTakeFirst();
-  return row !== undefined;
+/**
+ * An operator's retry of a stuck event: its tries start again. False when the event is not stuck. The reset and the retry's own
+ * `event.retried` announcement commit or fail together (decision 0030), so the audit trail can never come apart from the retry.
+ */
+export async function retryStuck(db: Db, eventId: string, by: { tenantId: TenantId; actor: string }): Promise<boolean> {
+  return db.transaction().execute(async (tx) => {
+    const row = await q(tx).updateTable("outbox").set({ attempts: 0, retry_at: null, stuck_at: null })
+      .where("event_id", "=", eventId).where("published_at", "is", null).where("stuck_at", "is not", null).returning("event_id").executeTakeFirst();
+    if (row === undefined) return false;
+    await announce(tx, {
+      type: "exposure-analysis.change-recorded", tenantId: by.tenantId, programId: null, actor: by.actor,
+      action: "event.retried", targetType: "stuck-event", targetId: eventId, fields: [],
+    });
+    return true;
+  });
 }

@@ -15,6 +15,8 @@ import { NO_ACTION_MESSAGES } from "../../services/hedge-recommendation/contract
 import { sql, type KyselyPlugin } from "kysely";
 import { connect as connectHr, createHedgeRecommendation } from "../../services/hedge-recommendation/src/index.ts";
 import { connect as connectEm, createExposureManagement } from "../../services/exposure-management/src/index.ts";
+import { connect as connectFxRate } from "../../services/fx-rate/src/index.ts";
+import { retryStuck as retryStuckFxRate } from "../../services/fx-rate/src/outbox.ts";
 import { readPolicy } from "../../services/hedge-recommendation/src/queries.ts";
 import { parseExecutedFile } from "../../services/fx-trade/src/index.ts";
 import { RETRY_POLICY, deliveryProblems, drain, retryStuckEvent, startDueCycles } from "./dispatch.ts";
@@ -1411,12 +1413,99 @@ e2e("a failed delivery is retried 1, 2, 4, 8 minutes later, then stuck; it holds
     await drain(app, { now: at(600 * min) });
     assert.equal(calls.filter((c) => c === a).length, tries, "a stuck event is not tried again by itself");
 
-    assert.equal(await retryStuckEvent(app, "fx-rate", behind), false, "only a stuck event can be retried");
+    const audit = { tenantId: a, actor: "platform:test-operator" };
+    assert.equal(await retryStuckEvent(app, "fx-rate", behind, audit), false, "only a stuck event can be retried");
     broken = false;
-    assert.equal(await retryStuckEvent(app, "fx-rate", first), true);
-    assert.equal(await drain(app, { now: at(601 * min) }), 2, "the retried event and the one that waited behind it, in order");
+    assert.equal(await retryStuckEvent(app, "fx-rate", first, audit), true);
+    assert.equal(await drain(app, { now: at(601 * min) }), 3, "the retried event, the one that waited behind it, and the retry's own change-recorded announcement");
     assert.deepEqual((await deliveryProblems(app)).filter((p) => p.tenantId === a), []);
     void other;
+  } finally {
+    cmds.retryWaiting = real;
+    await client.end();
+  }
+});
+
+e2e("a retry's reset and its own audit announcement commit or fail together: a failed announcement write undoes the reset too", async () => {
+  const t = await tenantWithProgram();
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  const rawDb = connectFxRate(url!);
+  try {
+    const id = randomUUID();
+    await client.query("INSERT INTO fx_rate.outbox (event_id, tenant_id, type, payload) VALUES ($1, $2, 'fx-rate.loaded', $3)", [id, t, JSON.stringify({ type: "fx-rate.loaded", tenantId: t, eventId: id, occurredAt: new Date().toISOString() })]);
+    for (let i = 0; i < 5; i++) await app.fxRate.outbox.recordFailure(id, "unavailable", new Date(), RETRY_POLICY);
+    const before = (await client.query("SELECT attempts, stuck_at FROM fx_rate.outbox WHERE event_id = $1", [id])).rows[0] as { attempts: number; stuck_at: Date };
+    assert.ok(before.stuck_at !== null, "set up: stuck");
+
+    const failOutboxInserts: KyselyPlugin = {
+      transformQuery: (args) => {
+        if (args.node.kind === "InsertQueryNode" && JSON.stringify(args.node).includes('"outbox"')) throw new Error("simulated: the announcement insert failed");
+        return args.node;
+      },
+      async transformResult(args) {
+        return args.result;
+      },
+    };
+    const brokenDb = rawDb.withPlugin(failOutboxInserts);
+    await assert.rejects(retryStuckFxRate(brokenDb, id, { tenantId: t, actor: "platform:test-operator" }), /simulated: the announcement insert failed/);
+
+    const after = (await client.query("SELECT attempts, retry_at, stuck_at FROM fx_rate.outbox WHERE event_id = $1", [id])).rows[0] as { attempts: number; retry_at: Date | null; stuck_at: Date | null };
+    assert.equal(after.attempts, before.attempts, "attempts unchanged: the reset's UPDATE rolled back with the failed announcement INSERT");
+    assert.ok(after.stuck_at !== null, "still stuck: the reset never took effect on its own");
+    assert.deepEqual((await trailOf(t)).filter((r) => r.action === "event.retried" && r.targetId === id), [], "no announcement exists for a retry that did not commit");
+  } finally {
+    await rawDb.destroy();
+    await client.end();
+  }
+});
+
+e2e("a retry's own announcement reaches Audit even if the retried event fails again right away; a second stuck episode of the same event gets its own, separate announcement, and nothing duplicates on replay", async () => {
+  const t = await tenantWithProgram();
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  const cmds = app.exposureAnalysis.commands as unknown as { retryWaiting: (tenant: TenantId) => Promise<unknown> };
+  const real = cmds.retryWaiting;
+  let broken = true;
+  cmds.retryWaiting = async (tenant) => {
+    if (tenant === t && broken) throw new Error("unavailable");
+  };
+  const by = { tenantId: t, actor: "platform:test-operator" };
+  const retriedRecordsOf = async () => (await trailOf(t)).filter((r) => r.action === "event.retried" && r.targetId === id);
+  let id = "";
+  let clk = new Date("2031-01-01T00:00:00Z");
+  const tick = () => (clk = new Date(clk.getTime() + 20 * 60_000));
+  try {
+    id = randomUUID();
+    await client.query("INSERT INTO fx_rate.outbox (event_id, tenant_id, type, payload) VALUES ($1, $2, 'fx-rate.loaded', $3)", [id, t, JSON.stringify({ type: "fx-rate.loaded", tenantId: t, eventId: id, occurredAt: new Date().toISOString() })]);
+    for (let i = 0; i < 5; i++) {
+      await drain(app, { now: clk });
+      tick();
+    }
+    assert.ok((await deliveryProblems(app)).find((p) => p.eventId === id)?.stuckAt, "set up: stuck (episode 1)");
+
+    assert.equal(await retryStuckEvent(app, "fx-rate", id, by), true, "episode 1 retried");
+    // Still broken: the event fails again on every delivery attempt, re-reaching stuck without ever being delivered. The
+    // retry's own announcement (a separate, higher-sequence event) must still reach Audit throughout this (decision 0030),
+    // even though it is queued behind an event of the same tenant and service that keeps failing.
+    for (let i = 0; i < 5; i++) {
+      await drain(app, { now: clk });
+      tick();
+    }
+    assert.ok((await deliveryProblems(app)).find((p) => p.eventId === id)?.stuckAt, "episode 2: stuck again, without the retried event itself ever being delivered");
+    assert.equal((await retriedRecordsOf()).length, 1, "episode 1's announcement reached Audit despite the event it was about getting stuck again");
+
+    broken = false; // let it succeed this time
+    assert.equal(await retryStuckEvent(app, "fx-rate", id, by), true, "episode 2 retried");
+    await drain(app, { now: clk });
+
+    const afterBoth = await retriedRecordsOf();
+    assert.equal(afterBoth.length, 2, "a second, separate record for the second episode; the first is untouched");
+    assert.notEqual(afterBoth[0]!.recordId, afterBoth[1]!.recordId, "two distinct records, not one replayed");
+
+    const before = await trailOf(t);
+    await drain(app, { now: clk }); // nothing left pending: a repeat drain must add nothing
+    assert.deepEqual(await trailOf(t), before, "replaying with nothing new pending adds no duplicate");
   } finally {
     cmds.retryWaiting = real;
     await client.end();

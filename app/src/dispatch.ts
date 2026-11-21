@@ -126,11 +126,15 @@ export async function deliveryProblems(app: App): Promise<DeliveryProblem[]> {
   return all;
 }
 
-/** An operator's retry of a stuck event: its tries start again on the next drain. False when no such event is stuck. */
-export async function retryStuckEvent(app: App, service: string, eventId: string): Promise<boolean> {
+/**
+ * An operator's retry of a stuck event: its tries start again on the next drain. False when no such event is stuck.
+ * The service's own outbox resets it and announces the retry (`<service>.change-recorded`, `event.retried`) in one transaction
+ * (decision 0030), so `audit` names who did it and for which tenant.
+ */
+export async function retryStuckEvent(app: App, service: string, eventId: string, audit: { tenantId: TenantId; actor: string }): Promise<boolean> {
   const found = sources(app).find(([name]) => name === service);
   if (!found) throw new Error(`no service called ${service}`);
-  return found[1].outbox.retryStuck(eventId);
+  return found[1].outbox.retryStuck(eventId, audit);
 }
 
 /** Starts the cycles the schedule says are due today. A missed day is not made up. Returns the cycles started. */

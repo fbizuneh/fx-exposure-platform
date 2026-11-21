@@ -125,15 +125,16 @@ dbTest("the platform role sees and retries every tenant, may filter by tenant, a
   assert.ok(used.some((r) => r.targetId === "operations:manage-events"), "every use of the platform role is written to the trail (decision 0001)");
 });
 
-dbTest("an audit record exists for each retry: event.retried, target stuck-event / service:eventId", async () => {
+dbTest("an audit record exists for each retry: event.retried, target stuck-event / the plain event ID, source names the owning service", async () => {
   const { t, admin } = await tenantWithRoles();
   const stuck = await stuckEvent(t);
-  const before = (await recordsOf(t, admin)).length;
   await retryDeliveryProblem(app, admin, { service: "fx-rate", tenantId: t, eventId: stuck });
+  await drain(app); // the announcement is written in fx-rate's own outbox transaction now; it reaches Audit on the next drain, alongside whatever else this tenant's setup queued (e.g. identity's own user.added records), so match on the retry itself rather than a raw count
   const rs = await recordsOf(t, admin);
-  assert.equal(rs.length, before + 1);
-  const r = rs[rs.length - 1]!;
-  assert.deepEqual([r.action, r.targetType, r.targetId, r.programId, r.fields], ["event.retried", "stuck-event", `fx-rate:${stuck}`, null, []]);
+  const retried = rs.filter((r) => r.action === "event.retried" && r.targetId === stuck);
+  assert.equal(retried.length, 1, "exactly one retry record for this event");
+  const r = retried[0]!;
+  assert.deepEqual([r.source, r.targetType, r.programId, r.fields], ["fx-rate", "stuck-event", null, []]);
   assert.ok(r.actor.startsWith("user:"));
   assert.deepEqual(await app.audit.questions.verify(t, admin), { ok: true, checked: rs.length, brokenAtSeq: null });
 });

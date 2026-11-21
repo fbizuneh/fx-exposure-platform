@@ -24,7 +24,7 @@ The one deployable. It wires the services together, delivers events between them
 
 ## Files
 - `compose.ts`: builds every service over one database. `dispatch.ts`: `drain` (delivers events), `deliveryProblems`, `retryStuckEvent`, `startDueCycles`. These are unguarded primitives.
-- `operations.ts`: the guarded operator functions over `dispatch.ts` (decision 0030) — `listDeliveryProblems`, `deliveryProblemSummary`, `retryDeliveryProblem` — each checking `operations:manage-events` (TREASURY_ADMIN for their own tenant, the platform role for every tenant) and recording a retry to Audit as `event.retried`.
+- `operations.ts`: the guarded operator functions over `dispatch.ts` (decision 0030) — `listDeliveryProblems`, `deliveryProblemSummary`, `retryDeliveryProblem` — each checking `operations:manage-events` (TREASURY_ADMIN for their own tenant, the platform role for every tenant). A retry's `event.retried` announcement is written by the retried event's own service, atomically with the reset (every service's `outbox.ts`), not by `app/` after the fact, so the two cannot come apart.
 - `loaders/`: one function per file kind (entities, hierarchy, accounts, currencies, calendars, exposure currencies, GL, rates, executed). Each parses, returns `INVALID_FILE` without calling the service when the file has problems, otherwise calls the owning service command and maps refusals and results to `LoadOutcome`.
 - `cli/load.ts`: command-line shell over the loaders (`npm run load`).
 - `config.ts`, `log.ts`: settings and JSON logging (no row contents, secrets redacted).

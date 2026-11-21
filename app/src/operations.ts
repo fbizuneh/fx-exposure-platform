@@ -1,6 +1,5 @@
 // Guarded access to the stuck-event functions in dispatch.ts: who may see and retry a tenant's delivery problems (decision 0030).
 // dispatch.ts itself checks nothing; this is the only path a caller outside app/ should use.
-import { randomUUID } from "node:crypto";
 import type { Actor, DenyReason } from "@services/identity/contract";
 import type { TenantId } from "@shared/kernel";
 import type { App } from "./compose.ts";
@@ -101,24 +100,18 @@ export interface RetryTarget {
 /**
  * Retries a stuck event, after checking access for its named tenant and looking the event up within that tenant only — so one
  * tenant's admin can never reach another tenant's event by guessing an ID. Refuses an event that is not stuck, naming its state.
- * The retry itself is recorded to Audit as `event.retried`, target `stuck-event`/`<service>:<eventId>` (decision 0030 — the service is an
- * identifying detail of the target, not a value-free field name, matching how `role.granted` targets `<user>/<role>`); `checkAccess`
- * already records a platform role's use.
- * KNOWN GAP (DECISION REQUIRED, decision 0030): this record is written after the reset below has already committed, not in the
- * same transaction, so it can be lost to a crash or an Audit outage between the two steps, with the event then no longer stuck
- * and so never retried through this path again. The durable fix (each service's own outbox announces the retry, in the same
- * transaction as the reset) touches every service's outbox.ts and awaits the product owner's confirmation.
+ * The retry and its audit announcement (`event.retried`, target `stuck-event`/the plain event ID, `fields: []`) are written together,
+ * in the owning service's own outbox transaction (decision 0030, confirmed with the product owner after review) — not a separate
+ * call from here, so the two cannot come apart on a crash or an Audit outage between them. The announcement's `source` in the
+ * trail is that service's name, since it is that service's own outbox that changed. `checkAccess` already records a platform
+ * role's use.
  */
 export async function retryDeliveryProblem(app: App, actor: Actor, target: RetryTarget): Promise<void> {
   await checkTenant(app, actor, target.tenantId);
   const found = (await deliveryProblems(app)).find((p) => p.service === target.service && p.tenantId === target.tenantId && p.eventId === target.eventId);
   if (!found) throw new RangeError("no such event for this tenant");
   if (found.stuckAt === null) throw new RangeError("the event is retrying automatically; it is not stuck");
-  const retried = await retryStuckEvent(app, target.service, target.eventId);
-  if (!retried) throw new RangeError("the event is no longer stuck");
   const by = actor.kind === "user" ? `user:${actor.userId}` : `platform:${actor.platformUserId}`;
-  await app.audit.commands.record({
-    type: "operations.change-recorded", eventId: randomUUID(), occurredAt: new Date().toISOString(), tenantId: target.tenantId, programId: null,
-    actor: by, action: "event.retried", targetType: "stuck-event", targetId: `${target.service}:${target.eventId}`, fields: [],
-  });
+  const retried = await retryStuckEvent(app, target.service, target.eventId, { tenantId: target.tenantId, actor: by });
+  if (!retried) throw new RangeError("the event is no longer stuck");
 }
