@@ -50,7 +50,7 @@ async function approveExposure(t: TenantId, cycle: string): Promise<void> {
   await drain(app);
 }
 async function tenantWithProgram(level = "ENTITY", segregation = false): Promise<TenantId> {
-  const t = await app.identity.commands.createTenant("Acme");
+  const t = await app.identity.commands.createTenant(`Acme-${randomUUID()}`);
   const ops = (await app.identity.commands.createPlatformUser({ issuer: "platform", externalSubject: randomUUID() })) as string;
   await app.identity.commands.enableProgram(t, programId("BS"), ops);
   const adminId = await app.identity.commands.addUser(t, { issuer: "idp", externalSubject: randomUUID(), roles: ["TREASURY_ADMIN"] }, ops);
@@ -1357,7 +1357,7 @@ e2e("a failed delivery is retried 1, 2, 4, 8 minutes later, then stuck; it holds
 });
 
 e2e("a failure is persisted whole: an interrupted recording cannot leave an event eligible, a fifth failure never leads to a sixth delivery, and earlier failures keep their wait", async () => {
-  const tenant = await app.identity.commands.createTenant("Acme");
+  const tenant = await app.identity.commands.createTenant(`Acme-${randomUUID()}`);
   const client = new pg.Client({ connectionString: url });
   await client.connect();
   try {
@@ -1389,7 +1389,7 @@ e2e("a failure is persisted whole: an interrupted recording cannot leave an even
 });
 
 e2e("the wait after a failure starts when the delivery failed, not when the drain began", async () => {
-  const tenant = await app.identity.commands.createTenant("Acme");
+  const tenant = await app.identity.commands.createTenant(`Acme-${randomUUID()}`);
   const client = new pg.Client({ connectionString: url });
   await client.connect();
   const cmds = app.exposureAnalysis.commands as unknown as { retryWaiting: (t: TenantId) => Promise<unknown> };

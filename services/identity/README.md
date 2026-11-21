@@ -16,6 +16,7 @@ See docs/decisions/0001, 0002 and 0003 (identity-model, roles-and-permissions, u
 - Who may do what in which tenant and program
 - Which programs a tenant has enabled
 - Which tenants are active (platform level, no tenant; only the runtime asks, decision 0023)
+- The tenant ID for an exact name, including disabled tenants (decision 0024)
 Each is defined in contract/.
 
 ## Announces

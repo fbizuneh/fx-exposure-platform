@@ -10,6 +10,10 @@ import { deliveryProblems, markPublished, pendingEvents, recordFailure, retryStu
 
 export function identityQuestions(db: Db): IdentityQuestions {
   return {
+    async tenantByName(name) {
+      const row = await q(db).selectFrom("tenants").select("tenant_id").where("name", "=", name).executeTakeFirst();
+      return (row?.tenant_id ?? null) as TenantId | null;
+    },
     async checkAccess(query) {
       const decision = decide(query, await loadAccessFacts(db, query));
       // Every use of the platform role is written to the trail (decision 0001), whether or not the tenant would have allowed it.

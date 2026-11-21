@@ -48,7 +48,7 @@ after(async () => {
 
 async function tenantWithDailyProgram(name: string): Promise<{ tenant: TenantId; admin: Actor }> {
   const { app } = runtime;
-  const tenant = await app.identity.commands.createTenant(name);
+  const tenant = await app.identity.commands.createTenant(`${name}-${randomUUID()}`);
   const ops = (await app.identity.commands.createPlatformUser({ issuer: "platform", externalSubject: randomUUID() })) as string;
   await app.identity.commands.enableProgram(tenant, programId("BS"), ops);
   const adminId = await app.identity.commands.addUser(tenant, { issuer: "idp", externalSubject: randomUUID(), roles: ["TREASURY_ADMIN"] }, ops);

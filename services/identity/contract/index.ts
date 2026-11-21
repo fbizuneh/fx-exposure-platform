@@ -92,6 +92,8 @@ export interface ProgramScope {
 
 /** The questions Identity answers. Inside the deployable this is a direct call. */
 export interface IdentityQuestions {
+  /** Exact-name lookup, including disabled tenants. A name is reserved for one tenant. */
+  tenantByName(name: string): Promise<TenantId | null>;
   checkAccess(query: AccessQuery): Promise<AccessDecision>;
   enabledPrograms(tenantId: TenantId): Promise<readonly ProgramId[]>;
   /** The program scope of an actor in a tenant, for services that list records across programs (decision 0001). */

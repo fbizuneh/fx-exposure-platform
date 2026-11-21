@@ -43,6 +43,19 @@ const everythingFor = async (tenant: TenantId) => (await id.outbox.pending(1000)
 const eventsFor = async (tenant: TenantId) => (await everythingFor(tenant)).filter((e) => e.type !== "identity.change-recorded"); // what other services react to
 const changesFor = async (tenant: TenantId) => (await everythingFor(tenant)).flatMap((e) => (e.type === "identity.change-recorded" ? [`${e.action} ${e.targetType}`] : [])); // what Audit is told
 
+dbTest("a tenant name identifies one tenant even under concurrent creation", async () => {
+  const name = `UAT-${randomUUID()}`;
+  assert.equal(await id.questions.tenantByName(name), null);
+  const attempts = await Promise.allSettled([id.commands.createTenant(name), id.commands.createTenant(name)]);
+  const made = attempts.filter((r): r is PromiseFulfilledResult<TenantId> => r.status === "fulfilled");
+  const refused = attempts.filter((r) => r.status === "rejected");
+  assert.deepEqual([made.length, refused.length], [1, 1]);
+  assert.equal(await id.questions.tenantByName(name), made[0]!.value);
+  await q(db).updateTable("tenants").set({ status: "DISABLED" }).where("tenant_id", "=", made[0]!.value).execute();
+  assert.equal(await id.questions.tenantByName(name), made[0]!.value, "a disabled tenant still reserves its name");
+  await assert.rejects(id.commands.createTenant(name));
+});
+
 dbTest("access end to end: roles, enabled programs, restriction, disabled user", async () => {
   const { tenant, by } = await tenantWith("Acme", [DAILY, MONTHLY]);
   const user = await id.commands.addUser(tenant, { issuer: "idp", externalSubject: "s1", roles: ["TREASURY_APPROVER"] }, by);
