@@ -1,0 +1,10 @@
+{
+  "expectedLoadStatus": "APPLIED",
+  "storedRows": 20000,
+  "plantedChanges": {
+    "unknownEntity": 10,
+    "unknownAccount": 10,
+    "excludedAccount": 10
+  },
+  "serviceQualityCounts": "pending D loader and Data Source/Exposure Analysis verification"
+}
