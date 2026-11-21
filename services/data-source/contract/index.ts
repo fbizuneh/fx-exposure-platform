@@ -1,5 +1,6 @@
 // Published questions and events of Data Source. Other services import this file, never src/.
 import type { AccountId, AsOfDate, EntityId, LineageRef, ProgramId, TenantId } from "@shared/kernel";
+import type { ChangeRecordFields } from "@services/audit/contract";
 
 /** One included balance, stamped with its program. Amounts are signed decimal strings, kept as the source sent them; the sign says nothing about asset or liability. */
 export interface IncludedBalance {
@@ -84,4 +85,11 @@ export interface IssuesRaised {
   readonly occurredAt: string;
   readonly batchId: string;
 }
-export type DataSourceEvents = DataStamped | IssuesRaised;
+
+/** A change record for Audit (decision 0012): who did what to which record. Identifiers and field names only. */
+export interface DataSourceChangeRecorded extends ChangeRecordFields {
+  readonly type: "data-source.change-recorded";
+  readonly eventId: string;
+  readonly occurredAt: string;
+}
+export type DataSourceEvents = DataStamped | IssuesRaised | DataSourceChangeRecorded;
