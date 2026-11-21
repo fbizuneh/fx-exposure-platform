@@ -35,8 +35,8 @@ Row type: `EntityRow` in Master Data. Load options: `--source`, `--as-of`, `--mo
 
 ```csv
 code,name,type,parent_code,country_code,functional_currency,is_legal_entity,is_treasury_entity,is_hedge_execution_entity
-G,Acme Group,GROUP,,,false,false,false
-AMER,Americas,REGION,G,,false,false,false
+G,Acme Group,GROUP,,,,false,false,false
+AMER,Americas,REGION,G,,,false,false,false
 US1,Acme US Inc,LEGAL_ENTITY,AMER,US,USD,true,true,true
 ```
 
@@ -112,7 +112,7 @@ Row type: `CalendarRow` in Master Data (decision 0014). The file is one row per 
 | Column | Type | Required? | Allowed values |
 | --- | --- | --- | --- |
 | `currency_code` | text | yes | Three upper-case letters |
-| `weekend_days` | text | yes | One to three values from `MON`, `TUE`, `WED`, `THU`, `FRI`, `SAT`, `SUN`, separated by `\|` (for example `SAT\|SUN`). Every row of one currency must repeat the same value |
+| `weekend_days` | text | yes | Zero to three values from `MON`, `TUE`, `WED`, `THU`, `FRI`, `SAT`, `SUN`, separated by `\|` (for example `SAT\|SUN`); empty means no weekend days. Master Data refuses more than three (`validateCalendars`). Every row of one currency must repeat the same value |
 | `covered_through` | date | yes | `YYYY-MM-DD`. Every row of one currency must repeat the same value. Holidays must not fall after it |
 | `holiday_date` | date | no | `YYYY-MM-DD`, or empty when the currency has no holidays |
 | `holiday_name` | text | no | Empty, or a non-blank name for that holiday |
@@ -193,9 +193,9 @@ A spot row must not carry a value date, spot or forward points. Service validati
 
 ```csv
 base,quote,type,tenor,value_date,all_in,spot,forward_points,bid,mid,ask,observed_at
-EUR,USD,SPOT,SPOT,,1.0850000000,,,,1.0849000000,1.0850000000,1.0851000000,2026-03-09T16:30:00Z
+EUR,USD,SPOT,SPOT,,1.0850000000,,,1.0849000000,1.0850000000,1.0851000000,2026-03-09T16:30:00Z
 GBP,USD,SPOT,SPOT,,1.2700000000,,,,,,2026-03-09T16:30:00Z
-EUR,USD,FORWARD,3M,2026-06-09,1.0900000000,1.0850000000,0.0050000000,,,2026-03-09T16:30:00Z
+EUR,USD,FORWARD,3M,2026-06-09,1.0900000000,1.0850000000,0.0050000000,,,,2026-03-09T16:30:00Z
 ```
 
 ---
