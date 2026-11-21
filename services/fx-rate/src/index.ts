@@ -23,3 +23,5 @@ export type { Db };
 export { RatesInvalid } from "./validate.ts";
 export type { RateRow } from "./rows.ts";
 export type { RateLoad, LoadResult } from "./load.ts";
+export { parseRatesFile } from "./file.ts";
+export type { FileProblem, ParseResult } from "./file.ts";

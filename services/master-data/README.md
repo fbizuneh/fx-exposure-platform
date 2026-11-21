@@ -29,5 +29,8 @@ Events carry identifiers only.
 - ERP and TMS syncs
 - Manual uploads and edits
 
+## Files
+Pure parsers in `src/files.ts` (`parseEntitiesFile`, `parseHierarchyFile`, `parseAccountsFile`, `parseCurrenciesFile`, `parseCalendarsFile`, `parseExposureCurrenciesFile`) read the layouts in `docs/file-layouts.md` via the local `csv.ts`. Shape only; loaders call them then submit.
+
 ## Schema
 `master_data`. Its tables are defined by this service's migrations.
