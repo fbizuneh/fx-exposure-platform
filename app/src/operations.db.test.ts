@@ -125,7 +125,7 @@ dbTest("the platform role sees and retries every tenant, may filter by tenant, a
   assert.ok(used.some((r) => r.targetId === "operations:manage-events"), "every use of the platform role is written to the trail (decision 0001)");
 });
 
-dbTest("an audit record exists for each retry: event.retried, the event ID as target, naming the service", async () => {
+dbTest("an audit record exists for each retry: event.retried, target stuck-event / service:eventId", async () => {
   const { t, admin } = await tenantWithRoles();
   const stuck = await stuckEvent(t);
   const before = (await recordsOf(t, admin)).length;
@@ -133,7 +133,33 @@ dbTest("an audit record exists for each retry: event.retried, the event ID as ta
   const rs = await recordsOf(t, admin);
   assert.equal(rs.length, before + 1);
   const r = rs[rs.length - 1]!;
-  assert.deepEqual([r.action, r.targetType, r.targetId, r.programId, r.fields], ["event.retried", "fx-rate", stuck, null, []]);
+  assert.deepEqual([r.action, r.targetType, r.targetId, r.programId, r.fields], ["event.retried", "stuck-event", `fx-rate:${stuck}`, null, []]);
   assert.ok(r.actor.startsWith("user:"));
   assert.deepEqual(await app.audit.questions.verify(t, admin), { ok: true, checked: rs.length, brokenAtSeq: null });
+});
+
+dbTest("the platform role's use is recorded once per call, not once per tenant it happens to see", async () => {
+  // At least 3 active tenants, so a per-tenant loop (the bug) would make a clearly different number of calls than the fix.
+  await tenantWithRoles();
+  await tenantWithRoles();
+  await tenantWithRoles();
+  const platformUserId = await app.identity.commands.createPlatformUser({ issuer: "platform", externalSubject: randomUUID() });
+  const platform: Actor = { kind: "platform", platformUserId: platformUserId as never };
+
+  // Each call to checkAccess for the platform role, allowed or not, is one write of platform-role.used (decision 0001);
+  // counting calls is the direct, tenant-count-independent way to check "one per list/summary call", not "one per tenant it could see".
+  const real = app.identity.questions.checkAccess;
+  let calls = 0;
+  app.identity.questions.checkAccess = (async (q) => {
+    calls++;
+    return real(q);
+  }) as typeof real;
+  try {
+    await listDeliveryProblems(app, platform);
+    await listDeliveryProblems(app, platform);
+    await deliveryProblemSummary(app, platform);
+  } finally {
+    app.identity.questions.checkAccess = real;
+  }
+  assert.equal(calls, 3, "one checkAccess call per list/summary call, not one per tenant the call could see (there are at least 3 of those)");
 });

@@ -21,10 +21,22 @@ async function checkTenant(app: App, actor: Actor, tenant: TenantId): Promise<vo
   if (!decision.allowed) throw new AccessDenied(decision.reason);
 }
 
-/** The tenants whose events this actor may see: the admin's own tenant, or, for the platform role, every tenant (decision #8/0030). */
+/**
+ * The tenants whose events this actor may see: the admin's own tenant, or, for the platform role, every tenant (decision #8/0030).
+ * A platform actor's grant does not depend on which tenant is named (`checkAccess` decides it from the platform role alone, before
+ * any tenant fact is loaded), so one check settles it for every candidate; checking once per candidate would also record
+ * `platform-role.used` once per candidate (decision 0001), which is not one use of the role but as many as there are tenants.
+ */
 async function visibleTenants(app: App, actor: Actor, candidates: Iterable<string>): Promise<Set<string>> {
+  const all = new Set<string>(candidates);
+  if (all.size === 0) return all;
+  if (actor.kind === "platform") {
+    const probe = [...all][0]!;
+    const decision = await app.identity.questions.checkAccess({ tenantId: probe as TenantId, actor, permission: PERMISSION });
+    return decision.allowed ? all : new Set();
+  }
   const visible = new Set<string>();
-  for (const t of new Set(candidates)) {
+  for (const t of all) {
     const decision = await app.identity.questions.checkAccess({ tenantId: t as TenantId, actor, permission: PERMISSION });
     if (decision.allowed) visible.add(t);
   }
@@ -89,7 +101,9 @@ export interface RetryTarget {
 /**
  * Retries a stuck event, after checking access for its named tenant and looking the event up within that tenant only — so one
  * tenant's admin can never reach another tenant's event by guessing an ID. Refuses an event that is not stuck, naming its state.
- * The retry itself is recorded to Audit as `event.retried` (decision 0030); `checkAccess` already records a platform role's use.
+ * The retry itself is recorded to Audit as `event.retried`, target `stuck-event`/`<service>:<eventId>` (decision 0030 — the service is an
+ * identifying detail of the target, not a value-free field name, matching how `role.granted` targets `<user>/<role>`); `checkAccess`
+ * already records a platform role's use.
  * KNOWN GAP (DECISION REQUIRED, decision 0030): this record is written after the reset below has already committed, not in the
  * same transaction, so it can be lost to a crash or an Audit outage between the two steps, with the event then no longer stuck
  * and so never retried through this path again. The durable fix (each service's own outbox announces the retry, in the same
@@ -105,6 +119,6 @@ export async function retryDeliveryProblem(app: App, actor: Actor, target: Retry
   const by = actor.kind === "user" ? `user:${actor.userId}` : `platform:${actor.platformUserId}`;
   await app.audit.commands.record({
     type: "operations.change-recorded", eventId: randomUUID(), occurredAt: new Date().toISOString(), tenantId: target.tenantId, programId: null,
-    actor: by, action: "event.retried", targetType: target.service, targetId: target.eventId, fields: [],
+    actor: by, action: "event.retried", targetType: "stuck-event", targetId: `${target.service}:${target.eventId}`, fields: [],
   });
 }
