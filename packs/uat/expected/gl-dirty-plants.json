@@ -6,5 +6,36 @@
     "unknownAccount": 10,
     "excludedAccount": 10
   },
-  "serviceQualityCounts": "pending D loader and Data Source/Exposure Analysis verification"
+  "expectedByProgram": {
+    "BS-ENT": {
+      "received": 20000,
+      "included": 18558,
+      "excluded": 1422,
+      "blocked": 20,
+      "blockedReasons": {
+        "GL_ENTITY_UNKNOWN": 10,
+        "GL_ACCOUNT_UNKNOWN": 10
+      },
+      "independentExclusionReasons": {
+        "NONFX": 1000,
+        "LE45": 422
+      }
+    },
+    "BS-REG": {
+      "received": 20000,
+      "included": 17890,
+      "excluded": 2090,
+      "blocked": 20,
+      "blockedReasons": {
+        "GL_ENTITY_UNKNOWN": 10,
+        "GL_ACCOUNT_UNKNOWN": 10
+      },
+      "independentExclusionReasons": {
+        "NONFX": 1000,
+        "LE45": 422,
+        "ACCOUNT_1900": 668
+      }
+    }
+  },
+  "method": "Compare Data Source total included/excluded/blocked and blocked issue codes to these counts; the exclusion-reason breakdown is independently calculated from the generated file and configured mappings, because the service does not report reasons for excluded rows."
 }

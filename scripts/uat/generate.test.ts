@@ -43,6 +43,25 @@ test("one seed produces identical complete UAT files and a manifest that covers 
     assert.equal(missingRates.filter((line) => line.startsWith(`${manifest.planted.missing.currency},USD,`)).length, 0);
     const staleRates = (await readFile(join(first, `rates/rates-${manifest.planted.stale.date}.csv`), "utf8")).split("\n");
     assert.equal(staleRates.filter((line) => line.startsWith(`${manifest.planted.stale.currency},USD,`)).length, 5);
+
+    const knownEntities = new Set((await readFile(join(first, "entities.csv"), "utf8")).trimEnd().split("\n").slice(1).map((line) => line.split(",")[0]));
+    const knownAccounts = new Set((await readFile(join(first, "accounts.csv"), "utf8")).trimEnd().split("\n").slice(1).map((line) => line.split(",")[1]));
+    const dirty = (await readFile(join(first, "gl-dirty.csv"), "utf8")).trimEnd().split("\n").slice(1);
+    const expected = JSON.parse(await readFile("packs/uat/expected/gl-dirty-plants.json", "utf8")) as { expectedByProgram: Record<string, { included: number; excluded: number; blocked: number; independentExclusionReasons: Record<string, number> }> };
+    for (const program of ["BS-ENT", "BS-REG"]) {
+      const counts = { included: 0, excluded: 0, blocked: 0, independentExclusionReasons: { NONFX: 0, LE45: 0, ACCOUNT_1900: 0 } };
+      for (const line of dirty) {
+        const [entity, account] = line.split(",");
+        if (!knownEntities.has(entity) || !knownAccounts.has(account)) counts.blocked++;
+        else if (account!.startsWith("8")) { counts.excluded++; counts.independentExclusionReasons.NONFX++; }
+        else if (entity === "LE45") { counts.excluded++; counts.independentExclusionReasons.LE45++; }
+        else if (program === "BS-REG" && account === "1900") { counts.excluded++; counts.independentExclusionReasons.ACCOUNT_1900++; }
+        else counts.included++;
+      }
+      const e = expected.expectedByProgram[program]!;
+      assert.deepEqual([counts.included, counts.excluded, counts.blocked], [e.included, e.excluded, e.blocked]);
+      for (const [reason, count] of Object.entries(e.independentExclusionReasons)) assert.equal(counts.independentExclusionReasons[reason as keyof typeof counts.independentExclusionReasons], count);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
