@@ -306,15 +306,38 @@ export async function countUndelivered(
   return { pending, failed };
 }
 
+function deliveryFollowUp(
+  lines: string[],
+  options: { deliveryIncomplete?: boolean; deliveryUnconfirmed?: boolean },
+): { readonly exitCode: ExitCode; readonly lines: string[] } | null {
+  if (options.deliveryUnconfirmed) {
+    return {
+      exitCode: 3,
+      lines: [...lines, "delivery could not be confirmed (load committed; retry delivery, do not re-import)"],
+    };
+  }
+  if (options.deliveryIncomplete) {
+    return {
+      exitCode: 3,
+      lines: [...lines, "delivery did not finish (load committed; events pending or failed for retry)"],
+    };
+  }
+  return null;
+}
+
 /** One summary line, then up to 50 problems (never row contents or raw service refusal text). */
 export function formatOutput(
   kind: Kind,
   outcome: LoadOutcome,
-  options: { dryRun?: boolean; drained?: number; deliveryIncomplete?: boolean } = {},
+  options: {
+    dryRun?: boolean;
+    drained?: number;
+    deliveryIncomplete?: boolean;
+    deliveryUnconfirmed?: boolean;
+  } = {},
 ): { readonly exitCode: ExitCode; readonly lines: string[] } {
   const dry = options.dryRun === true;
   const drainSuffix = options.drained !== undefined ? ` drained=${options.drained}` : "";
-  const deliveryNote = "delivery did not finish (load committed; events pending or failed for retry)";
 
   if (outcome.kind === "INVALID_FILE") {
     const problems = outcome.problems;
@@ -334,11 +357,7 @@ export function formatOutput(
   if (outcome.kind === "HELD") {
     // Reason is the safeguard summary (counts only), not rejected row values.
     const lines = [`${kind}: HELD batchId=${outcome.batchId} reason=${outcome.reason}${drainSuffix}`];
-    if (options.deliveryIncomplete) {
-      lines.push(deliveryNote);
-      return { exitCode: 3, lines };
-    }
-    return { exitCode: 4, lines };
+    return deliveryFollowUp(lines, options) ?? { exitCode: 4, lines };
   }
 
   // DONE
@@ -349,12 +368,8 @@ export function formatOutput(
     .map(([k, v]) => `${k}=${v}`)
     .join(" ");
   const summary = `${kind}: ${outcome.status}${counts ? ` ${counts}` : ""}${drainSuffix}`;
-  if (options.deliveryIncomplete) {
-    return { exitCode: 3, lines: [summary, deliveryNote] };
-  }
-  return { exitCode: 0, lines: [summary] };
-}
-export interface LoadCliResult {
+  return deliveryFollowUp([summary], options) ?? { exitCode: 0, lines: [summary] };
+}export interface LoadCliResult {
   readonly exitCode: ExitCode;
   readonly lines: string[];
 }
@@ -427,13 +442,19 @@ export async function runLoad(
 
     let drained: number | undefined;
     let deliveryIncomplete = false;
+    let deliveryUnconfirmed = false;
     if (parsed.drain && (outcome.kind === "DONE" || outcome.kind === "HELD")) {
-      drained = await drainOnce(app);
-      const left = await undelivered(app, parseTenant(parsed.tenant));
-      deliveryIncomplete = left.pending > 0 || left.failed > 0;
+      // Load already committed: drain/outbox failures must not look like a failed import.
+      try {
+        drained = await drainOnce(app);
+        const left = await undelivered(app, parseTenant(parsed.tenant));
+        deliveryIncomplete = left.pending > 0 || left.failed > 0;
+      } catch {
+        deliveryUnconfirmed = true;
+      }
     }
 
-    return formatOutput(parsed.kind, outcome, { drained, deliveryIncomplete });
+    return formatOutput(parsed.kind, outcome, { drained, deliveryIncomplete, deliveryUnconfirmed });
   } finally {
     await app.close();
   }

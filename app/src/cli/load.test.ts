@@ -253,6 +253,60 @@ describe("runLoad --drain", () => {
     assert.match(result.lines[1]!, /delivery did not finish/);
     assert.ok(result.lines.every((l) => !/roll.?back/i.test(l)));
   });
+
+  it("throwing dispatcher keeps APPLIED summary and exits 3", async () => {
+    const boom = `dispatcher blew up with ${MARKER}`;
+    const result = await runLoad(argv, { DATABASE_URL: "postgres://test/db" }, {
+      defaultBy: "cli:test",
+      readFile: async () => csv,
+      composeApp: () =>
+        appliedApp(async () => ({
+          status: "APPLIED",
+          batchId: "b1",
+          created: 2,
+          changed: 0,
+          ended: 0,
+          unchanged: 0,
+        })),
+      drain: async () => {
+        throw new Error(boom);
+      },
+      countUndelivered: async () => ({ pending: 0, failed: 0 }),
+    });
+    assert.equal(result.exitCode, 3);
+    assert.match(result.lines[0]!, /^currencies: APPLIED created=2/);
+    assert.match(result.lines[1]!, /delivery could not be confirmed/);
+    assert.match(result.lines[1]!, /load committed/);
+    assert.ok(result.lines.every((l) => !l.includes(MARKER)));
+    assert.ok(result.lines.every((l) => !l.includes("blew up")));
+  });
+
+  it("throwing outbox check keeps APPLIED summary and exits 3", async () => {
+    const boom = `outbox check failed for ${MARKER}`;
+    const result = await runLoad(argv, { DATABASE_URL: "postgres://test/db" }, {
+      defaultBy: "cli:test",
+      readFile: async () => csv,
+      composeApp: () =>
+        appliedApp(async () => ({
+          status: "APPLIED",
+          batchId: "b1",
+          created: 2,
+          changed: 0,
+          ended: 0,
+          unchanged: 0,
+        })),
+      drain: async () => 2,
+      countUndelivered: async () => {
+        throw new Error(boom);
+      },
+    });
+    assert.equal(result.exitCode, 3);
+    assert.match(result.lines[0]!, /^currencies: APPLIED created=2/);
+    assert.match(result.lines[0]!, /drained=2/);
+    assert.match(result.lines[1]!, /delivery could not be confirmed/);
+    assert.ok(result.lines.every((l) => !l.includes(MARKER)));
+    assert.ok(result.lines.every((l) => !l.includes("outbox check failed")));
+  });
 });
 
 describe("refusal output never prints CSV values", () => {
