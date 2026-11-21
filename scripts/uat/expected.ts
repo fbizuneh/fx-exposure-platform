@@ -155,6 +155,36 @@ export async function writeExpected(generated = "packs/uat/generated", configPat
     }
   }
   await writeFile(join(out, "expected-status.json"), `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+  const dirty = table(await readFile(join(generated, "gl-dirty.csv"), "utf8"));
+  const totals = (rows: Record<string, string>[]) => {
+    const byCurrency: Record<string, { rows: number; balance: string }> = {};
+    for (const row of rows) {
+      const currency = row.currency!;
+      const prior = byCurrency[currency];
+      byCurrency[currency] = { rows: (prior?.rows ?? 0) + 1, balance: new D(prior?.balance ?? 0).plus(row.balance!).toFixed(2) };
+    }
+    return Object.fromEntries(Object.entries(byCurrency).sort(([a], [b]) => a.localeCompare(b)));
+  };
+  const byProgram: Record<string, { included: ReturnType<typeof totals>; excluded: ReturnType<typeof totals>; blocked: ReturnType<typeof totals>; byReason: Record<string, ReturnType<typeof totals>> }> = {};
+  for (const { program } of config.tenants) {
+    const classified: Record<string, Record<string, string>[]> = {};
+    for (const row of dirty) {
+      const entity = entities.get(row.entity_code!);
+      const account = accounts.get(row.account_number!);
+      let reason: string;
+      if (!entity) reason = "GL_ENTITY_UNKNOWN";
+      else if (!account) reason = "GL_ACCOUNT_UNKNOWN";
+      else if (!account.fx || !account.monetary) reason = "NONFX";
+      else if (row.entity_code === "LE45") reason = "LE45";
+      else if (!included(row, program, account, parents, row.as_of!)) reason = account.number === "1900" ? "ACCOUNT_1900" : "OTHER_MAPPING";
+      else reason = "INCLUDED";
+      (classified[reason] ??= []).push(row);
+    }
+    const pick = (reasons: string[]) => reasons.flatMap((reason) => classified[reason] ?? []);
+    const excludedReasons = Object.keys(classified).filter((reason) => !["INCLUDED", "GL_ENTITY_UNKNOWN", "GL_ACCOUNT_UNKNOWN"].includes(reason)).sort();
+    byProgram[program.id] = { included: totals(pick(["INCLUDED"])), excluded: totals(pick(excludedReasons)), blocked: totals(pick(["GL_ENTITY_UNKNOWN", "GL_ACCOUNT_UNKNOWN"])), byReason: Object.fromEntries(excludedReasons.concat(["GL_ENTITY_UNKNOWN", "GL_ACCOUNT_UNKNOWN"]).map((reason) => [reason, totals(pick([reason]))])) };
+  }
+  await writeFile(join(out, "gl-dirty-expected.json"), `${JSON.stringify({ loadStatus: "APPLIED", storedRows: dirty.length, batchControlTotals: totals(dirty), byProgram }, null, 2)}\n`, "utf8");
   return summary;
 }
 

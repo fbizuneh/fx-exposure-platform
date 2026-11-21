@@ -11,7 +11,8 @@ The pack has 50 entity records (45 legal), 40 currencies, 25 hierarchy nodes, 40
 | Missing EUR/USD spot and forward curve | `rates/rates-2026-11-12.csv` | Exposure or recommendation rate lookup |
 | Stale GBP/USD observation | `rates/rates-2026-11-13.csv`; observed 2026-11-12 16:30 UTC | FX Rate quality flag |
 | AUD/USD spot and forward outlier | `rates/rates-2026-11-16.csv`; 25% spot jump | FX Rate quality flag |
-| Illustrative EUR holiday on the 3M value date | `calendars.csv` and `rates/rates-2026-11-20.csv`; 2027-02-22 | Joint calendar/value-date check |
+| Illustrative EUR holiday in the 3M value-date roll | `calendars.csv` and `rates/rates-2026-11-20.csv`; 2027-02-22 closes, quoted value date 2027-02-23 | Joint calendar/value-date check |
+| Late GL file | `gl/gl-2026-10-27.csv`; hold it back in both tenants until after the cycle starts | Cycle waits, then completes after the load and rerun |
 | EUR balance sign reversal | `gl/gl-2026-11-19.csv` and `gl/gl-2026-11-20.csv` | Exposure calculation |
 | All LE45 balances out of scope | Every GL file and both program mappings | Data Source mapping |
 | Forty file-shape errors | `gl-malformed.csv`; row and column list in `packs/uat/expected/gl-malformed-problems.json` | D parser, all or nothing |

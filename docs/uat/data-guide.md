@@ -38,11 +38,14 @@ foreach ($tenant in $tenants) {
   if ($LASTEXITCODE -ne 0) { throw "Executed history load failed" }
   foreach ($file in (Get-ChildItem "$pack/gl/gl-*.csv" | Sort-Object Name)) {
     $day = [regex]::Match($file.Name, '\d{4}-\d{2}-\d{2}').Value
+    if ($day -eq "2026-10-27") { continue } # scenario 3 loads this after cycle start
     npm run load -- gl $file.FullName --tenant $tenant.id --chart UAT --as-of $day --source uat-gl --drain
     if ($LASTEXITCODE -ne 0) { throw "GL load failed: $day" }
   }
 }
 ```
+
+For scenario 3, start the 2026-10-27 cycle in each tenant while that GL file is still withheld. Then load `gl/gl-2026-10-27.csv` with the same `gl` command and tenant arguments as the loop above, and rerun the waiting cycle. Do this before comparing the dated expected CSV.
 
 Load the malformed fixture with `--as-of 2026-11-20 --chart UAT --source uat-gl --tenant <id>` in place of a regular GL file. D5 must return `INVALID_FILE`, exit 1, all 40 problems at data rows 1–40 with the columns in `packs/uat/expected/gl-malformed-problems.json`, and store zero rows. Load `gl-dirty.csv` with the same options after the regular 2026-11-20 batch. It must return `APPLIED` and replace that source/date's current batch; reload `gl/gl-2026-11-20.csv` afterward to restore the baseline. Run these fixture demonstrations separately in each tenant so their results are not mixed with a cycle under review.
 
@@ -51,11 +54,11 @@ Load the malformed fixture with `--as-of 2026-11-20 --chart UAT --source uat-gl 
 | Condition | File and date | Detection and expected result |
 | --- | --- | --- |
 | Malformed GL | `gl-malformed.csv`, 2026-11-20 | D parser: `INVALID_FILE`, exit 1, 40 problems, zero stored; row/column list in `expected/gl-malformed-problems.json`. |
-| Parser-valid dirty GL | `gl-dirty.csv`, 2026-11-20 | Data Source: `APPLIED`, 20,000 stored, 20 blocked (`GL_ENTITY_UNKNOWN` 10, `GL_ACCOUNT_UNKNOWN` 10). `BS-ENT`: included 18,558, excluded 1,422. `BS-REG`: included 17,890, excluded 2,090. Independent exclusion reasons are in `expected/gl-dirty-plants.json`. The service exposes total excluded, not a reason-specific count; compare its total with the independent calculation, as Fikre chose. |
+| Parser-valid dirty GL | `gl-dirty.csv`, 2026-11-20 | Data Source: `APPLIED`, 20,000 stored, 20 blocked (`GL_ENTITY_UNKNOWN` 10, `GL_ACCOUNT_UNKNOWN` 10). `BS-ENT`: included 18,558, excluded 1,422. `BS-REG`: included 17,890, excluded 2,090. Compare J1 batch control totals by currency with `expected/gl-dirty-expected.json`; compare program totals with its independent per-currency and per-reason calculations. The service exposes total excluded, not a reason-specific count. |
 | Missing EUR/USD | `rates/rates-2026-11-12.csv` | FX Rate file loads; Exposure Analysis waits with `NO_RATE EUR-USD 2026-11-12`, cycle stays initiated. `expected/2026-11-12.csv` has no numeric rows; `expected-status.json` records the wait. |
 | Stale GBP/USD | `rates/rates-2026-11-13.csv`, observed 2026-11-12 16:30Z | FX Rate marks GBP/USD spot and forwards `STALE` under the 1,440-minute setting. Exposure Analysis may use the rate and shows a warning; compare numbers with `expected/2026-11-13.csv`. |
 | AUD/USD outlier | `rates/rates-2026-11-16.csv` | FX Rate marks the 25% spot and forward jump `OUTLIER` against the prior valid rate and 10% threshold. The run may complete with a warning; compare `expected/2026-11-16.csv`. |
-| Illustrative EUR holiday | `calendars.csv`, 2027-02-22, and the 3M forward in `rates/rates-2026-11-20.csv` | 2027-02-22 is closed for EUR; a recommendation using that value date needs a new joint business date. The next illustrative EUR/USD joint business day is 2027-02-23. This is a calendar check, not a CSV parser error. |
+| Illustrative EUR holiday | `calendars.csv`, 2027-02-22, and the 3M forward in `rates/rates-2026-11-20.csv` | 2027-02-22 is closed for EUR; the generated 3M forward is quoted for the joint business day 2027-02-23, matching the recommendation value date. |
 | EUR long-to-short reversal | `gl/gl-2026-11-19.csv` and `gl/gl-2026-11-20.csv` | In `BS-ENT`/LE01/EUR-USD, gross EUR exposure moves from +19,475,280.26 to −19,473,230.25; see the two dated expected CSVs. |
 | LE45 entirely excluded | Every GL file and both tenant mappings | Data Source excludes LE45's FX balances; its non-FX rows are also excluded. No LE45 exposure group appears in any dated expected CSV. |
 
@@ -70,8 +73,8 @@ The scenario names below are Fikre's Release 1 outline, word for word. “Expect
 | 1 | Onboard a tenant, load master data and users. | `config.json`; six master files at 2025-11-20 | Two tenants, one program each; 50 entities, 40 currencies, 40 accounts in each; second configuration run refuses an existing tenant name. |
 | 2 | Happy-path cycle from data to approved record. | `rates/rates-2026-10-26.csv`, `gl/gl-2026-10-26.csv`, program history | Run completes; two approval gates produce a frozen record. Compare `expected/2026-10-26.csv`. |
 | 3 | Late data, rerun, skip and delete. | Start 2026-10-27 before `gl/gl-2026-10-27.csv`; then load it. Use 2026-10-28 for skip/delete demonstrations. | Empty-data cycle waits, late load completes it, rerun gets a new run ID. Skip/delete leave their run as it was; compare `expected/2026-10-27.csv` and `expected/2026-10-28.csv` only for completed runs. |
-| 4 | Dirty data: blocked balances and a missing rate. | `gl-dirty.csv` on 2026-11-20; `rates/rates-2026-11-12.csv` | Dirty load counts above and `expected/gl-dirty-plants.json`; missing-rate run waits per `expected-status.json`. |
-| 5 | Each strategy: ratio, threshold, Adjust+Swap, Close-out+New. | `BS-ENT` 2026-10-26 and 2026-11-20; `BS-REG` 2026-10-30; program histories | Ratio and threshold use the configured policies. Adjust+Swap uses `BS-ENT` with maturing history. To demonstrate Close-out+New, set `BS-ENT` to that strategy for a separate cycle; then use the maturing history. Compare the applicable dated expected CSV before the policy decision. |
+| 4 | Dirty data: blocked balances and a missing rate. | `gl-dirty.csv` on 2026-11-20; `rates/rates-2026-11-12.csv` | Dirty load counts above and `expected/gl-dirty-expected.json`; missing-rate run waits per `expected-status.json`. |
+| 5 | Each strategy: ratio, threshold, Adjust+Swap, Close-out+New. | `BS-ENT` 2026-10-26 and 2026-11-20; `BS-REG` 2026-10-30; program histories | `BS-ENT` uses hedge ratio and Adjust+Swap; `BS-REG` uses amount threshold and Close-out+New. Each uses its own maturing history and configured policy. Compare the applicable dated expected CSV before the policy decision. |
 | 6 | Accept, override with a split, dismiss. | `gl/gl-2026-11-20.csv`, same-day rates, `expected/2026-11-20.csv` | Decide three recommendations separately; a large override respects the configured maximum and creates split parts. The amount baseline is the dated CSV; decision and part counts come from Hedge Recommendation. |
 | 7 | Approve Exposure and Approve Cycle with segregation of duties. | `config.json` users, `gl/gl-2026-11-20.csv`, rates | Starter cannot approve exposure; the exposure decider cannot approve the cycle. Different authorized users complete both gates; the approved exposure matches `expected/2026-11-20.csv`. |
 | 8 | Release pre-trades, return the executed file, match, follow up. | Pre-trade export for 2026-11-19; `rates/rates-2026-11-19.csv`; simulator output | Run `npm run uat:simulate -- --pretrades <file> --rates packs/uat/generated/rates/rates-2026-11-19.csv --trade-date 2026-11-19 --seed 20261120 --out <executed.csv>`; import its output. Every full fill echoes its PT reference and matches. |
@@ -80,4 +83,4 @@ The scenario names below are Fikre's Release 1 outline, word for word. “Expect
 | 11 | Audit review and chain check; program-restricted access. | Configuration, master loads and approved cycles above | An authorized approver or admin sees permitted program records and a valid chain; a user restricted to the other tenant/program cannot read them. No numeric expected CSV applies. |
 | 12 | A failed delivery and an operator retry. | Cause a delivery failure after a 2026-11-13 rate or GL load | Delivery records the failure and retry state; operator retry succeeds once and the tenant's subsequent event proceeds. `expected/2026-11-13.csv` remains the numeric reference. |
 
-The exact operator and policy commands in scenarios 5 and 12 depend on J's backend work and the rehearsal entry point. E7 will exercise them against a fresh `_uat` database. The guide's data dates, expected CSVs and file-level outcomes are fixed here; loader-backed and end-to-end results are still pending.
+The exact operator commands in scenario 12 depend on J's backend work and the rehearsal entry point. E7 will exercise them against a fresh `_uat` database. The guide's data dates, expected CSVs and file-level outcomes are fixed here; loader-backed and end-to-end results are still pending.

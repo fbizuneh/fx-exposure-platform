@@ -47,15 +47,34 @@ function businessDates(start: string, end: string): string[] {
   }
   return days;
 }
-function addMonths(day: string, months: number): string {
+function calendarMonths(day: string, months: number): string {
   const d = new Date(dateMs(day));
   const original = d.getUTCDate();
   d.setUTCDate(1);
   d.setUTCMonth(d.getUTCMonth() + months);
   const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
   d.setUTCDate(Math.min(original, last));
+  return dayAt(d.getTime());
+}
+function addMonths(day: string, months: number): string {
+  const d = new Date(dateMs(calendarMonths(day, months)));
   while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1);
   return dayAt(d.getTime());
+}
+function forwardValueDate(day: string, months: number, currency: CurrencyChoice, euroHoliday: string): string {
+  const unadjusted = calendarMonths(day, months);
+  const closed = (value: string): boolean => {
+    const weekday = new Date(dateMs(value)).getUTCDay();
+    const usdClosed = weekday === 0 || weekday === 6;
+    const currencyClosed = (currency.weekendDays === "FRI|SAT" ? weekday === 5 || weekday === 6 : weekday === 0 || weekday === 6) || (currency.code === "EUR" && value === euroHoliday);
+    return usdClosed || currencyClosed;
+  };
+  let forward = unadjusted;
+  while (closed(forward)) forward = addDays(forward, 1);
+  if (forward.slice(0, 7) === unadjusted.slice(0, 7)) return forward;
+  let backward = unadjusted;
+  while (closed(backward)) backward = addDays(backward, -1);
+  return backward;
 }
 function csv(rows: string[][]): string { return `${rows.map((r) => r.map((v) => /[",\r\n]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v).join(",")).join("\n")}\n`; }
 function money(value: Decimal, currency: string): string { return value.toDecimalPlaces(currency === "JPY" || currency === "KRW" ? 0 : 2).toFixed(currency === "JPY" || currency === "KRW" ? 0 : 2); }
@@ -137,7 +156,7 @@ export async function generate(seed: number, out: string, configPath = "packs/ua
         const usdInterest = new Decimal(g.currencies.find((x) => x.code === "USD")!.annualInterestPct);
         const differential = usdInterest.minus(c.annualInterestPct).div(100).times(months).div(12);
         const allIn = published.times(new Decimal(1).plus(differential)).toDecimalPlaces(10);
-        rows.push([c.code, "USD", "FORWARD", tenor, addMonths(day, months), rate(allIn), rate(published), rate(allIn.minus(published)), "", "", "", observed]);
+        rows.push([c.code, "USD", "FORWARD", tenor, forwardValueDate(day, months, c, holiday), rate(allIn), rate(published), rate(allIn.minus(published)), "", "", "", observed]);
       }
     }
     spotByDay.set(day, dayRates);
@@ -204,7 +223,7 @@ export async function generate(seed: number, out: string, configPath = "packs/ua
   for (const [program, history] of histories) await save(`executed-history-${program}.csv`, history);
 
   files.sort((a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : 0);
-  const manifest = { seed, config: relative(process.cwd(), configPath).replaceAll("\\", "/"), dates: { ratesFrom: rateDays[0], ratesThrough: rateDays.at(-1), glFrom: glDays[0], glThrough: glDays.at(-1) }, planted: { missing, stale, outlier, holiday: { date: holiday, currency: "EUR" }, flip: { currency: "EUR", from: glDays[18], to: glDays[19] }, excludedEntity: "LE45" }, malformedProblems, dirtyChanges: { unknownEntity: 10, unknownAccount: 10, excludedAccount: 10 }, files };
+  const manifest = { seed, config: relative(process.cwd(), configPath).replaceAll("\\", "/"), dates: { ratesFrom: rateDays[0], ratesThrough: rateDays.at(-1), glFrom: glDays[0], glThrough: glDays.at(-1) }, planted: { missing, stale, outlier, holiday: { date: holiday, currency: "EUR", adjustedForwardDate: forwardValueDate(g.endDate, 3, g.currencies.find((c) => c.code === "EUR")!, holiday) }, lateGl: { date: "2026-10-27", file: "gl/gl-2026-10-27.csv", loadAfterCycleStart: true }, flip: { currency: "EUR", from: glDays[18], to: glDays[19] }, excludedEntity: "LE45" }, malformedProblems, dirtyChanges: { unknownEntity: 10, unknownAccount: 10, excludedAccount: 10 }, files };
   await writeFile(join(out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   return files;
 }

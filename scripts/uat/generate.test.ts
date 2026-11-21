@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { toBusinessCalendar, valueDateFor } from "../../services/hedge-recommendation/src/calc.ts";
 import { generate } from "./generate.ts";
 
 test("one seed produces identical complete UAT files and a manifest that covers their bytes", async () => {
@@ -19,7 +20,7 @@ test("one seed produces identical complete UAT files and a manifest that covers 
     const manifest = JSON.parse(a.toString("utf8")) as {
       files: { file: string; rows: number; sha256: string }[];
       malformedProblems: { row: number; column: string; kind: string }[];
-      planted: { missing: { date: string; currency: string }; stale: { date: string; currency: string }; outlier: { date: string; currency: string } };
+      planted: { missing: { date: string; currency: string }; stale: { date: string; currency: string }; outlier: { date: string; currency: string }; lateGl: { date: string; file: string; loadAfterCycleStart: boolean } };
     };
     assert.equal(manifest.files.length, 292);
     for (const program of ["BS-ENT", "BS-REG"]) {
@@ -28,6 +29,7 @@ test("one seed produces identical complete UAT files and a manifest that covers 
       assert.ok(history.every((line) => line.split(",")[14] === program));
     }
     assert.equal(manifest.files.filter((f) => f.file.startsWith("gl/gl-")).length, 20);
+    assert.deepEqual(manifest.planted.lateGl, { date: "2026-10-27", file: "gl/gl-2026-10-27.csv", loadAfterCycleStart: true });
     assert.equal(manifest.files.filter((f) => f.file.startsWith("rates/rates-")).length, 262);
     assert.equal(manifest.malformedProblems.length, 40);
     assert.equal(new Set(manifest.malformedProblems.map((p) => p.row)).size, 40);
@@ -49,6 +51,13 @@ test("one seed produces identical complete UAT files and a manifest that covers 
     assert.equal(missingRates.filter((line) => line.startsWith(`${manifest.planted.missing.currency},USD,`)).length, 0);
     const staleRates = (await readFile(join(first, `rates/rates-${manifest.planted.stale.date}.csv`), "utf8")).split("\n");
     assert.equal(staleRates.filter((line) => line.startsWith(`${manifest.planted.stale.currency},USD,`)).length, 5);
+    const calendarRows = (await readFile(join(first, "calendars.csv"), "utf8")).trimEnd().split("\n").slice(1).map((line) => line.split(","));
+    const calendars = new Map(calendarRows.map((row) => [row[0]!, toBusinessCalendar({ currency: row[0]!, weekendDays: row[1]!.split("|"), coveredThrough: row[2]!, holidays: row[3] ? [{ date: row[3] }] : [] })]));
+    const lastRates = (await readFile(join(first, "rates/rates-2026-11-20.csv"), "utf8")).trimEnd().split("\n").slice(1).map((line) => line.split(","));
+    for (const row of lastRates.filter((cells) => cells[2] === "FORWARD")) {
+      assert.equal(row[4], valueDateFor("2026-11-20", row[3]!, [calendars.get(row[0]!)!, calendars.get("USD")!]), `${row[0]} ${row[3]}`);
+    }
+    assert.equal(lastRates.find((row) => row[0] === "EUR" && row[3] === "3M")?.[4], "2027-02-23", "the EUR holiday moves the exact 3M value date");
 
     const knownEntities = new Set((await readFile(join(first, "entities.csv"), "utf8")).trimEnd().split("\n").slice(1).map((line) => line.split(",")[0]));
     const knownAccounts = new Set((await readFile(join(first, "accounts.csv"), "utf8")).trimEnd().split("\n").slice(1).map((line) => line.split(",")[1]));
