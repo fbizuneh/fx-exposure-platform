@@ -3,6 +3,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import type { KyselyPlugin } from "kysely";
 import { accountId, asOfDate, entityId, programId, tenantId, type AsOfDate, type TenantId } from "@shared/kernel";
 import type { Account, Entity, MasterDataQuestions } from "@services/master-data/contract";
 import { migrate } from "../../../scripts/migrate.mjs";
@@ -71,6 +72,9 @@ async function setup(t: TenantId) {
 const send = (t: TenantId, rows: GlBalanceRow[], asOf: AsOfDate = D1, source = "erp") => ds.commands.submitGlBatch({ tenantId: t, sourceSystem: source, chartCode: "C", asOf, rows, by: "test" });
 const included = (t: TenantId, program = "BS", asOf: AsOfDate = D1) => ds.questions.includedBalances({ tenantId: t, programId: programId(program), asOf });
 const events = async (t: TenantId) => (await ds.outbox.pending(1000)).filter((e) => e.tenantId === t);
+const recordsOf = async (t: TenantId) =>
+  (await ds.outbox.pending(1000)).filter((e) => e.tenantId === t && e.type === "data-source.change-recorded") as unknown as
+    { programId: string | null; actor: string; action: string; targetType: string; targetId: string; fields: readonly string[] }[];
 
 dbTest("balances are stamped, excluded or blocked; only included ones are served", async () => {
   const t = newTenant();
@@ -213,10 +217,10 @@ dbTest("rules: overlap check respects scope, excludes and dates; rules can be en
   const bs = await q(db).selectFrom("mapping_rules").select("rule_id").where("tenant_id", "=", t2).where("program_id", "=", "BS").executeTakeFirstOrThrow();
   const cfNode = (from: string) => ds.commands.addMappingRule({ tenantId: t2, programId: "CF", kind: "INCLUDE", target: { type: "NODE", chartCode: "C", nodeCode: "1" }, validFrom: from, validTo: null, by: "test" });
   await assert.rejects(cfNode("2026-02-01"), /both claim/);
-  await ds.commands.endMappingRule(t2, bs.rule_id, "2026-02-01");
+  await ds.commands.endMappingRule(t2, bs.rule_id, "2026-02-01", "test");
   await cfNode("2026-02-01");
-  await assert.rejects(ds.commands.endMappingRule(t2, bs.rule_id, "2026-03-01"), RuleInvalid, "a rule can only be shortened");
-  await assert.rejects(ds.commands.endMappingRule(t2, bs.rule_id, "2025-12-01"), RuleInvalid);
+  await assert.rejects(ds.commands.endMappingRule(t2, bs.rule_id, "2026-03-01", "test"), RuleInvalid, "a rule can only be shortened");
+  await assert.rejects(ds.commands.endMappingRule(t2, bs.rule_id, "2025-12-01", "test"), RuleInvalid);
 
   // scope: a rule for another source system does not clash with one scoped to a different source
   const t3 = newTenant();
