@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Decimal } from "decimal.js";
 import { generate } from "./generate.ts";
 import { writeExpected } from "./expected.ts";
+
+type CurrencyTotals = Record<string, { rows: number; balance: string }>;
+type DirtyResult = { storedRows: number; batchControlTotals: CurrencyTotals; byProgram: Record<string, { included: CurrencyTotals; excluded: CurrencyTotals; blocked: CurrencyTotals; byReason: Record<string, CurrencyTotals> }> };
 
 test("independent UAT results are stable, reconcile per group, and wait for the planted missing rate", async () => {
   const root = await mkdtemp(join(tmpdir(), "uat-expected-"));
@@ -21,7 +24,7 @@ test("independent UAT results are stable, reconcile per group, and wait for the 
     for (const { date } of statuses) assert.deepEqual(await readFile(join(first, `${date}.csv`)), await readFile(join(second, `${date}.csv`)), date);
     assert.deepEqual(await readFile(join(first, "expected-status.json")), await readFile(join(second, "expected-status.json")));
     assert.deepEqual(await readFile(join(first, "gl-dirty-expected.json")), await readFile(join(second, "gl-dirty-expected.json")));
-    const dirty = JSON.parse(await readFile(join(first, "gl-dirty-expected.json"), "utf8")) as { storedRows: number; batchControlTotals: Record<string, { rows: number; balance: string }>; byProgram: Record<string, { included: Record<string, { rows: number }>; excluded: Record<string, { rows: number }>; blocked: Record<string, { rows: number }>; byReason: Record<string, Record<string, { rows: number }>> }> };
+    const dirty = JSON.parse(await readFile(join(first, "gl-dirty-expected.json"), "utf8")) as DirtyResult;
     const count = (byCurrency: Record<string, { rows: number }>) => Object.values(byCurrency).reduce((sum, item) => sum + item.rows, 0);
     assert.equal(dirty.storedRows, 20000);
     assert.equal(count(dirty.batchControlTotals), 20000);
@@ -30,6 +33,26 @@ test("independent UAT results are stable, reconcile per group, and wait for the 
       assert.deepEqual([count(result.included), count(result.excluded), count(result.blocked)], expected);
       assert.equal(count(result.byReason.GL_ENTITY_UNKNOWN!), 10);
       assert.equal(count(result.byReason.GL_ACCOUNT_UNKNOWN!), 10);
+    }
+    const config = JSON.parse(await readFile("packs/uat/config.json", "utf8")) as { tenants: { program: { id: string; mappingRules: { kind: string; entityCode?: string; target: { nodeCode?: string } }[] } }[] };
+    for (const tenant of config.tenants) tenant.program.mappingRules = tenant.program.mappingRules.filter((rule) => !(rule.kind === "EXCLUDE" && rule.entityCode === "LE45" && rule.target.nodeCode === "FX"));
+    const changedConfig = join(root, "without-le45-exclusion.json");
+    await writeFile(changedConfig, JSON.stringify(config));
+    const changedOutput = join(root, "changed");
+    await writeExpected(generated, changedConfig, changedOutput);
+    const changed = JSON.parse(await readFile(join(changedOutput, "gl-dirty-expected.json"), "utf8")) as DirtyResult;
+    assert.deepEqual(changed.batchControlTotals, dirty.batchControlTotals, "received control totals do not depend on program mappings");
+    for (const program of ["BS-ENT", "BS-REG"]) {
+      const before = dirty.byProgram[program]!, after = changed.byProgram[program]!, le45 = before.byReason.LE45!;
+      assert.equal(count(le45), 422);
+      assert.equal(count(after.included) - count(before.included), 422);
+      assert.equal(count(before.excluded) - count(after.excluded), 422);
+      assert.deepEqual(after.blocked, before.blocked);
+      assert.equal(after.byReason.LE45, undefined);
+      for (const [currency, amount] of Object.entries(le45)) {
+        assert.equal(new Decimal(after.included[currency]?.balance ?? 0).minus(before.included[currency]?.balance ?? 0).toFixed(2), amount.balance);
+        assert.equal(new Decimal(before.excluded[currency]?.balance ?? 0).minus(after.excluded[currency]?.balance ?? 0).toFixed(2), amount.balance);
+      }
     }
     const lines = (await readFile(join(first, "2026-11-20.csv"), "utf8")).trimEnd().split("\n");
     assert.ok(lines.length > 700);
