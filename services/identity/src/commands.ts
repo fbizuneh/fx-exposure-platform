@@ -1,7 +1,7 @@
 // What the admin and onboarding screens ask Identity to do. Each command is one transaction;
 // a command that announces something writes the event in that same transaction.
 import { programId, tenantId, type ProgramId, type TenantId } from "@shared/kernel";
-import { TENANT_ROLES, type PlatformUserId, type TenantRole, type UserId } from "../contract/index.ts";
+import { TENANT_ROLES, TenantNameTaken, type PlatformUserId, type TenantRole, type UserId } from "../contract/index.ts";
 import { q, type Db } from "./db.ts";
 import { recordChange } from "./change-record.ts";
 import { announce } from "./outbox.ts";
@@ -22,8 +22,13 @@ export interface NewUser {
 export function identityCommands(db: Db) {
   return {
     async createTenant(name: string): Promise<TenantId> {
-      const row = await q(db).insertInto("tenants").values({ name }).returning("tenant_id").executeTakeFirstOrThrow();
-      return tenantId(row.tenant_id);
+      try {
+        const row = await q(db).insertInto("tenants").values({ name }).returning("tenant_id").executeTakeFirstOrThrow();
+        return tenantId(row.tenant_id);
+      } catch (error) {
+        if (error !== null && typeof error === "object" && "code" in error && "constraint" in error && error.code === "23505" && error.constraint === "tenants_name_unique") throw new TenantNameTaken(name);
+        throw error;
+      }
     },
 
     async createPlatformUser(u: { issuer: string; externalSubject: string; email?: string; displayName?: string }): Promise<PlatformUserId> {
