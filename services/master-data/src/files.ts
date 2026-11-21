@@ -55,18 +55,15 @@ const has = <T extends string>(list: readonly T[], v: string): v is T => (list a
 const weekendKey = (days: readonly Weekday[]): string => [...days].sort().join("|");
 
 function openCsv(text: string): { header: string[] | undefined; body: string[][]; problems: FileProblem[] } {
+  const problems: FileProblem[] = [];
   const bad = quotingProblem(text);
   if (bad) {
     const raw = bad.header?.[bad.columnIndex];
     const column = raw !== undefined && raw.trim() !== "" ? normalizeHeader(raw) : null;
-    return {
-      header: undefined,
-      body: [],
-      problems: [{ rowNo: bad.rowNo, column, message: bad.message }],
-    };
+    problems.push({ rowNo: bad.rowNo, column, message: bad.message });
   }
   const [header, ...body] = splitCsv(text);
-  return { header, body, problems: [] };
+  return { header, body, problems };
 }
 
 function assertWidth(problems: FileProblem[], rowNo: number, cells: string[], width: number): boolean {
@@ -197,11 +194,12 @@ const ENTITY_OPTIONAL = ["parent_code", "country_code", "functional_currency"] a
 
 export function parseEntitiesFile(text: string): ParseResult<EntityRow> {
   const opened = openCsv(text);
-  if (opened.problems.length > 0) return { rows: [], problems: opened.problems };
   const { header, body } = opened;
-  const { index, problems } = mapColumns(header, ENTITY_REQUIRED, ENTITY_OPTIONAL);
+  const mapped = mapColumns(header, ENTITY_REQUIRED, ENTITY_OPTIONAL);
+  const problems = [...opened.problems, ...mapped.problems];
+  const { index } = mapped;
   const rows: EntityRow[] = [];
-  if (problems.length > 0) return { rows, problems };
+  if (mapped.problems.length > 0) return { rows: [], problems };
   const width = header!.length;
 
   body.forEach((cells, i) => {
@@ -252,11 +250,12 @@ const HIERARCHY_OPTIONAL = ["parent_code"] as const;
 
 export function parseHierarchyFile(text: string): ParseResult<HierarchyNodeRow> {
   const opened = openCsv(text);
-  if (opened.problems.length > 0) return { rows: [], problems: opened.problems };
   const { header, body } = opened;
-  const { index, problems } = mapColumns(header, HIERARCHY_REQUIRED, HIERARCHY_OPTIONAL);
+  const mapped = mapColumns(header, HIERARCHY_REQUIRED, HIERARCHY_OPTIONAL);
+  const problems = [...opened.problems, ...mapped.problems];
+  const { index } = mapped;
   const rows: HierarchyNodeRow[] = [];
-  if (problems.length > 0) return { rows, problems };
+  if (mapped.problems.length > 0) return { rows: [], problems };
   const width = header!.length;
 
   body.forEach((cells, i) => {
@@ -287,11 +286,12 @@ const ACCOUNT_OPTIONAL = ["hierarchy_node_code"] as const;
 
 export function parseAccountsFile(text: string): ParseResult<AccountRow> {
   const opened = openCsv(text);
-  if (opened.problems.length > 0) return { rows: [], problems: opened.problems };
   const { header, body } = opened;
-  const { index, problems } = mapColumns(header, ACCOUNT_REQUIRED, ACCOUNT_OPTIONAL);
+  const mapped = mapColumns(header, ACCOUNT_REQUIRED, ACCOUNT_OPTIONAL);
+  const problems = [...opened.problems, ...mapped.problems];
+  const { index } = mapped;
   const rows: AccountRow[] = [];
-  if (problems.length > 0) return { rows, problems };
+  if (mapped.problems.length > 0) return { rows: [], problems };
   const width = header!.length;
 
   body.forEach((cells, i) => {
@@ -331,11 +331,12 @@ export function parseAccountsFile(text: string): ParseResult<AccountRow> {
 
 export function parseCurrenciesFile(text: string): ParseResult<CurrencyRow> {
   const opened = openCsv(text);
-  if (opened.problems.length > 0) return { rows: [], problems: opened.problems };
   const { header, body } = opened;
-  const { index, problems } = mapColumns(header, ["code", "is_ndf"]);
+  const mapped = mapColumns(header, ["code", "is_ndf"]);
+  const problems = [...opened.problems, ...mapped.problems];
+  const { index } = mapped;
   const rows: CurrencyRow[] = [];
-  if (problems.length > 0) return { rows, problems };
+  if (mapped.problems.length > 0) return { rows: [], problems };
   const width = header!.length;
 
   body.forEach((cells, i) => {
@@ -353,10 +354,11 @@ const CALENDAR_OPTIONAL = ["holiday_date", "holiday_name"] as const;
 
 export function parseCalendarsFile(text: string): ParseResult<CalendarRow> {
   const opened = openCsv(text);
-  if (opened.problems.length > 0) return { rows: [], problems: opened.problems };
   const { header, body } = opened;
-  const { index, problems } = mapColumns(header, CALENDAR_REQUIRED, CALENDAR_OPTIONAL);
-  if (problems.length > 0) return { rows: [], problems };
+  const mapped = mapColumns(header, CALENDAR_REQUIRED, CALENDAR_OPTIONAL);
+  const problems = [...opened.problems, ...mapped.problems];
+  const { index } = mapped;
+  if (mapped.problems.length > 0) return { rows: [], problems };
   const width = header!.length;
 
   type Acc = {
@@ -450,11 +452,12 @@ export function parseCalendarsFile(text: string): ParseResult<CalendarRow> {
 
 export function parseExposureCurrenciesFile(text: string): ParseResult<PairExposureCurrencyRow> {
   const opened = openCsv(text);
-  if (opened.problems.length > 0) return { rows: [], problems: opened.problems };
   const { header, body } = opened;
-  const { index, problems } = mapColumns(header, ["pair", "exposure_currency"]);
+  const mapped = mapColumns(header, ["pair", "exposure_currency"]);
+  const problems = [...opened.problems, ...mapped.problems];
+  const { index } = mapped;
   const rows: PairExposureCurrencyRow[] = [];
-  if (problems.length > 0) return { rows, problems };
+  if (mapped.problems.length > 0) return { rows: [], problems };
   const width = header!.length;
 
   body.forEach((cells, i) => {

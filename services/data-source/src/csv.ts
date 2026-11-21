@@ -1,13 +1,14 @@
 // One of four identical CSV readers (master-data, data-source, fx-rate, fx-trade); change all four together.
 
 /** Comma-separated text with quotes. A blank line is skipped; a comma-only record (all cells empty, width > 1) is kept. */
+const keepCsvRow = (r: readonly string[]) => r.some((x) => x.trim() !== "") || r.length > 1;
+
 export function splitCsv(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = "";
   let quoted = false;
   const t = text.replace(/^﻿/, "");
-  const keep = (r: string[]) => r.some((x) => x.trim() !== "") || r.length > 1;
   for (let i = 0; i < t.length; i++) {
     const c = t[i]!;
     if (quoted) {
@@ -19,12 +20,12 @@ export function splitCsv(text: string): string[][] {
     else if (c === "\n" || c === "\r") {
       if (c === "\r" && t[i + 1] === "\n") i++;
       row.push(cell); cell = "";
-      if (keep(row)) rows.push(row);
+      if (keepCsvRow(row)) rows.push(row);
       row = [];
     } else cell += c;
   }
   row.push(cell);
-  if (keep(row)) rows.push(row);
+  if (keepCsvRow(row)) rows.push(row);
   return rows;
 }
 
@@ -56,7 +57,7 @@ export function quotingProblem(
     } else if (c === "\n" || c === "\r") {
       if (c === "\r" && t[i + 1] === "\n") i++;
       row.push(cell); cell = ""; afterQuote = false;
-      if (row.some((x) => x.trim() !== "")) {
+      if (keepCsvRow(row)) {
         if (header === null) header = row;
         completed++;
       }

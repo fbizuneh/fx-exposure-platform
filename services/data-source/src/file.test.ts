@@ -109,6 +109,15 @@ test("parseGlFile: comma-only row is not dropped; file returns no rows", () => {
   assert.ok(r.problems.some((p) => p.rowNo === 2 && p.column === "entity_code"));
 });
 
+test("parseGlFile: comma-only then bad quote keep aligned row numbers", () => {
+  const r = parseGlFile(`${HEADER}\n,,,,,,,\nUS1,1000,USD,"10"0,,,2026-03-09,\n`);
+  assert.equal(r.rows.length, 0);
+  assert.ok(r.problems.some((p) => p.rowNo === 1 && p.column === "entity_code"));
+  assert.ok(
+    r.problems.some((p) => p.rowNo === 2 && p.column === "balance" && /text after closing quote/.test(p.message)),
+  );
+});
+
 test("parseGlFile: row width must match the header", () => {
   const short = parseGlFile(`${HEADER}\nUS1,1000,USD,10\n`);
   assert.equal(short.rows.length, 0);

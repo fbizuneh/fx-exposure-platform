@@ -39,7 +39,7 @@ export function parseGlFile(text: string): ParseResult<GlBalanceRow> {
   if (badQuote) {
     const raw = badQuote.header?.[badQuote.columnIndex];
     const column = raw !== undefined && raw.trim() !== "" ? normalizeHeader(raw) : null;
-    return { rows: [], problems: [{ rowNo: badQuote.rowNo, column, message: badQuote.message }] };
+    problems.push({ rowNo: badQuote.rowNo, column, message: badQuote.message });
   }
 
   const [header, ...body] = splitCsv(text);
@@ -76,8 +76,9 @@ export function parseGlFile(text: string): ParseResult<GlBalanceRow> {
     if (!index.has(name)) problems.push({ rowNo: null, column: name, message: `missing required column ${name}` });
   }
   // balance / debit / credit / as_of may be absent as columns; treated as empty on every row.
+  // Quote problems do not skip body checks — row numbers must stay aligned with splitCsv.
 
-  if (problems.length > 0) return { rows: [], problems };
+  if (REQUIRED.some((name) => !index.has(name))) return { rows: [], problems };
 
   const width = header.length;
   const get = (cells: string[], name: string): string | null => {

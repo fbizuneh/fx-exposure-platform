@@ -34,3 +34,10 @@ test("quotingProblem: unclosed quote, text after close; valid and escaped quotes
   assert.equal(quotingProblem('a,b\n1,"2""3",4\n'), null);
   assert.equal(quotingProblem('a,b\n1,"2,3",4\n'), null);
 });
+
+test("quotingProblem: comma-only rows share splitCsv numbering", () => {
+  const bad = quotingProblem('a,b\n,\n1,"2"0\n');
+  assert.equal(bad?.rowNo, 2);
+  assert.equal(bad?.columnIndex, 1);
+  assert.equal(bad?.message, "text after closing quote");
+});

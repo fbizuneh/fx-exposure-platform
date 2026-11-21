@@ -107,17 +107,20 @@ function parsePositive(
 }
 
 export function parseRatesFile(text: string): ParseResult<RateRow> {
+  const problems: FileProblem[] = [];
   const badQuote = quotingProblem(text);
   if (badQuote) {
     const raw = badQuote.header?.[badQuote.columnIndex];
     const column = raw !== undefined && raw.trim() !== "" ? normalizeHeader(raw) : null;
-    return { rows: [], problems: [{ rowNo: badQuote.rowNo, column, message: badQuote.message }] };
+    problems.push({ rowNo: badQuote.rowNo, column, message: badQuote.message });
   }
 
   const [header, ...body] = splitCsv(text);
-  const { index, problems } = mapColumns(header);
+  const mapped = mapColumns(header);
+  problems.push(...mapped.problems);
+  const { index } = mapped;
   const rows: RateRow[] = [];
-  if (problems.length > 0) return { rows, problems };
+  if (mapped.problems.length > 0) return { rows: [], problems };
   const width = header!.length;
 
   const get = (cells: string[], name: string): string | null => {
