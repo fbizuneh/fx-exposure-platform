@@ -118,6 +118,15 @@ test("parseGlFile: comma-only then bad quote keep aligned row numbers", () => {
   );
 });
 
+test("parseGlFile: collects quote errors on every bad balance row", () => {
+  const r = parseGlFile(
+    `${HEADER}\nUS1,1000,USD,"10"0,,,2026-03-09,\nUS1,1000,USD,"20"0,,,2026-03-09,\n`,
+  );
+  assert.equal(r.rows.length, 0);
+  assert.ok(r.problems.some((p) => p.rowNo === 1 && p.column === "balance" && /text after closing quote/.test(p.message)));
+  assert.ok(r.problems.some((p) => p.rowNo === 2 && p.column === "balance" && /text after closing quote/.test(p.message)));
+});
+
 test("parseGlFile: row width must match the header", () => {
   const short = parseGlFile(`${HEADER}\nUS1,1000,USD,10\n`);
   assert.equal(short.rows.length, 0);
