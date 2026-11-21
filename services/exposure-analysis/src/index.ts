@@ -1,4 +1,5 @@
 // Exposure Analysis's entry point for app/ to wire. Other services never import this; they import contract/.
+import type { TenantId } from "@shared/kernel";
 import { connect, type Db } from "./db.ts";
 import { deliveryProblems, markPublished, pendingEvents, recordFailure, retryStuck, type RetryPolicy } from "./outbox.ts";
 import type { Collaborators } from "./ports.ts";
@@ -15,7 +16,7 @@ export function createExposureAnalysis(db: Db, deps: Collaborators & { now?: () 
       markPublished: (ids: readonly string[]) => markPublished(db, ids),
       recordFailure: (eventId: string, error: string, now: Date, policy: RetryPolicy) => recordFailure(db, eventId, error, now, policy),
       problems: () => deliveryProblems(db),
-      retryStuck: (eventId: string) => retryStuck(db, eventId),
+      retryStuck: (eventId: string, by: { tenantId: TenantId; actor: string }) => retryStuck(db, eventId, by),
     },
   };
 }

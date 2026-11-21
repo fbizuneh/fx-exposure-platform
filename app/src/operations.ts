@@ -1,0 +1,117 @@
+// Guarded access to the stuck-event functions in dispatch.ts: who may see and retry a tenant's delivery problems (decision 0030).
+// dispatch.ts itself checks nothing; this is the only path a caller outside app/ should use.
+import type { Actor, DenyReason } from "@services/identity/contract";
+import type { TenantId } from "@shared/kernel";
+import type { App } from "./compose.ts";
+import { deliveryProblems, retryStuckEvent, type DeliveryProblem } from "./dispatch.ts";
+
+const PERMISSION = "operations:manage-events" as const;
+
+export class AccessDenied extends Error {
+  readonly reason: DenyReason;
+  constructor(reason: DenyReason) {
+    super(`not allowed (${PERMISSION}): ${reason}`);
+    this.reason = reason;
+  }
+}
+
+async function checkTenant(app: App, actor: Actor, tenant: TenantId): Promise<void> {
+  const decision = await app.identity.questions.checkAccess({ tenantId: tenant, actor, permission: PERMISSION });
+  if (!decision.allowed) throw new AccessDenied(decision.reason);
+}
+
+/**
+ * The tenants whose events this actor may see: the admin's own tenant, or, for the platform role, every tenant (decision #8/0030).
+ * A platform actor's grant does not depend on which tenant is named (`checkAccess` decides it from the platform role alone, before
+ * any tenant fact is loaded), so one check settles it for every candidate; checking once per candidate would also record
+ * `platform-role.used` once per candidate (decision 0001), which is not one use of the role but as many as there are tenants.
+ */
+async function visibleTenants(app: App, actor: Actor, candidates: Iterable<string>): Promise<Set<string>> {
+  const all = new Set<string>(candidates);
+  if (all.size === 0) return all;
+  if (actor.kind === "platform") {
+    const probe = [...all][0]!;
+    const decision = await app.identity.questions.checkAccess({ tenantId: probe as TenantId, actor, permission: PERMISSION });
+    return decision.allowed ? all : new Set();
+  }
+  const visible = new Set<string>();
+  for (const t of all) {
+    const decision = await app.identity.questions.checkAccess({ tenantId: t as TenantId, actor, permission: PERMISSION });
+    if (decision.allowed) visible.add(t);
+  }
+  return visible;
+}
+
+/** Every real tenant plus any tenant that currently has a delivery problem, so an admin of a trouble-free tenant is still recognised. */
+async function candidateTenants(app: App, problems: readonly DeliveryProblem[]): Promise<Set<string>> {
+  const active = await app.identity.questions.activeTenants();
+  return new Set<string>([...active, ...problems.map((p) => p.tenantId)]);
+}
+
+const trimmed = (p: DeliveryProblem): DeliveryProblem => ({ ...p, lastError: p.lastError === null ? null : p.lastError.slice(0, 500) });
+
+/**
+ * Service, tenant, event ID, event type, tries, last error (cut to 500 characters) and next-try or stuck time.
+ * A tenant admin sees only their tenant's events; the platform role sees every tenant's, and may narrow with `filter.tenantId`.
+ */
+export async function listDeliveryProblems(app: App, actor: Actor, filter?: { readonly tenantId?: TenantId }): Promise<DeliveryProblem[]> {
+  const all = await deliveryProblems(app);
+  if (filter?.tenantId !== undefined) {
+    await checkTenant(app, actor, filter.tenantId);
+    return all.filter((p) => p.tenantId === filter.tenantId).map(trimmed);
+  }
+  const visible = await visibleTenants(app, actor, await candidateTenants(app, all));
+  if (visible.size === 0) throw new AccessDenied("permission-missing");
+  return all.filter((p) => visible.has(p.tenantId)).map(trimmed);
+}
+
+export interface DeliveryProblemSummary {
+  readonly byService: Readonly<Record<string, { readonly waiting: number; readonly stuck: number }>>;
+  readonly total: { readonly waiting: number; readonly stuck: number };
+}
+
+/** Counts by service and by state (waiting, stuck), over whatever tenants this actor may see. For a badge, or the runtime's /status. */
+export async function deliveryProblemSummary(app: App, actor: Actor): Promise<DeliveryProblemSummary> {
+  const all = await deliveryProblems(app);
+  const visible = await visibleTenants(app, actor, await candidateTenants(app, all));
+  if (visible.size === 0) throw new AccessDenied("permission-missing");
+  const byService: Record<string, { waiting: number; stuck: number }> = {};
+  const total = { waiting: 0, stuck: 0 };
+  for (const p of all) {
+    if (!visible.has(p.tenantId)) continue;
+    const bucket = (byService[p.service] ??= { waiting: 0, stuck: 0 });
+    if (p.stuckAt !== null) {
+      bucket.stuck++;
+      total.stuck++;
+    } else {
+      bucket.waiting++;
+      total.waiting++;
+    }
+  }
+  return { byService, total };
+}
+
+export interface RetryTarget {
+  readonly service: string;
+  readonly tenantId: TenantId;
+  readonly eventId: string;
+}
+
+/**
+ * Retries a stuck event, after checking access for its named tenant and looking the event up within that tenant only — so one
+ * tenant's admin can never reach another tenant's event by guessing an ID. Refuses an event that is not stuck, naming its state.
+ * The retry and its audit announcement (`event.retried`, target `stuck-event`/the plain event ID, `fields: []`) are written together,
+ * in the owning service's own outbox transaction (decision 0030, confirmed with the product owner after review) — not a separate
+ * call from here, so the two cannot come apart on a crash or an Audit outage between them. The announcement's `source` in the
+ * trail is that service's name, since it is that service's own outbox that changed. `checkAccess` already records a platform
+ * role's use.
+ */
+export async function retryDeliveryProblem(app: App, actor: Actor, target: RetryTarget): Promise<void> {
+  await checkTenant(app, actor, target.tenantId);
+  const found = (await deliveryProblems(app)).find((p) => p.service === target.service && p.tenantId === target.tenantId && p.eventId === target.eventId);
+  if (!found) throw new RangeError("no such event for this tenant");
+  if (found.stuckAt === null) throw new RangeError("the event is retrying automatically; it is not stuck");
+  const by = actor.kind === "user" ? `user:${actor.userId}` : `platform:${actor.platformUserId}`;
+  const retried = await retryStuckEvent(app, target.service, target.eventId, { tenantId: target.tenantId, actor: by });
+  if (!retried) throw new RangeError("the event is no longer stuck");
+}

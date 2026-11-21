@@ -69,6 +69,7 @@ export const PERMISSIONS = [
   "fx-trade:manage",
   "authorization:manage",
   "audit:read",
+  "operations:manage-events",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 

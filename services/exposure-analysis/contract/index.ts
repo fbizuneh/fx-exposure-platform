@@ -1,6 +1,7 @@
 // Published questions and events of Exposure Analysis. Other services import this file, never src/.
 import type { AsOfDate, CycleId, LineageRef, ProgramId, TenantId } from "@shared/kernel";
 import type { NettingLevel } from "@services/exposure-management/contract";
+import type { ChangeRecordFields } from "@services/audit/contract";
 
 export const RUN_STATUSES = ["WAITING", "FINISHED", "SUPERSEDED"] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
@@ -210,4 +211,14 @@ export interface RunFinished extends Announcement {
   readonly programId: ProgramId;
   readonly runId: string;
 }
-export type ExposureAnalysisEvents = RunStarted | RunFinished;
+/**
+ * A change record for Audit (decision 0012): who did what to which record. Identifiers and field names only.
+ * Exposure Analysis has no person-triggered domain command (decision 0032/J2), so this type exists only to carry an
+ * operator's stuck-event retry (decision 0030) into Audit through this service's own outbox; it records no domain activity.
+ */
+export interface ExposureAnalysisChangeRecorded extends ChangeRecordFields {
+  readonly type: "exposure-analysis.change-recorded";
+  readonly eventId: string;
+  readonly occurredAt: string;
+}
+export type ExposureAnalysisEvents = RunStarted | RunFinished | ExposureAnalysisChangeRecorded;
