@@ -152,6 +152,13 @@ export async function generate(seed: number, out: string, configPath = "packs/ua
       if (day === missing.date && c.code === missing.currency) continue;
       const observed = `${day === stale.date && c.code === stale.currency ? addDays(day, -1) : day}T16:30:00Z`;
       rows.push([c.code, "USD", "SPOT", "SPOT", "", rate(published), "", "", "", "", "", observed]);
+      if (day === "2026-11-20" && c.code === "EUR") {
+        // Scenario 8's close-out is a standalone forward dated before the first monthly tenor.
+        const usdInterest = new Decimal(g.currencies.find((x) => x.code === "USD")!.annualInterestPct);
+        const differential = usdInterest.minus(c.annualInterestPct).div(100).times(7).div(365);
+        const allIn = published.times(new Decimal(1).plus(differential)).toDecimalPlaces(10);
+        rows.push([c.code, "USD", "FORWARD", "1W", addDays(day, 7), rate(allIn), rate(published), rate(allIn.minus(published)), "", "", "", observed]);
+      }
       for (const [tenor, months] of [["1M", 1], ["3M", 3], ["6M", 6], ["12M", 12]] as const) {
         const usdInterest = new Decimal(g.currencies.find((x) => x.code === "USD")!.annualInterestPct);
         const differential = usdInterest.minus(c.annualInterestPct).div(100).times(months).div(12);

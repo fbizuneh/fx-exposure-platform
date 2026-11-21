@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { toBusinessCalendar, valueDateFor } from "../../services/hedge-recommendation/src/calc.ts";
 import { parseGlFile } from "../../services/data-source/src/file.ts";
+import { parseRatesFile } from "../../services/fx-rate/src/file.ts";
 import { generate } from "./generate.ts";
 
 test("one seed produces identical complete UAT files and a manifest that covers their bytes", async () => {
@@ -59,10 +60,13 @@ test("one seed produces identical complete UAT files and a manifest that covers 
     assert.equal(staleRates.filter((line) => line.startsWith(`${manifest.planted.stale.currency},USD,`)).length, 5);
     const calendarRows = (await readFile(join(first, "calendars.csv"), "utf8")).trimEnd().split("\n").slice(1).map((line) => line.split(","));
     const calendars = new Map(calendarRows.map((row) => [row[0]!, toBusinessCalendar({ currency: row[0]!, weekendDays: row[1]!.split("|"), coveredThrough: row[2]!, holidays: row[3] ? [{ date: row[3] }] : [] })]));
-    const lastRates = (await readFile(join(first, "rates/rates-2026-11-20.csv"), "utf8")).trimEnd().split("\n").slice(1).map((line) => line.split(","));
-    for (const row of lastRates.filter((cells) => cells[2] === "FORWARD")) {
+    const lastRateFile = await readFile(join(first, "rates/rates-2026-11-20.csv"), "utf8");
+    assert.deepEqual(parseRatesFile(lastRateFile).problems, [], "the extra 1W quote is valid for the FX Rate loader");
+    const lastRates = lastRateFile.trimEnd().split("\n").slice(1).map((line) => line.split(","));
+    for (const row of lastRates.filter((cells) => cells[2] === "FORWARD" && cells[3] !== "1W")) {
       assert.equal(row[4], valueDateFor("2026-11-20", row[3]!, [calendars.get(row[0]!)!, calendars.get("USD")!]), `${row[0]} ${row[3]}`);
     }
+    assert.equal(lastRates.find((row) => row[0] === "EUR" && row[3] === "1W")?.[4], "2026-11-27", "the close-out has an exact one-week forward quote");
     assert.equal(lastRates.find((row) => row[0] === "EUR" && row[3] === "3M")?.[4], "2027-02-23", "the EUR holiday moves the exact 3M value date");
 
     const dirty = (await readFile(join(first, "gl-dirty.csv"), "utf8")).trimEnd().split("\n").slice(1);
