@@ -1,6 +1,10 @@
 // GL balance file loader: parse, then submit through Data Source's entry point.
 import type { AsOfDate, TenantId } from "@shared/kernel";
-import { BatchRefused, parseGlFile } from "../../../services/data-source/src/index.ts";
+import {
+  BatchRefused,
+  parseGlFile,
+  type ExpectedTotal,
+} from "../../../services/data-source/src/index.ts";
 import type { App } from "../compose.ts";
 import type { LoadOutcome } from "./outcome.ts";
 
@@ -11,6 +15,8 @@ export interface GlLoadOptions {
   readonly asOf: AsOfDate;
   readonly sourceSystem: string;
   readonly by: string;
+  /** When set, passed through as GlBatch.expectedTotals (decision 0031 / D7). */
+  readonly expectedTotals?: readonly ExpectedTotal[];
 }
 
 export async function loadGlFile(app: App, opts: GlLoadOptions): Promise<LoadOutcome> {
@@ -37,6 +43,7 @@ export async function loadGlFile(app: App, opts: GlLoadOptions): Promise<LoadOut
       asOf: opts.asOf,
       rows: parsed.rows,
       by: opts.by,
+      ...(opts.expectedTotals !== undefined ? { expectedTotals: opts.expectedTotals } : {}),
     });
     return {
       kind: "DONE",

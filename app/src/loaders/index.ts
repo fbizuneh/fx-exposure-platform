@@ -11,5 +11,6 @@ export {
   type MasterDataLoadOptions,
 } from "./master-data.ts";
 export { loadGlFile, type GlLoadOptions } from "./gl.ts";
+export { parseControlFile } from "../../../services/data-source/src/index.ts";
 export { loadRatesFile, type RatesLoadOptions } from "./rates.ts";
 export { loadExecutedFile, type ExecutedLoadOptions } from "./executed.ts";
