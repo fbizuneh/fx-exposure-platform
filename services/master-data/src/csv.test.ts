@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { quotingProblems, splitCsv } from "./csv.ts";
+import { quotingProblems, readCsvStrict, splitCsv } from "./csv.ts";
 
 test("splitCsv: quoted commas, escaped quotes, blank lines, CRLF and trailing newline", () => {
   assert.deepEqual(splitCsv('a,"b,1",c\r\n\r\n"x ""q""",,z\n'), [["a", "b,1", "c"], ['x "q"', "", "z"]]);
@@ -54,4 +54,14 @@ test("quotingProblems: collects every recoverable quote error", () => {
       [2, 1, "text after closing quote"],
     ],
   );
+});
+
+test("readCsvStrict: stray quote keeps the next record; legacy splitCsv swallows it", () => {
+  const text = "a,b\n1,10\"\n2,NaN\n";
+  assert.equal(splitCsv(text).length, 2, "legacy merges the second data row into the open quote");
+  const strict = readCsvStrict(text);
+  assert.equal(strict.rows.length, 3);
+  assert.deepEqual(strict.rows[2], ["2", "NaN"]);
+  assert.equal(strict.problems[0]?.rowNo, 1);
+  assert.equal(strict.problems[0]?.message, "text around quotes");
 });

@@ -1,5 +1,5 @@
 // Pure CSV parser for GL balance files (docs/file-layouts.md). Shape only; no database.
-import { quotingProblems, splitCsv } from "./csv.ts";
+import { readCsvStrict } from "./csv.ts";
 import type { GlBalanceRow } from "./rows.ts";
 import { SIGNED, UNSIGNED, fits } from "./validate.ts";
 
@@ -35,13 +35,14 @@ const realDate = (v: string): boolean => {
 
 export function parseGlFile(text: string): ParseResult<GlBalanceRow> {
   const problems: FileProblem[] = [];
-  for (const badQuote of quotingProblems(text)) {
+  const strict = readCsvStrict(text);
+  for (const badQuote of strict.problems) {
     const raw = badQuote.header?.[badQuote.columnIndex];
     const column = raw !== undefined && raw.trim() !== "" ? normalizeHeader(raw) : null;
     problems.push({ rowNo: badQuote.rowNo, column, message: badQuote.message });
   }
 
-  const [header, ...body] = splitCsv(text);
+  const [header, ...body] = strict.rows;
   const index = new Map<string, number>();
   const dimensions: string[] = [];
 

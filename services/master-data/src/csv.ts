@@ -37,12 +37,13 @@ export interface QuotingIssue {
 }
 
 /**
- * All recoverable quoting problems before trusting splitCsv cells.
- * Text after a closing quote and a quote mid-field are collected per field; scanning continues.
- * An unclosed quote at EOF is reported once (later record boundaries are not guessed).
- * rowNo is null on the header; data rows count from 1.
+ * Strict CSV pass for D3 parsers: rows and quote diagnostics share the same record
+ * boundaries. A stray quote (e.g. 10") does not swallow the next line; valid quoted
+ * fields, escaped quotes, and multiline quoted fields still work. Legacy splitCsv
+ * stays permissive for FX Trade.
  */
-export function quotingProblems(text: string): QuotingIssue[] {
+export function readCsvStrict(text: string): { rows: string[][]; problems: QuotingIssue[] } {
+  const rows: string[][] = [];
   const problems: QuotingIssue[] = [];
   let header: string[] | null = null;
   let row: string[] = [];
@@ -64,6 +65,15 @@ export function quotingProblems(text: string): QuotingIssue[] {
     afterQuote = false;
     brokenField = false;
   };
+  const endRow = () => {
+    endField();
+    if (keepCsvRow(row)) {
+      if (header === null) header = row;
+      rows.push(row);
+      completed++;
+    }
+    row = [];
+  };
   for (let i = 0; i < t.length; i++) {
     const c = t[i]!;
     if (quoted) {
@@ -74,12 +84,7 @@ export function quotingProblems(text: string): QuotingIssue[] {
       endField();
     } else if (c === "\n" || c === "\r") {
       if (c === "\r" && t[i + 1] === "\n") i++;
-      endField();
-      if (keepCsvRow(row)) {
-        if (header === null) header = row;
-        completed++;
-      }
-      row = [];
+      endRow();
     } else if (brokenField) {
       cell += c;
     } else if (c === '"') {
@@ -98,7 +103,21 @@ export function quotingProblems(text: string): QuotingIssue[] {
       cell += c;
     } else cell += c;
   }
-  endField();
-  if (quoted) problems.push(at(row.length - 1, "unclosed quote"));
-  return problems;
+  if (quoted) {
+    // Unclosed at EOF: do not invent later record boundaries; emit the partial row once.
+    problems.push(at(row.length, "unclosed quote"));
+    endField();
+    if (keepCsvRow(row)) {
+      if (header === null) header = row;
+      rows.push(row);
+    }
+  } else {
+    endRow();
+  }
+  return { rows, problems };
+}
+
+/** Quote diagnostics from the strict pass (same boundaries as readCsvStrict rows). */
+export function quotingProblems(text: string): QuotingIssue[] {
+  return readCsvStrict(text).problems;
 }

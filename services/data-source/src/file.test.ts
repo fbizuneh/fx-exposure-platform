@@ -127,6 +127,14 @@ test("parseGlFile: collects quote errors on every bad balance row", () => {
   assert.ok(r.problems.some((p) => p.rowNo === 2 && p.column === "balance" && /text after closing quote/.test(p.message)));
 });
 
+test("parseGlFile: stray quote does not swallow the next row", () => {
+  // Legacy splitCsv would pull row 2 into the quoted balance; the strict pass keeps both rows.
+  const r = parseGlFile(`${HEADER}\nUS1,1000,USD,10",,,2026-03-09,\nUS1,2000,USD,NaN,,,2026-03-09,\n`);
+  assert.equal(r.rows.length, 0);
+  assert.ok(r.problems.some((p) => p.rowNo === 1 && p.column === "balance" && /text around quotes/.test(p.message)));
+  assert.ok(r.problems.some((p) => p.rowNo === 2 && p.column === "balance" && /at most 4 places/.test(p.message)));
+});
+
 test("parseGlFile: row width must match the header", () => {
   const short = parseGlFile(`${HEADER}\nUS1,1000,USD,10\n`);
   assert.equal(short.rows.length, 0);

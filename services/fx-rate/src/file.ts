@@ -1,5 +1,5 @@
 // Pure CSV parser for FX rate files (docs/file-layouts.md). Shape only; no database.
-import { quotingProblems, splitCsv } from "./csv.ts";
+import { readCsvStrict } from "./csv.ts";
 import type { RateRow } from "./rows.ts";
 
 export interface FileProblem {
@@ -108,13 +108,14 @@ function parsePositive(
 
 export function parseRatesFile(text: string): ParseResult<RateRow> {
   const problems: FileProblem[] = [];
-  for (const badQuote of quotingProblems(text)) {
+  const strict = readCsvStrict(text);
+  for (const badQuote of strict.problems) {
     const raw = badQuote.header?.[badQuote.columnIndex];
     const column = raw !== undefined && raw.trim() !== "" ? normalizeHeader(raw) : null;
     problems.push({ rowNo: badQuote.rowNo, column, message: badQuote.message });
   }
 
-  const [header, ...body] = splitCsv(text);
+  const [header, ...body] = strict.rows;
   const mapped = mapColumns(header);
   problems.push(...mapped.problems);
   const { index } = mapped;

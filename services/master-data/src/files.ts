@@ -11,7 +11,7 @@ import {
   type StatementType,
   type Weekday,
 } from "../contract/index.ts";
-import { quotingProblems, splitCsv } from "./csv.ts";
+import { readCsvStrict } from "./csv.ts";
 import type {
   AccountRow,
   CalendarRow,
@@ -56,12 +56,13 @@ const weekendKey = (days: readonly Weekday[]): string => [...days].sort().join("
 
 function openCsv(text: string): { header: string[] | undefined; body: string[][]; problems: FileProblem[] } {
   const problems: FileProblem[] = [];
-  for (const bad of quotingProblems(text)) {
+  const strict = readCsvStrict(text);
+  for (const bad of strict.problems) {
     const raw = bad.header?.[bad.columnIndex];
     const column = raw !== undefined && raw.trim() !== "" ? normalizeHeader(raw) : null;
     problems.push({ rowNo: bad.rowNo, column, message: bad.message });
   }
-  const [header, ...body] = splitCsv(text);
+  const [header, ...body] = strict.rows;
   return { header, body, problems };
 }
 
